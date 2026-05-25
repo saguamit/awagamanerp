@@ -1,0 +1,37 @@
+# Visual Studio / WPF
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build outputs
+**/bin/
+**/obj/
+**/Debug/
+**/Release/
+**/x64/
+**/x86/
+
+# Test outputs
+TestResult.xml
+*.trx
+*.coverage
+*.coveragexml
+
+# NUnit / internal logs
+nunit-agent_*.log
+InternalTrace.*.log
+
+# Temporary project artifacts
+*_wpftmp.csproj
+*.tmp
+*.temp
+
+# Package caches / local tools
+packages/
+nuget.exe
+
+# OS files
+Thumbs.db
+Desktop.ini

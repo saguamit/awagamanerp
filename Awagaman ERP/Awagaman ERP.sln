@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36408.4 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Awagaman ERP", "Awagaman ERP.csproj", "{72C25EB9-0DEF-4556-BB7F-6431D4300A60}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Awagaman_ERP.Tests", "..\Awagaman_ERP.Tests\Awagaman_ERP.Tests.csproj", "{00CB4D27-4F64-43AA-A8F5-88795C6526FF}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{72C25EB9-0DEF-4556-BB7F-6431D4300A60}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{72C25EB9-0DEF-4556-BB7F-6431D4300A60}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{72C25EB9-0DEF-4556-BB7F-6431D4300A60}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{72C25EB9-0DEF-4556-BB7F-6431D4300A60}.Release|Any CPU.Build.0 = Release|Any CPU
+		{00CB4D27-4F64-43AA-A8F5-88795C6526FF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{00CB4D27-4F64-43AA-A8F5-88795C6526FF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{00CB4D27-4F64-43AA-A8F5-88795C6526FF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{00CB4D27-4F64-43AA-A8F5-88795C6526FF}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {795DD5B2-007C-4EBF-A53E-76DD37BE4732}
+	EndGlobalSection
+EndGlobal

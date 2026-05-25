@@ -1,0 +1,202 @@
+<Controls:MetroWindow x:Class="Awagaman_ERP.BillFormWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:Controls="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
+        Title="Bill Entry"
+        Height="650" Width="900"
+        WindowStartupLocation="CenterOwner"
+        Background="#EEEEEE"
+        BorderThickness="1"
+        BorderBrush="#18609A">
+    <Controls:MetroWindow.Resources>
+        <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="#666" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+        <Style x:Key="InputTextBoxStyle" TargetType="TextBox">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="BorderBrush" Value="#CCC" />
+        </Style>
+        <Style x:Key="InputDatePickerStyle" TargetType="DatePicker">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+        <Style x:Key="CardStyle" TargetType="Border">
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderBrush" Value="#E0E0E0" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="16" />
+        </Style>
+    </Controls:MetroWindow.Resources>
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="24">
+            <TextBlock Text="Bill Entry" FontSize="20" FontWeight="Bold" Foreground="#333" Margin="0,0,0,20" />
+
+            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="Bill Details" FontSize="14" FontWeight="SemiBold" Foreground="#18609A" Margin="0,0,0,12" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,12">
+                            <TextBlock Style="{StaticResource FieldLabelStyle}">
+                                <Run Text="Bill No" />
+                                <Run Text=" *" Foreground="#D32F2F" />
+                            </TextBlock>
+                            <TextBox Text="{Binding BillNo, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,12">
+                            <TextBlock Text="Bill Date" Style="{StaticResource FieldLabelStyle}" />
+                            <DatePicker SelectedDate="{Binding BillDate, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputDatePickerStyle}" />
+                        </StackPanel>
+
+                        <StackPanel x:Name="PartyFieldPanel" Grid.Row="1" Grid.Column="0" Margin="0,0,0,12">
+                            <TextBlock Style="{StaticResource FieldLabelStyle}">
+                                <Run Text="Bill Party" />
+                                <Run Text=" *" Foreground="#D32F2F" />
+                            </TextBlock>
+                            <Grid>
+                                <TextBox x:Name="BillPartyBox" Text="{Binding Party, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" TextChanged="BillPartyBox_TextChanged" PreviewKeyDown="BillPartyBox_PreviewKeyDown" />
+                                <Popup x:Name="BillPartyPopup" PlacementTarget="{Binding ElementName=BillPartyBox}" Placement="Bottom" StaysOpen="False" Width="{Binding ActualWidth, ElementName=BillPartyBox}">
+                                    <Border BorderBrush="#AAA" BorderThickness="1" Background="White" CornerRadius="4">
+                                        <ListBox x:Name="BillPartySuggestionList" MaxHeight="200" FontSize="13" SelectionChanged="BillPartySuggestionList_SelectionChanged" />
+                                    </Border>
+                                </Popup>
+                            </Grid>
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,0,0,12">
+                            <TextBlock Style="{StaticResource FieldLabelStyle}">
+                                <Run Text="LR No." />
+                                <Run Text=" *" Foreground="#D32F2F" />
+                            </TextBlock>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="LRNoBox" Text="{Binding LRNo, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" LostFocus="LRNoBox_LostFocus" />
+                                <Button Grid.Column="1" Content="+ Select" FontSize="10" Height="28" Padding="6,0" Margin="4,0,0,0" Click="SelectLRs_Click" Background="#18609A" Foreground="White" BorderThickness="0" />
+                            </Grid>
+                        </StackPanel>
+                        <StackPanel x:Name="LRDateFieldPanel" Grid.Row="1" Grid.Column="4" Margin="0,0,0,12">
+                            <TextBlock Text="LR Date" Style="{StaticResource FieldLabelStyle}" />
+                            <DatePicker SelectedDate="{Binding LRDate, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputDatePickerStyle}" />
+                        </StackPanel>
+
+                        <StackPanel x:Name="FromFieldPanel" Grid.Row="2" Grid.Column="0" Margin="0,0,0,12">
+                            <TextBlock Text="From" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBox Text="{Binding From, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                        </StackPanel>
+                        <StackPanel x:Name="ToFieldPanel" Grid.Row="2" Grid.Column="2" Margin="0,0,0,12">
+                            <TextBlock Text="To" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBox Text="{Binding To, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                        </StackPanel>
+                        <StackPanel x:Name="VehicleTypeFieldPanel" Grid.Row="2" Grid.Column="4" Margin="0,0,0,12">
+                            <TextBlock Text="Vehicle Type" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBox Text="{Binding VehicleType, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Border x:Name="AmountsSectionBorder" Style="{StaticResource CardStyle}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="Amounts" FontSize="14" FontWeight="SemiBold" Foreground="#18609A" Margin="0,0,0,12" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,12">
+                            <TextBlock Text="Freight" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBox Text="{Binding Freight, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,12">
+                            <TextBlock Text="Detention" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBox Text="{Binding Detention, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="0" Grid.Column="4" Margin="0,0,0,12">
+                            <TextBlock Text="HML" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBox Text="{Binding HML, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,0,12">
+                            <TextBlock Text="OTHR" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBox Text="{Binding OTHR, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,0,0,12">
+                            <TextBlock Text="RCVD" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBox Text="{Binding RCVD, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="4" Margin="0,0,0,12">
+                            <TextBlock Text="TDS" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBox Text="{Binding TDS, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,0,12">
+                            <TextBlock Text="DED" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBox Text="{Binding DED, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="2" Grid.Column="2" Margin="0,0,0,12">
+                            <TextBlock Text="MOP" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBox Text="{Binding MOP, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="2" Grid.Column="4" Margin="0,0,0,12">
+                            <TextBlock Text="MR" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBox Text="{Binding MR, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Margin="0,16,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Background="#F0F8FF" BorderBrush="#90CAF9" BorderThickness="1" CornerRadius="4" Padding="12,8">
+                            <StackPanel>
+                                <TextBlock Text="TOTAL" FontSize="11" Foreground="#1565C0" />
+                                <TextBlock Text="{Binding Total, StringFormat=N2}" FontSize="18" FontWeight="Bold" Foreground="#0D47A1" />
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Column="2" Background="#FFF0F0" BorderBrush="#EF9A9A" BorderThickness="1" CornerRadius="4" Padding="12,8">
+                            <StackPanel>
+                                <TextBlock Text="DUE" FontSize="11" Foreground="#C62828" />
+                                <TextBlock Text="{Binding Due, StringFormat=N2}" FontSize="18" FontWeight="Bold" Foreground="#B71C1C" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                <Button Content="Save" Width="100" Height="32" Background="#18609A" Foreground="White" BorderThickness="0" FontSize="13" Margin="0,0,12,0" Click="Save_Click" />
+                <Button Content="Cancel" Width="80" Height="32" Click="Cancel_Click" />
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Controls:MetroWindow>

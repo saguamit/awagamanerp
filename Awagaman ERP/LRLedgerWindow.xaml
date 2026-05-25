@@ -1,0 +1,275 @@
+<Controls:MetroWindow x:Class="Awagaman_ERP.LRLedgerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:Awagaman_ERP"
+        xmlns:Controls="http://metro.mahapps.com/winfx/xaml/controls"
+        xmlns:dgx="urn:tom-englert.de/DataGridExtensions"
+        mc:Ignorable="d"
+        Title="LR Ledger" Height="768" Width="1366" WindowStartupLocation="CenterScreen" 
+        Background="#F3F4F6">
+    <Controls:MetroWindow.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <ControlTemplate x:Key="MultiFilterTemplate">
+            <dgx:MultipleChoiceFilter Filter="{Binding Path=Filter, RelativeSource={RelativeSource FindAncestor, AncestorType=dgx:DataGridFilterColumnControl}}"/>
+        </ControlTemplate>
+
+        <SolidColorBrush x:Key="ThemeBlue" Color="#18609A" />
+        <SolidColorBrush x:Key="ThemeGreen" Color="#00B08B" />
+        <SolidColorBrush x:Key="TextDark" Color="#1F2937" />
+        <SolidColorBrush x:Key="TextMuted" Color="#6B7280" />
+        <SolidColorBrush x:Key="BorderLight" Color="#E5E7EB" />
+        
+        <Style x:Key="SidebarButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="12,12"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{TemplateBinding Tag}" Margin="0,0,12,0" FontSize="16" Foreground="{TemplateBinding Foreground}"/>
+                                <ContentPresenter VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="GreenButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource ThemeGreen}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="16,8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="TabButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#888888" />
+            <Setter Property="BorderThickness" Value="0,0,0,3" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Padding" Value="20,12" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource ThemeBlue}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ActiveTabButtonStyle" TargetType="Button" BasedOn="{StaticResource TabButtonStyle}">
+            <Setter Property="Foreground" Value="{StaticResource ThemeBlue}" />
+            <Setter Property="BorderBrush" Value="{StaticResource ThemeBlue}" />
+        </Style>
+
+        <Style x:Key="DataGridHeaderStyle" TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="#F9FAFB" />
+            <Setter Property="Foreground" Value="#4B5563" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="BorderBrush" Value="#E5E7EB" />
+            <Setter Property="BorderThickness" Value="0,0,1,1" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="MinHeight" Value="40" />
+        </Style>
+    </Controls:MetroWindow.Resources>
+
+    <Grid x:Name="Root">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" x:Name="SidebarColumn" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Sidebar -->
+        <Border Grid.Column="0" Background="White" BorderBrush="{StaticResource BorderLight}" BorderThickness="0,0,1,0" Width="220">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Border Grid.Row="0" BorderBrush="{StaticResource BorderLight}" BorderThickness="0,0,0,1" Padding="20">
+                    <StackPanel>
+                        <TextBlock Text="AWAGAMAN" Foreground="{StaticResource ThemeBlue}" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" />
+                        <TextBlock Text="Subhash Kumar" Foreground="{StaticResource ThemeBlue}" FontSize="12" HorizontalAlignment="Center" Margin="0,8,0,0" />
+                    </StackPanel>
+                </Border>
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden">
+                    <StackPanel>
+                        <Button Content="Sales" Tag="📊" Style="{StaticResource SidebarButtonStyle}" />
+                        <Button Content="LR Ledger" Tag="📄" Style="{StaticResource SidebarButtonStyle}" Foreground="{StaticResource ThemeBlue}" Background="#F3F4F6" />
+                        <Button Content="Delivery Challans" Tag="🚚" Style="{StaticResource SidebarButtonStyle}" />
+                        <Button Content="Master" Tag="≡" Style="{StaticResource SidebarButtonStyle}" />
+                        <Button Content="Reports" Tag="⊞" Style="{StaticResource SidebarButtonStyle}" />
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- Main Workspace -->
+        <Grid Grid.Column="1" Margin="24">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- Page Title Area -->
+            <Grid Grid.Row="0" Margin="0,0,0,16">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="LR Ledger List" FontSize="18" Foreground="#555555" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+
+            <!-- White Main Card -->
+            <Border Grid.Row="1" Background="White" BorderBrush="{StaticResource BorderLight}" BorderThickness="1">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" /> <!-- Tabs -->
+                        <RowDefinition Height="Auto" /> <!-- Summary -->
+                        <RowDefinition Height="Auto" /> <!-- Search -->
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" BorderBrush="{StaticResource BorderLight}" BorderThickness="0,0,0,1">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Stretch">
+                            <Button Content="Advance Receipts" Style="{StaticResource TabButtonStyle}" Width="160" />
+                            <Button Content="Bills of Supply" Style="{StaticResource TabButtonStyle}" Width="160" />
+                            <Button Content="LR Ledger" Style="{StaticResource ActiveTabButtonStyle}" Width="160" />
+                            <Button Content="Delivery Challans" Style="{StaticResource TabButtonStyle}" Width="160" Click="OpenDeliveryChallans_Click" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Row="1" BorderBrush="{StaticResource BorderLight}" BorderThickness="0,0,0,1" Padding="16,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal">
+                                <StackPanel Margin="0,0,40,0">
+                                    <TextBlock Text="Total Records" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
+                                    <TextBlock Text="{Binding Entries.Count}" FontSize="13" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,40,0">
+                                    <TextBlock Text="Total Freight" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
+                                    <TextBlock Text="{Binding FilteredTotalFreight, StringFormat=₹ {0:N2}}" FontSize="13" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,40,0">
+                                    <TextBlock Text="Total Balance" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
+                                    <TextBlock Text="{Binding FilteredTotalBalance, StringFormat=₹ {0:N2}}" FontSize="13" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                                </StackPanel>
+                            </StackPanel>
+                            <Button Grid.Column="1" Content="+ Create LR" Style="{StaticResource GreenButtonStyle}" Click="OpenLRForm_Click" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="2" Background="#FAFAFA" BorderBrush="{StaticResource BorderLight}" BorderThickness="0,0,0,1" Padding="16,8">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="Search &amp; Filter" FontSize="12" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,16,0" />
+                            <TextBox x:Name="SearchBox" TextChanged="SearchBox_TextChanged" Width="200" Height="26" BorderBrush="{StaticResource BorderLight}" FontSize="12" Padding="4,2" Margin="0,0,16,0" />
+                            <Button Content="↻" Background="{StaticResource ThemeGreen}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="Refresh_Click" ToolTip="Clear Filters &amp; Search" />
+                            <Button Content="🗑" Background="#E53935" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="DeleteSelected_Click" ToolTip="Delete Selected" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- DataGrid Area -->
+                    <Grid Grid.Row="3">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <DataGrid Grid.Row="0" ItemsSource="{Binding Entries}" AutoGenerateColumns="False" CanUserAddRows="False" x:Name="LedgerGrid"
+                                  Background="White" BorderThickness="0" RowHeight="36" HeadersVisibility="All"
+                                  GridLinesVisibility="All" HorizontalGridLinesBrush="#E5E7EB" VerticalGridLinesBrush="#E5E7EB"
+                                  RowBackground="White" FontSize="12" SelectionUnit="CellOrRowHeader"
+                                  SelectedCellsChanged="LedgerGrid_SelectedCellsChanged"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                  dgx:DataGridFilter.IsAutoFilterEnabled="True" ColumnHeaderStyle="{StaticResource DataGridHeaderStyle}">
+                            <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Sr." Binding="{Binding Sr}" Width="35" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="LR No." Binding="{Binding LRNo}" Width="90" FontWeight="SemiBold" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    <DataGridTextColumn Header="Date" Binding="{Binding Date, StringFormat=dd-MMM-yyyy}" Width="90" />
+                                    
+                                    <DataGridTextColumn Header="Consignor Name" Binding="{Binding ConsignorName}" Width="150" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    <DataGridTextColumn Header="Consignor Address" Binding="{Binding ConsignorAddress}" Width="150" />
+                                    <DataGridTextColumn Header="Consignor GST" Binding="{Binding ConsignorGST}" Width="110" />
+                                    
+                                    <DataGridTextColumn Header="Consignee Name" Binding="{Binding ConsigneeName}" Width="150" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    <DataGridTextColumn Header="Consignee Address" Binding="{Binding ConsigneeAddress}" Width="150" />
+                                    <DataGridTextColumn Header="Consignee GST" Binding="{Binding ConsigneeGST}" Width="110" />
+                                    
+                                    <DataGridTextColumn Header="From" Binding="{Binding From}" Width="90" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    <DataGridTextColumn Header="To" Binding="{Binding To}" Width="90" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    
+                                    <DataGridTextColumn Header="Vehicle No." Binding="{Binding VehicleNo}" Width="100" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    <DataGridTextColumn Header="Type" Binding="{Binding VehicleType}" Width="80" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    
+                                    <DataGridTextColumn Header="WEIGHT" Binding="{Binding Weight}" Width="70" />
+                                    <DataGridTextColumn Header="PKG" Binding="{Binding PKG}" Width="50" />
+                                    <DataGridTextColumn Header="DESCRIPTION" Binding="{Binding Description}" Width="120" />
+                                    
+                                    <DataGridTextColumn Header="CH No." Binding="{Binding CHNo}" Width="90" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    
+                                    <DataGridTextColumn Header="Total Freight" Binding="{Binding TotalFreight}" Width="90" FontWeight="SemiBold" Foreground="#18609A" />
+                                    <DataGridTextColumn Header="NEFT" Binding="{Binding NEFT}" Width="80" />
+                                    <DataGridTextColumn Header="CASH" Binding="{Binding CASH}" Width="80" />
+                                    <DataGridTextColumn Header="Bal" Binding="{Binding Bal}" Width="80" FontWeight="Bold" Foreground="#00B08B" />
+                                    
+                                    <DataGridTextColumn Header="Bill No." Binding="{Binding BillNo}" Width="90" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    <DataGridTextColumn Header="Bill Date" Binding="{Binding BillDate, StringFormat=dd-MMM-yyyy}" Width="90" />
+                                    <DataGridTextColumn Header="BILL" Binding="{Binding BILL}" Width="90" />
+                                    <DataGridTextColumn Header="Bill Party" Binding="{Binding BillParty}" Width="120" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    <DataGridTextColumn Header="Broker" Binding="{Binding Broker}" Width="110" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    
+                                    <DataGridTextColumn Header="Frt Type" Binding="{Binding FrtType}" Width="80" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    <DataGridTextColumn Header="comm" Binding="{Binding Comm}" Width="70" />
+                                    <DataGridTextColumn Header="Paid" Binding="{Binding Paid}" Width="60" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        
+                        <Border Grid.Row="1" Background="White" BorderBrush="#EEEEEE" BorderThickness="0,1,0,0" Padding="10,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="SearchedRecordsTextBlock" Text="{Binding FilteredEntriesCount, StringFormat='Records: {0}'}" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextDark}" VerticalAlignment="Center" />
+                                <TextBlock x:Name="SelectedSumTextBlock" Grid.Column="1" Text="" FontSize="13" FontWeight="Bold" Foreground="#10B981" VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="Collapsed" />
+                                <TextBlock x:Name="SearchedTotalDueTextBlock" Grid.Column="2" Text="{Binding FilteredTotalBalance, StringFormat='Filtered Balance: ₹ {0:N2}'}" FontSize="13" Foreground="#DC2626" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Right" Visibility="Collapsed" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Controls:MetroWindow>
