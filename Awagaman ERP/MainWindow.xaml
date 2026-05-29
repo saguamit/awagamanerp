@@ -809,6 +809,7 @@
                                 <Button Content="📂" Background="#1565C0" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ImportBill_Click" ToolTip="Import Bills from CSV" />
                                 <Button Content="₹" Background="#00897B" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenReceiveBillAmount_Click" ToolTip="Receive Bill Amount" />
                                 <Button Content="Σ" Background="#6D4C41" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenPartyBillSummary_Click" ToolTip="Party-wise Bill Due Summary" />
+                                <Button Content="⚙P" Background="#7C3AED" Foreground="White" BorderThickness="0" Width="30" Height="26" Margin="4,0" Cursor="Hand" Click="OpenBillPrefixSettings_Click" ToolTip="Bill Prefix Settings" />
                                 <Button Content="⚙" Background="{StaticResource ThemeBlue}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ShowBillColumnsMenu_Click" ToolTip="Show/Hide Columns" />
                             </StackPanel>
                         </Border>
@@ -852,8 +853,8 @@
                                         <Setter Property="BorderThickness" Value="0,0,1,1" />
                                         <Style.Triggers>
                                             <Trigger Property="IsSelected" Value="True">
-                                                <Setter Property="Background" Value="#BFDBFE" />
-                                                <Setter Property="BorderBrush" Value="#60A5FA" />
+                                                <Setter Property="Background" Value="#DBEAFE" />
+                                                <Setter Property="BorderBrush" Value="#93C5FD" />
                                                 <Setter Property="Foreground" Value="#0F172A" />
                                             </Trigger>
                                         </Style.Triggers>
@@ -877,15 +878,15 @@
                                     <DataGridTextColumn Header="BILL NO." Binding="{Binding BillNoDisplay}" Width="100" FontWeight="SemiBold" IsReadOnly="True" />
                                     <DataGridTextColumn Header="BILL DATE" Binding="{Binding BillDate, StringFormat=dd-MMM-yyyy}" Width="90" />
                                     <DataGridTextColumn Header="PARTY" Binding="{Binding Party}" Width="120" />
-                                    <DataGridTextColumn Header="LR NO." Binding="{Binding LRNo}" Width="90" />
-                                    <DataGridTextColumn Header="LR DATE" Binding="{Binding LRDate, StringFormat=dd-MMM-yyyy}" Width="90" />
-                                    <DataGridTextColumn Header="FROM" Binding="{Binding From}" Width="80" />
-                                    <DataGridTextColumn Header="TO" Binding="{Binding To}" Width="80" />
-                                    <DataGridTextColumn Header="Vehicle Type" Binding="{Binding VehicleType}" Width="80" />
-                                    <DataGridTextColumn Header="FREIGHT" Binding="{Binding Freight, StringFormat=N2}" Width="80" />
-                                    <DataGridTextColumn Header="DETENTION" Binding="{Binding Detention, StringFormat=N2}" Width="80" />
-                                    <DataGridTextColumn Header="HML" Binding="{Binding HML, StringFormat=N2}" Width="60" />
-                                    <DataGridTextColumn Header="OTHR" Binding="{Binding OTHR, StringFormat=N2}" Width="60" />
+                                    <DataGridTextColumn Header="LR NO." Binding="{Binding LRNo}" Width="90" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="LR DATE" Binding="{Binding LRDate, StringFormat=dd-MMM-yyyy}" Width="90" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="FROM" Binding="{Binding From}" Width="80" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="TO" Binding="{Binding To}" Width="80" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="Vehicle Type" Binding="{Binding VehicleType}" Width="80" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="FREIGHT" Binding="{Binding Freight, StringFormat=N2}" Width="80" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="DETENTION" Binding="{Binding Detention, StringFormat=N2}" Width="80" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="HML" Binding="{Binding HML, StringFormat=N2}" Width="60" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="OTHR" Binding="{Binding OTHR, StringFormat=N2}" Width="60" IsReadOnly="True" />
                                     <DataGridTextColumn Header="TOTAL" Binding="{Binding Total, StringFormat=N2}" Width="80" IsReadOnly="True" Foreground="#18609A" FontWeight="SemiBold" />
                                     <DataGridTextColumn Header="RCVD" Binding="{Binding RCVD, StringFormat=N2}" Width="70" />
                                     <DataGridTextColumn Header="TDS" Binding="{Binding TDS, StringFormat=N2}" Width="60" />
@@ -894,6 +895,7 @@
                                     <DataGridTextColumn Header="MOP" Binding="{Binding MOP}" Width="60" />
                                     <DataGridTextColumn Header="MR" Binding="{Binding MR}" Width="90" />
                                     <DataGridTextColumn Header="RECEIVED DATE" Binding="{Binding Date, StringFormat=dd-MMM-yyyy}" Width="110" />
+                                    <DataGridTextColumn Header="REMARKS" Binding="{Binding Remarks}" Width="180" />
                                 </DataGrid.Columns>
                             </DataGrid>
                             <Border Grid.Row="1" Background="White" BorderBrush="#EEEEEE" BorderThickness="0,1,0,0" Padding="10,8">
@@ -914,14 +916,25 @@
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
                             <Grid Grid.Row="0" Margin="0,0,0,16">
-                                <TextBlock Text="Party Ledger" FontSize="20" FontWeight="Bold" Foreground="#333" VerticalAlignment="Center" />
-                                <TextBox x:Name="PartySearchBox" TextChanged="PartySearchBox_TextChanged" Width="200" Height="26" FontSize="12" Padding="4,2" BorderBrush="#CCC" HorizontalAlignment="Right" Margin="0,0,0,0" />
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Party Ledger" FontSize="20" FontWeight="Bold" Foreground="#333" VerticalAlignment="Center" />
+                                <Button Grid.Column="1" Content="+ Add Row" Height="26" Margin="0,0,8,0" Padding="10,0" Background="#00B08B" Foreground="White" BorderThickness="0" Cursor="Hand" Click="PartyAddRow_Click" />
+                                <Button Grid.Column="2" Content="📂 Import" Height="26" Margin="0,0,8,0" Padding="10,0" Background="#1565C0" Foreground="White" BorderThickness="0" Cursor="Hand" Click="ImportParty_Click" />
+                                <Button Grid.Column="3" Content="🗑 Delete" Height="26" Margin="0,0,8,0" Padding="10,0" Background="#DC2626" Foreground="White" BorderThickness="0" Cursor="Hand" Click="PartyDeleteSelected_Click" />
+                                <TextBox Grid.Column="4" x:Name="PartySearchBox" TextChanged="PartySearchBox_TextChanged" Width="200" Height="26" FontSize="12" Padding="4,2" BorderBrush="#CCC" />
                             </Grid>
                             <DataGrid x:Name="PartyGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
                                       Background="White" BorderThickness="1" BorderBrush="#DDD" RowHeight="30"
                                       ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"
                                       GridLinesVisibility="All" HeadersVisibility="All"
                                       ColumnHeaderStyle="{StaticResource DataGridHeaderStyle}"
+                                      SelectionMode="Extended"
                                       CellEditEnding="PartyGrid_CellEditEnding">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Sr." Binding="{Binding Sr}" Width="40" IsReadOnly="True" />
@@ -1083,6 +1096,7 @@
                             <Button Content="✎" Background="#FF9800" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="EditSelected_Click" ToolTip="Edit Selected" />
 
                             <Button Background="#7B1FA2" Foreground="White" BorderThickness="0" Width="80" Height="26" Margin="4,0" Cursor="Hand" Click="MakeBuilty_Click" ToolTip="Create LR from selected Challan" FontSize="11">Make Builty</Button>
+                            <Button Content="₹" Background="#00897B" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenChallanPay_Click" ToolTip="Pay Challan (Broker-wise)" />
 
                             <Button Content="📂" Background="#1565C0" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ImportChallan_Click" ToolTip="Import Challans from Excel" />
 
@@ -1152,7 +1166,7 @@
                                       ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"
                                       VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel"
                                       Background="White" BorderThickness="0" RowHeight="30" RowHeaderWidth="28" HeadersVisibility="All"
-                                      GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E5E7EB" 
+                                      GridLinesVisibility="All" HorizontalGridLinesBrush="#E5E7EB" VerticalGridLinesBrush="#EEF2F7"
                                       RowBackground="White" AlternatingRowBackground="White" AlternationCount="2"
                                       FontSize="12" SelectionUnit="CellOrRowHeader"
                                          PreviewMouseLeftButtonDown="LedgerGrid_PreviewMouseLeftButtonDown"
@@ -1164,6 +1178,19 @@
                                          PreviewMouseRightButtonUp="LedgerGrid_PreviewMouseRightButtonUp"
                                          Sorting="LedgerGrid_Sorting"
                                          ColumnHeaderStyle="{StaticResource DataGridHeaderStyle}">
+                                    <DataGrid.CellStyle>
+                                        <Style TargetType="DataGridCell">
+                                            <Setter Property="BorderBrush" Value="#EEF2F7" />
+                                            <Setter Property="BorderThickness" Value="0,0,1,1" />
+                                            <Style.Triggers>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter Property="Background" Value="#DBEAFE" />
+                                                    <Setter Property="BorderBrush" Value="#93C5FD" />
+                                                    <Setter Property="Foreground" Value="#0F172A" />
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </DataGrid.CellStyle>
                                     <DataGrid.Columns>
 
                                         <DataGridTextColumn Header="#" Binding="{Binding Sr}" Width="35" IsReadOnly="True" CanUserSort="False" Visibility="{Binding DataContext.ShowSr, ElementName=Root, Converter={StaticResource BoolToVis}}" />
@@ -1535,19 +1562,35 @@
                                           ScrollViewer.HorizontalScrollBarVisibility="Visible" ScrollViewer.VerticalScrollBarVisibility="Auto"
                                           VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel"
                                           Background="White" BorderThickness="0" RowHeight="30" RowHeaderWidth="28" HeadersVisibility="All"
-                                          GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E5E7EB" 
+                                          GridLinesVisibility="All" HorizontalGridLinesBrush="#E5E7EB" VerticalGridLinesBrush="#EEF2F7"
                                           RowBackground="White" FontSize="12" SelectionUnit="CellOrRowHeader"
 
                                            SelectedCellsChanged="LRLedgerGrid_SelectedCellsChanged"
+                                           BeginningEdit="LRLedgerGrid_BeginningEdit"
+                                           PreparingCellForEdit="LRLedgerGrid_PreparingCellForEdit"
                                            CellEditEnding="LRLedgerGrid_CellEditEnding"
                                            PreviewKeyDown="DataGrid_PreviewKeyDown"
                                            PreviewMouseLeftButtonDown="LRLedgerGrid_PreviewMouseLeftButtonDown"
+                                           PreviewMouseDoubleClick="LRLedgerGrid_PreviewMouseDoubleClick"
                                            PreviewMouseMove="LRLedgerGrid_PreviewMouseMove"
                                            PreviewMouseLeftButtonUp="LRLedgerGrid_PreviewMouseLeftButtonUp"
                                            PreviewMouseRightButtonUp="LRLedgerGrid_PreviewMouseRightButtonUp"
                                            Sorting="LRLedgerGrid_SortingMenuOnly"
 
                                            ColumnHeaderStyle="{StaticResource DataGridHeaderStyle}">
+                                    <DataGrid.CellStyle>
+                                        <Style TargetType="DataGridCell">
+                                            <Setter Property="BorderBrush" Value="#EEF2F7" />
+                                            <Setter Property="BorderThickness" Value="0,0,1,1" />
+                                            <Style.Triggers>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter Property="Background" Value="#DBEAFE" />
+                                                    <Setter Property="BorderBrush" Value="#93C5FD" />
+                                                    <Setter Property="Foreground" Value="#0F172A" />
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </DataGrid.CellStyle>
                                     <DataGrid.Resources>
                                         <Style TargetType="ScrollBar">
                                             <Style.Triggers>
@@ -1592,41 +1635,95 @@
 
                                         <DataGridTextColumn Header="Consignor Address" Binding="{Binding ConsignorAddress}" Width="150" />
 
-                                        <DataGridTextColumn Header="Consignor GST" Binding="{Binding ConsignorGST}" Width="110" />
+                                        <DataGridTextColumn Header="Consignor GST" Binding="{Binding ConsignorGST}" Width="110">
+                                            <DataGridTextColumn.EditingElementStyle>
+                                                <Style TargetType="TextBox">
+                                                    <Setter Property="CharacterCasing" Value="Upper" />
+                                                </Style>
+                                            </DataGridTextColumn.EditingElementStyle>
+                                        </DataGridTextColumn>
 
                                         <DataGridTextColumn Header="Consignee Name" Binding="{Binding ConsigneeName}" Width="150" />
 
                                         <DataGridTextColumn Header="Consignee Address" Binding="{Binding ConsigneeAddress}" Width="150" />
 
-                                        <DataGridTextColumn Header="Consignee GST" Binding="{Binding ConsigneeGST}" Width="110" />
+                                        <DataGridTextColumn Header="Consignee GST" Binding="{Binding ConsigneeGST}" Width="110">
+                                            <DataGridTextColumn.EditingElementStyle>
+                                                <Style TargetType="TextBox">
+                                                    <Setter Property="CharacterCasing" Value="Upper" />
+                                                </Style>
+                                            </DataGridTextColumn.EditingElementStyle>
+                                        </DataGridTextColumn>
 
-                                        <DataGridTextColumn Header="From" Binding="{Binding From}" Width="90" />
+                                        <DataGridTextColumn Header="From" Binding="{Binding From}" Width="90" IsReadOnly="True" />
 
-                                        <DataGridTextColumn Header="To" Binding="{Binding To}" Width="90" />
+                                        <DataGridTextColumn Header="To" Binding="{Binding To}" Width="90" IsReadOnly="True" />
 
-                                        <DataGridTextColumn Header="Vehicle No." Binding="{Binding VehicleNo}" Width="100" />
+                                        <DataGridTextColumn Header="Vehicle No." Binding="{Binding VehicleNo}" Width="100" IsReadOnly="True" />
 
-                                        <DataGridTextColumn Header="Type" Binding="{Binding VehicleType}" Width="80" />
+                                        <DataGridTextColumn Header="Type" Binding="{Binding VehicleType}" Width="80" IsReadOnly="True" />
 
-                                        <DataGridTextColumn Header="WEIGHT" Binding="{Binding Weight}" Width="70" />
+                                        <DataGridTextColumn Header="WEIGHT" Binding="{Binding Weight}" Width="70">
+                                            <DataGridTextColumn.EditingElementStyle>
+                                                <Style TargetType="TextBox">
+                                                    <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                    <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                                </Style>
+                                            </DataGridTextColumn.EditingElementStyle>
+                                        </DataGridTextColumn>
 
-                                        <DataGridTextColumn Header="PKG" Binding="{Binding PKG}" Width="50" />
+                                        <DataGridTextColumn Header="PKG" Binding="{Binding PKG}" Width="50">
+                                            <DataGridTextColumn.EditingElementStyle>
+                                                <Style TargetType="TextBox">
+                                                    <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                    <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                                </Style>
+                                            </DataGridTextColumn.EditingElementStyle>
+                                        </DataGridTextColumn>
 
                                         <DataGridTextColumn Header="DESCRIPTION" Binding="{Binding Description}" Width="120" />
 
                                         <DataGridTextColumn Header="Invoice" Binding="{Binding Invoice}" Width="100" />
 
-                                        <DataGridTextColumn Header="CH No." Binding="{Binding CHNo}" Width="90" />
+                                        <DataGridTextColumn Header="CH No." Binding="{Binding CHNo}" Width="90" IsReadOnly="True" />
 
-                                        <DataGridTextColumn Header="Total Freight" Binding="{Binding TotalFreight}" Width="90" FontWeight="SemiBold" Foreground="#18609A" />
+                                        <DataGridTextColumn Header="Total Freight" Binding="{Binding TotalFreight}" Width="90" FontWeight="SemiBold" Foreground="#18609A">
+                                            <DataGridTextColumn.EditingElementStyle>
+                                                <Style TargetType="TextBox">
+                                                    <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                    <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                                </Style>
+                                            </DataGridTextColumn.EditingElementStyle>
+                                        </DataGridTextColumn>
 
-                                        <DataGridTextColumn Header="Hamali" Binding="{Binding Hamali}" Width="80" />
+                                        <DataGridTextColumn Header="Hamali" Binding="{Binding Hamali}" Width="80">
+                                            <DataGridTextColumn.EditingElementStyle>
+                                                <Style TargetType="TextBox">
+                                                    <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                    <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                                </Style>
+                                            </DataGridTextColumn.EditingElementStyle>
+                                        </DataGridTextColumn>
 
-                                        <DataGridTextColumn Header="Detention" Binding="{Binding Detention}" Width="80" />
+                                        <DataGridTextColumn Header="Detention" Binding="{Binding Detention}" Width="80">
+                                            <DataGridTextColumn.EditingElementStyle>
+                                                <Style TargetType="TextBox">
+                                                    <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                    <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                                </Style>
+                                            </DataGridTextColumn.EditingElementStyle>
+                                        </DataGridTextColumn>
 
-                                        <DataGridTextColumn Header="Others" Binding="{Binding Others}" Width="80" />
+                                        <DataGridTextColumn Header="Others" Binding="{Binding Others}" Width="80">
+                                            <DataGridTextColumn.EditingElementStyle>
+                                                <Style TargetType="TextBox">
+                                                    <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                    <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                                </Style>
+                                            </DataGridTextColumn.EditingElementStyle>
+                                        </DataGridTextColumn>
 
-                                        <DataGridTextColumn Header="Total Bill" Binding="{Binding TotalBill}" Width="90" FontWeight="SemiBold" Foreground="#1D4ED8" />
+                                        <DataGridTextColumn Header="Total Bill" Binding="{Binding TotalBill}" Width="90" FontWeight="SemiBold" Foreground="#1D4ED8" IsReadOnly="True" />
 
                                         <DataGridTextColumn Header="Bill No." Binding="{Binding BillNo}" Width="90" />
 

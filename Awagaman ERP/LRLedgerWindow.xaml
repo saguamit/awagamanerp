@@ -209,6 +209,7 @@
                                   Background="White" BorderThickness="0" RowHeight="36" HeadersVisibility="All"
                                   GridLinesVisibility="All" HorizontalGridLinesBrush="#E5E7EB" VerticalGridLinesBrush="#E5E7EB"
                                   RowBackground="White" FontSize="12" SelectionUnit="CellOrRowHeader"
+                                  BeginningEdit="LedgerGrid_BeginningEdit"
                                   SelectedCellsChanged="LedgerGrid_SelectedCellsChanged"
                                   ScrollViewer.HorizontalScrollBarVisibility="Auto"
                                   ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -226,17 +227,17 @@
                                     <DataGridTextColumn Header="Consignee Address" Binding="{Binding ConsigneeAddress}" Width="150" />
                                     <DataGridTextColumn Header="Consignee GST" Binding="{Binding ConsigneeGST}" Width="110" />
                                     
-                                    <DataGridTextColumn Header="From" Binding="{Binding From}" Width="90" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
-                                    <DataGridTextColumn Header="To" Binding="{Binding To}" Width="90" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    <DataGridTextColumn Header="From" Binding="{Binding From}" Width="90" IsReadOnly="True" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    <DataGridTextColumn Header="To" Binding="{Binding To}" Width="90" IsReadOnly="True" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
                                     
-                                    <DataGridTextColumn Header="Vehicle No." Binding="{Binding VehicleNo}" Width="100" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
-                                    <DataGridTextColumn Header="Type" Binding="{Binding VehicleType}" Width="80" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    <DataGridTextColumn Header="Vehicle No." Binding="{Binding VehicleNo}" Width="100" IsReadOnly="True" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    <DataGridTextColumn Header="Type" Binding="{Binding VehicleType}" Width="80" IsReadOnly="True" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
                                     
                                     <DataGridTextColumn Header="WEIGHT" Binding="{Binding Weight}" Width="70" />
                                     <DataGridTextColumn Header="PKG" Binding="{Binding PKG}" Width="50" />
                                     <DataGridTextColumn Header="DESCRIPTION" Binding="{Binding Description}" Width="120" />
                                     
-                                    <DataGridTextColumn Header="CH No." Binding="{Binding CHNo}" Width="90" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
+                                    <DataGridTextColumn Header="CH No." Binding="{Binding CHNo}" Width="90" IsReadOnly="True" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
                                     
                                     <DataGridTextColumn Header="Total Freight" Binding="{Binding TotalFreight}" Width="90" FontWeight="SemiBold" Foreground="#18609A" />
                                     <DataGridTextColumn Header="NEFT" Binding="{Binding NEFT}" Width="80" />

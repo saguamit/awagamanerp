@@ -100,6 +100,7 @@
     <Compile Include="Data\CommentRepository.cs" />
     <Compile Include="Data\BillRepository.cs" />
     <Compile Include="Data\VehicleRepository.cs" />
+    <Compile Include="Data\BillPrefixSettings.cs" />
     <Compile Include="ViewModels\ChallanViewModel.cs" />
     <Compile Include="ViewModels\LRLedgerViewModel.cs" />
     <Compile Include="ViewModels\TrackingViewModel.cs" />

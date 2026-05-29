@@ -32,6 +32,7 @@ namespace Awagaman_ERP.Data
                 DED = GetDecimal(r["DED"]),
                 MOP = r["MOP"] as string,
                 MR = r["MR"] as string,
+                Remarks = r["Remarks"] as string,
                 Date = DateTime.TryParse(r["Date"] as string, out var dt) ? dt : DateTime.Today,
             };
         }
@@ -62,7 +63,7 @@ namespace Awagaman_ERP.Data
             string orderBy = BuildOrderBy(sortColumn, sortAscending);
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand(
-                $"SELECT * FROM Bills WHERE BillNo LIKE @f OR Party LIKE @f OR LRNo LIKE @f OR FromLoc LIKE @f OR ToLoc LIKE @f OR MR LIKE @f ORDER BY {orderBy} LIMIT @lim OFFSET @off;", c))
+                $"SELECT * FROM Bills WHERE BillNo LIKE @f OR Party LIKE @f OR LRNo LIKE @f OR FromLoc LIKE @f OR ToLoc LIKE @f OR MR LIKE @f OR Remarks LIKE @f ORDER BY {orderBy} LIMIT @lim OFFSET @off;", c))
             {
                 cmd.Parameters.AddWithValue("@f", $"%{filter}%");
                 cmd.Parameters.AddWithValue("@lim", pageSize);
@@ -79,7 +80,7 @@ namespace Awagaman_ERP.Data
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand(
                 string.IsNullOrWhiteSpace(filter) ? "SELECT COUNT(*) FROM Bills;"
-                : "SELECT COUNT(*) FROM Bills WHERE BillNo LIKE @f OR Party LIKE @f OR LRNo LIKE @f OR FromLoc LIKE @f OR ToLoc LIKE @f OR MR LIKE @f;", c))
+                : "SELECT COUNT(*) FROM Bills WHERE BillNo LIKE @f OR Party LIKE @f OR LRNo LIKE @f OR FromLoc LIKE @f OR ToLoc LIKE @f OR MR LIKE @f OR Remarks LIKE @f;", c))
             {
                 if (!string.IsNullOrWhiteSpace(filter)) cmd.Parameters.AddWithValue("@f", $"%{filter}%");
                 c.Open();
@@ -97,14 +98,14 @@ namespace Awagaman_ERP.Data
                 if (e.Id <= 0)
                 {
                     cmd.CommandText = @"INSERT INTO Bills (Sr, BillNo, BillDate, Party, LRNo, LRDate, FromLoc, ToLoc, VehicleType,
-                        Freight, Detention, HML, OTHR, RCVD, TDS, DED, MOP, MR, Date) VALUES (@Sr,@BillNo,@BillDate,@Party,@LRNo,@LRDate,@FromLoc,@ToLoc,@VehicleType,
-                        @Freight,@Detention,@HML,@OTHR,@RCVD,@TDS,@DED,@MOP,@MR,@Date); SELECT last_insert_rowid();";
+                        Freight, Detention, HML, OTHR, RCVD, TDS, DED, MOP, MR, Remarks, Date) VALUES (@Sr,@BillNo,@BillDate,@Party,@LRNo,@LRDate,@FromLoc,@ToLoc,@VehicleType,
+                        @Freight,@Detention,@HML,@OTHR,@RCVD,@TDS,@DED,@MOP,@MR,@Remarks,@Date); SELECT last_insert_rowid();";
                 }
                 else
                 {
                     cmd.CommandText = @"UPDATE Bills SET Sr=@Sr, BillNo=@BillNo, BillDate=@BillDate, Party=@Party, LRNo=@LRNo, LRDate=@LRDate,
                         FromLoc=@FromLoc, ToLoc=@ToLoc, VehicleType=@VehicleType, Freight=@Freight, Detention=@Detention,
-                        HML=@HML, OTHR=@OTHR, RCVD=@RCVD, TDS=@TDS, DED=@DED, MOP=@MOP, MR=@MR, Date=@Date WHERE Id=@Id;";
+                        HML=@HML, OTHR=@OTHR, RCVD=@RCVD, TDS=@TDS, DED=@DED, MOP=@MOP, MR=@MR, Remarks=@Remarks, Date=@Date WHERE Id=@Id;";
                     cmd.Parameters.AddWithValue("@Id", e.Id);
                 }
                 cmd.Parameters.AddWithValue("@Sr", e.Sr);
@@ -125,6 +126,7 @@ namespace Awagaman_ERP.Data
                 cmd.Parameters.AddWithValue("@DED", e.DED);
                 cmd.Parameters.AddWithValue("@MOP", (object)e.MOP ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@MR", (object)e.MR ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@Remarks", (object)e.Remarks ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@Date", e.Date.ToString("o"));
                 if (e.Id <= 0) e.Id = Convert.ToInt32((long)cmd.ExecuteScalar());
                 else cmd.ExecuteNonQuery();
@@ -202,6 +204,7 @@ LRNo {d}, Sr, Id";
                 case "due": return $"(Freight+Detention+HML+OTHR-RCVD-TDS-DED) {d}, Sr, Id";
                 case "mop": return $"MOP {d}, Sr, Id";
                 case "mr": return $"MR {d}, Sr, Id";
+                case "remarks": return $"Remarks {d}, Sr, Id";
                 case "date": return $"Date {d}, Sr, Id";
                 default: return "Sr, Id";
             }

@@ -199,6 +199,31 @@ namespace Awagaman_ERP
                 string.Equals((c?.ChallanNumber ?? string.Empty).Trim(), key, StringComparison.OrdinalIgnoreCase));
         }
 
+        private decimal? FindChallanLorryHireFromDatabase(string challanNo)
+        {
+            var key = (challanNo ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(key)) return null;
+            try
+            {
+                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                {
+                    conn.Open();
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT LorryHire FROM Challans WHERE TRIM(COALESCE(ChallanNumber,'')) = @no LIMIT 1;";
+                        cmd.Parameters.AddWithValue("@no", key);
+                        var value = cmd.ExecuteScalar();
+                        if (value == null || value == DBNull.Value) return null;
+                        return Convert.ToDecimal(value);
+                    }
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private void CurrentEntry_PropertyChanged(object sender, PropertyChangedEventArgs e)
         {
             if (e?.PropertyName == nameof(LREntry.CHNo))
@@ -214,9 +239,37 @@ namespace Awagaman_ERP
             {
                 ChallanLorryHire = challan.LorryHire;
             }
-            else if (clearWhenMissing)
+            else
+            {
+                var lorryHire = FindChallanLorryHireFromDatabase(CurrentEntry?.CHNo);
+                if (lorryHire.HasValue)
+                {
+                    ChallanLorryHire = lorryHire.Value;
+                    return;
+                }
+            }
+
+            if (clearWhenMissing)
             {
                 ChallanLorryHire = null;
+            }
+        }
+
+        private void NumericBox_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        {
+            if (sender is TextBox tb)
+            {
+                tb.SelectAll();
+            }
+        }
+
+        private void NumericBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (!(sender is TextBox tb)) return;
+            if (!tb.IsKeyboardFocusWithin)
+            {
+                e.Handled = true;
+                tb.Focus();
             }
         }
 

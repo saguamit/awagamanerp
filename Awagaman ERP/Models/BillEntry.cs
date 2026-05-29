@@ -25,6 +25,7 @@ namespace Awagaman_ERP.Models
         private decimal _ded;
         private string _mop;
         private string _mr;
+        private string _remarks;
         private DateTime _date = DateTime.Today;
         private bool _hasComments;
 
@@ -47,6 +48,7 @@ namespace Awagaman_ERP.Models
         public decimal DED { get => _ded; set { _ded = value; OnPropertyChanged(); OnPropertyChanged(nameof(Due)); } }
         public string MOP { get => _mop; set { _mop = value; OnPropertyChanged(); } }
         public string MR { get => _mr; set { _mr = value; OnPropertyChanged(); } }
+        public string Remarks { get => _remarks; set { _remarks = value; OnPropertyChanged(); } }
         public DateTime Date { get => _date; set { _date = value; OnPropertyChanged(); } }
         public decimal Total => Freight + Detention + HML + OTHR;
         public decimal Due => Total - RCVD - TDS - DED;

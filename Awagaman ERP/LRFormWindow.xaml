@@ -159,7 +159,7 @@
                             
                             <StackPanel Grid.Column="4">
                                 <TextBlock Text="Vehicle No." Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CurrentEntry.VehicleNo, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.VehicleNo, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" IsReadOnly="True" ToolTip="Editable from Challan only" />
                             </StackPanel>
                         </Grid>
                         
@@ -173,15 +173,15 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="Vehicle Type" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CurrentEntry.VehicleType, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.VehicleType, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" IsReadOnly="True" ToolTip="Editable from Challan only" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
                                 <TextBlock Text="From" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CurrentEntry.From, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.From, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" IsReadOnly="True" ToolTip="Editable from Challan only" />
                             </StackPanel>
                             <StackPanel Grid.Column="4">
                                 <TextBlock Text="To" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CurrentEntry.To, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.To, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" IsReadOnly="True" ToolTip="Editable from Challan only" />
                             </StackPanel>
                         </Grid>
                         </StackPanel>
@@ -210,7 +210,7 @@
                             <TextBlock Text="Address" Style="{StaticResource FieldLabelStyle}" />
                             <TextBox x:Name="ConsignorAddressBox" Text="{Binding CurrentEntry.ConsignorAddress, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,12" />
                             <TextBlock Text="GST" Style="{StaticResource FieldLabelStyle}" />
-                            <TextBox x:Name="ConsignorGSTBox" Text="{Binding CurrentEntry.ConsignorGST, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                            <TextBox x:Name="ConsignorGSTBox" Text="{Binding CurrentEntry.ConsignorGST, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" CharacterCasing="Upper" />
                         </StackPanel>
                     </Border>
                     
@@ -229,7 +229,7 @@
                             <TextBlock Text="Address" Style="{StaticResource FieldLabelStyle}" />
                             <TextBox Text="{Binding CurrentEntry.ConsigneeAddress, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,12" />
                             <TextBlock Text="GST" Style="{StaticResource FieldLabelStyle}" />
-                            <TextBox Text="{Binding CurrentEntry.ConsigneeGST, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                            <TextBox Text="{Binding CurrentEntry.ConsigneeGST, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" CharacterCasing="Upper" />
                         </StackPanel>
                     </Border>
                     </Grid>
@@ -271,11 +271,11 @@
                             
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="WEIGHT" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CurrentEntry.Weight, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.Weight, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
                                 <TextBlock Text="PKG" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CurrentEntry.PKG, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.PKG, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
                             </StackPanel>
                             <StackPanel Grid.Column="4">
                                 <TextBlock Text="DESCRIPTION" Style="{StaticResource FieldLabelStyle}" />
@@ -320,19 +320,19 @@
 
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="Total Freight" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CurrentEntry.TotalFreight, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,10" />
+                                <TextBox Text="{Binding CurrentEntry.TotalFreight, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,10" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
                                 <TextBlock Text="Hamali" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CurrentEntry.Hamali, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.Hamali, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
                             </StackPanel>
                             <StackPanel Grid.Column="4">
                                 <TextBlock Text="Detention" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CurrentEntry.Detention, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.Detention, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
                             </StackPanel>
                             <StackPanel Grid.Column="6">
                                 <TextBlock Text="Others" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CurrentEntry.Others, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.Others, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
                             </StackPanel>
                         </Grid>
 

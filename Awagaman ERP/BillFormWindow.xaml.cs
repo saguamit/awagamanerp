@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
 using Awagaman_ERP.Data;
 using Awagaman_ERP.Models;
 using MahApps.Metro.Controls;
@@ -48,6 +50,11 @@ namespace Awagaman_ERP
                 if (!_isEditMode)
                 {
                     ApplyCreateModeLayout();
+                    if (string.IsNullOrWhiteSpace(Result?.BillNo))
+                    {
+                        var prefix = BillPrefixSettings.GetPrefix();
+                        Result.BillNo = $"{prefix}/";
+                    }
                 }
                 if (_isEditMode) return;
                 if (string.IsNullOrWhiteSpace(Result?.LRNo)) return;
@@ -66,6 +73,21 @@ namespace Awagaman_ERP
             if (ToFieldPanel != null) ToFieldPanel.Visibility = Visibility.Collapsed;
             if (VehicleTypeFieldPanel != null) VehicleTypeFieldPanel.Visibility = Visibility.Collapsed;
             if (AmountsSectionBorder != null) AmountsSectionBorder.Visibility = Visibility.Collapsed;
+        }
+
+        private void NumericTextBox_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        {
+            if (sender is TextBox tb) tb.SelectAll();
+        }
+
+        private void NumericTextBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (!(sender is TextBox tb)) return;
+            if (!tb.IsKeyboardFocusWithin)
+            {
+                e.Handled = true;
+                tb.Focus();
+            }
         }
 
         private void BillPartyBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
@@ -196,7 +218,7 @@ namespace Awagaman_ERP
 
             if (matched.Count == 0) return;
             var first = matched[0];
-            if (string.IsNullOrWhiteSpace(Result.Party)) Result.Party = GetPreferredBillParty(first);
+            Result.Party = GetPreferredBillParty(first);
             if (!Result.LRDate.HasValue) Result.LRDate = first.Date;
             if (string.IsNullOrWhiteSpace(Result.From)) Result.From = first.From;
             if (string.IsNullOrWhiteSpace(Result.To)) Result.To = first.To;
@@ -363,8 +385,7 @@ namespace Awagaman_ERP
                     var newlyAdded = items.Where(lr => !string.IsNullOrWhiteSpace(lr.LRNo) && !existingSet.Contains(lr.LRNo)).ToList();
                     var combined = existing.Concat(selected).Distinct(StringComparer.OrdinalIgnoreCase);
                     Result.LRNo = string.Join(", ", combined);
-                    if (string.IsNullOrWhiteSpace(existingParty))
-                        Result.Party = selectedParty;
+                    Result.Party = selectedParty;
                     if (!Result.LRDate.HasValue) Result.LRDate = items[0].Date;
                     if (string.IsNullOrWhiteSpace(Result.From)) Result.From = items[0].From;
                     if (string.IsNullOrWhiteSpace(Result.To)) Result.To = items[0].To;
@@ -448,6 +469,63 @@ namespace Awagaman_ERP
         {
             DialogResult = false;
             Close();
+        }
+
+        private void BillNoBox_LostFocus(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var raw = (Result?.BillNo ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(raw)) return;
+
+                // If user enters only a number, apply default prefix automatically.
+                if (int.TryParse(raw, out var onlyNumber))
+                {
+                    var prefix = BillPrefixSettings.GetPrefix();
+                    Result.BillNo = $"{prefix}/{onlyNumber}";
+                    return;
+                }
+
+                // If user enters custom prefix only, append next number for that prefix.
+                if (!raw.Contains("/"))
+                {
+                    var next = GetNextBillSequence(raw);
+                    Result.BillNo = $"{raw}/{next}";
+                }
+            }
+            catch { }
+        }
+
+        private static int GetNextBillSequence(string prefix)
+        {
+            var pfx = (prefix ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(pfx)) pfx = BillPrefixSettings.GetPrefix();
+
+            var max = 0;
+            using (var c = new System.Data.SQLite.SQLiteConnection(Data.AppDatabase.ConnectionString))
+            {
+                c.Open();
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT BillNo FROM Bills WHERE BillNo LIKE @pfx";
+                    cmd.Parameters.AddWithValue("@pfx", pfx + "/%");
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            var billNo = (r["BillNo"] as string) ?? string.Empty;
+                            var idx = billNo.LastIndexOf('/');
+                            if (idx < 0 || idx == billNo.Length - 1) continue;
+                            if (int.TryParse(billNo.Substring(idx + 1).Trim(), out var n) && n > max)
+                            {
+                                max = n;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return max + 1;
         }
     }
 }

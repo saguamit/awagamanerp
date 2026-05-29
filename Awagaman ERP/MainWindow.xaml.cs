@@ -82,6 +82,7 @@ namespace Awagaman_ERP
                 if (LRLedgerGrid != null)
                 {
                     if (LRLedgerView.DataContext == null) LRLedgerView.DataContext = LRVM;
+                    EnforceLRLockedColumnsReadOnly();
                     LRRefreshFilteredSummary();
                     var lrView = System.Windows.Data.CollectionViewSource.GetDefaultView(LRLedgerGrid.ItemsSource) as System.Collections.Specialized.INotifyCollectionChanged;
                     if (lrView != null) lrView.CollectionChanged += (s2, e2) => LRRefreshFilteredSummary();
@@ -603,6 +604,85 @@ namespace Awagaman_ERP
             }
         }
 
+        private void OpenBillPrefixSettings_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dialog = new Window
+                {
+                    Title = "Bill Prefix Settings",
+                    Width = 420,
+                    Height = 190,
+                    Owner = this,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    ResizeMode = ResizeMode.NoResize,
+                    Background = System.Windows.Media.Brushes.White
+                };
+
+                var root = new Grid { Margin = new Thickness(14) };
+                root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+                var label = new TextBlock
+                {
+                    Text = "Default Bill Prefix",
+                    FontWeight = FontWeights.SemiBold,
+                    Margin = new Thickness(0, 0, 0, 6)
+                };
+                var box = new TextBox
+                {
+                    Height = 28,
+                    Text = BillPrefixSettings.GetPrefix(),
+                    Margin = new Thickness(0, 0, 0, 8)
+                };
+                var hint = new TextBlock
+                {
+                    Text = "Example: FBD 26-27 (bill no will be Prefix/NextNumber)",
+                    Foreground = System.Windows.Media.Brushes.Gray,
+                    FontSize = 12
+                };
+
+                var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+                var saveBtn = new Button { Content = "Save", Width = 90, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
+                var cancelBtn = new Button { Content = "Cancel", Width = 90, Height = 30 };
+                footer.Children.Add(saveBtn);
+                footer.Children.Add(cancelBtn);
+
+                Grid.SetRow(label, 0);
+                Grid.SetRow(box, 1);
+                Grid.SetRow(hint, 2);
+                Grid.SetRow(footer, 3);
+                root.Children.Add(label);
+                root.Children.Add(box);
+                root.Children.Add(hint);
+                root.Children.Add(footer);
+                dialog.Content = root;
+
+                saveBtn.Click += (_, __) =>
+                {
+                    var value = (box.Text ?? string.Empty).Trim().TrimEnd('/');
+                    if (string.IsNullOrWhiteSpace(value))
+                    {
+                        MessageBox.Show("Prefix cannot be empty.", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+
+                    BillPrefixSettings.SavePrefix(value);
+                    dialog.DialogResult = true;
+                    dialog.Close();
+                };
+                cancelBtn.Click += (_, __) => { dialog.DialogResult = false; dialog.Close(); };
+
+                dialog.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to open bill prefix settings: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void CreateBillFromLR_Click(object sender, RoutedEventArgs e)
         {
             if (LRLedgerGrid == null) return;
@@ -899,6 +979,182 @@ namespace Awagaman_ERP
             catch { }
         }
 
+        private void PartyAddRow_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var repo = new PartyRepository();
+                var list = repo.GetAll();
+                int maxSr = 0;
+                foreach (var p in list) if (p.Sr > maxSr) maxSr = p.Sr;
+
+                var entry = new PartyEntry
+                {
+                    Sr = maxSr + 1,
+                    PartyName = "New Party",
+                    Address = string.Empty,
+                    GSTNo = string.Empty
+                };
+
+                repo.Upsert(entry);
+                RefreshPartyGrid();
+
+                var added = _allParties?.FirstOrDefault(x =>
+                    string.Equals((x.PartyName ?? string.Empty).Trim(), "New Party", StringComparison.OrdinalIgnoreCase) &&
+                    x.Sr == entry.Sr);
+                if (added != null && PartyGrid != null)
+                {
+                    PartyGrid.SelectedItem = added;
+                    PartyGrid.ScrollIntoView(added);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to add party row: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void ImportParty_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Filter = "CSV Files|*.csv;*.txt|All Files|*.*",
+                Title = "Select Party Import File"
+            };
+            if (dialog.ShowDialog() != true) return;
+
+            try
+            {
+                var lines = System.IO.File.ReadAllLines(dialog.FileName);
+                if (lines.Length < 2)
+                {
+                    MessageBox.Show("CSV file has no data rows.", "Import", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var headers = SplitCsvLine(lines[0]);
+                var colMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < headers.Length; i++)
+                {
+                    var key = NormalizePartyHeader(headers[i]);
+                    if (!colMap.ContainsKey(key)) colMap[key] = i;
+                }
+
+                int nameIdx = GetFirstIndex(colMap, "partyname", "party", "name");
+                int addrIdx = GetFirstIndex(colMap, "address", "addr");
+                int gstIdx = GetFirstIndex(colMap, "gst", "gstno", "gstnumber");
+                if (nameIdx < 0)
+                {
+                    MessageBox.Show("Required column missing: Party Name", "Import", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var repo = new PartyRepository();
+                var existing = repo.GetAll();
+                int maxSr = existing.Count > 0 ? existing.Max(x => x.Sr) : 0;
+                var existingByName = new Dictionary<string, PartyEntry>(StringComparer.OrdinalIgnoreCase);
+                foreach (var p in existing)
+                {
+                    var k = (p.PartyName ?? string.Empty).Trim();
+                    if (!string.IsNullOrWhiteSpace(k) && !existingByName.ContainsKey(k)) existingByName[k] = p;
+                }
+
+                int imported = 0, updated = 0, skipped = 0;
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    var parts = SplitCsvLine(lines[i]);
+                    var name = GetCsvCol(parts, nameIdx).Trim();
+                    if (string.IsNullOrWhiteSpace(name)) { skipped++; continue; }
+                    var addr = addrIdx >= 0 ? GetCsvCol(parts, addrIdx).Trim() : string.Empty;
+                    var gst = (gstIdx >= 0 ? GetCsvCol(parts, gstIdx).Trim() : string.Empty).ToUpperInvariant();
+
+                    if (existingByName.TryGetValue(name, out var row))
+                    {
+                        row.Address = string.IsNullOrWhiteSpace(addr) ? row.Address : addr;
+                        row.GSTNo = string.IsNullOrWhiteSpace(gst) ? row.GSTNo : gst;
+                        repo.Upsert(row);
+                        updated++;
+                    }
+                    else
+                    {
+                        var n = new PartyEntry { Sr = ++maxSr, PartyName = name, Address = addr, GSTNo = gst };
+                        repo.Upsert(n);
+                        existingByName[name] = n;
+                        imported++;
+                    }
+                }
+
+                RefreshPartyGrid();
+                MessageBox.Show($"Party import complete.\nAdded: {imported}\nUpdated: {updated}\nSkipped: {skipped}", "Import Result", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Party import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void PartyDeleteSelected_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (PartyGrid == null) return;
+                var selected = PartyGrid.SelectedItems.Cast<PartyEntry>().Where(x => x != null).ToList();
+                if (selected.Count == 0)
+                {
+                    MessageBox.Show("Select party row(s) to delete.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var confirm = MessageBox.Show(
+                    $"Delete {selected.Count} selected part{(selected.Count == 1 ? "y" : "ies")}?",
+                    "Confirm Delete",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+                if (confirm != MessageBoxResult.Yes) return;
+
+                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                {
+                    conn.Open();
+                    foreach (var row in selected)
+                    {
+                        if (row.Id <= 0) continue;
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.CommandText = "DELETE FROM Parties WHERE Id = @id;";
+                            cmd.Parameters.AddWithValue("@id", row.Id);
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+                }
+
+                RefreshPartyGrid();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to delete selected party rows: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private static string NormalizePartyHeader(string value)
+        {
+            return (value ?? string.Empty).Trim().ToLowerInvariant().Replace(" ", "").Replace(".", "").Replace("_", "");
+        }
+
+        private static int GetFirstIndex(Dictionary<string, int> map, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (map.TryGetValue(key, out var idx)) return idx;
+            }
+            return -1;
+        }
+
+        private static string GetCsvCol(string[] parts, int idx)
+        {
+            if (parts == null || idx < 0 || idx >= parts.Length) return string.Empty;
+            return parts[idx] ?? string.Empty;
+        }
+
         private void OpenVehicleLedgerTab_Click(object sender, RoutedEventArgs e)
         {
             DashboardView.Visibility = Visibility.Collapsed;
@@ -956,6 +1212,364 @@ namespace Awagaman_ERP
                 new VehicleRepository().Upsert(entry);
             }
             catch { }
+        }
+
+        private class DueChallanOption
+        {
+            public int Id { get; set; }
+            public string ChallanNo { get; set; }
+            public string Broker { get; set; }
+            public decimal LorryHire { get; set; }
+            public decimal Advance { get; set; }
+            public decimal BalancePaid { get; set; }
+            public decimal Due { get; set; }
+            public string Display => $"{ChallanNo} | LH ₹{LorryHire:N2} | Adv ₹{Advance:N2} | Due ₹{Due:N2}";
+        }
+
+        private List<string> LoadDueBrokers()
+        {
+            var list = new List<string>();
+            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT DISTINCT TRIM(COALESCE(BrokerName, '')) AS Broker
+FROM Challans
+WHERE (COALESCE(LorryHire,0) - COALESCE(LessTDS,0) - COALESCE(AdvanceAmount,0)
+      + COALESCE(Detention,0) + COALESCE(Hamali,0) + COALESCE(Deduction,0)
+      - COALESCE(BalancePaidNEFT,0) - COALESCE(BalancePaidCash,0)) > 0
+  AND TRIM(COALESCE(BrokerName, '')) <> ''
+ORDER BY Broker;";
+                    using (var r = cmd.ExecuteReader())
+                        while (r.Read()) list.Add((r["Broker"] as string ?? string.Empty).Trim());
+                }
+            }
+            return list;
+        }
+
+        private List<DueChallanOption> LoadDueChallansByBroker(string broker)
+        {
+            var rows = new List<DueChallanOption>();
+            var brokerKey = (broker ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(brokerKey)) return rows;
+            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT Id,
+       ChallanNumber,
+       BrokerName,
+       COALESCE(LorryHire,0) AS LorryHireAmt,
+       COALESCE(AdvanceAmount,0) AS AdvanceAmt,
+       (COALESCE(BalancePaidNEFT,0) + COALESCE(BalancePaidCash,0)) AS PaidAmt,
+       (COALESCE(LorryHire,0) - COALESCE(LessTDS,0) - COALESCE(AdvanceAmount,0)
+       + COALESCE(Detention,0) + COALESCE(Hamali,0) + COALESCE(Deduction,0)
+       - COALESCE(BalancePaidNEFT,0) - COALESCE(BalancePaidCash,0)) AS DueAmt
+FROM Challans
+WHERE TRIM(COALESCE(BrokerName,'')) = @broker
+  AND (COALESCE(LorryHire,0) - COALESCE(LessTDS,0) - COALESCE(AdvanceAmount,0)
+       + COALESCE(Detention,0) + COALESCE(Hamali,0) + COALESCE(Deduction,0)
+       - COALESCE(BalancePaidNEFT,0) - COALESCE(BalancePaidCash,0)) > 0
+ORDER BY Id DESC;";
+                    cmd.Parameters.AddWithValue("@broker", brokerKey);
+                    using (var r = cmd.ExecuteReader())
+                        while (r.Read())
+                            rows.Add(new DueChallanOption
+                            {
+                                Id = Convert.ToInt32(r["Id"]),
+                                ChallanNo = (r["ChallanNumber"] as string) ?? string.Empty,
+                                Broker = (r["BrokerName"] as string) ?? string.Empty,
+                                LorryHire = Convert.ToDecimal(r["LorryHireAmt"]),
+                                Advance = Convert.ToDecimal(r["AdvanceAmt"]),
+                                BalancePaid = Convert.ToDecimal(r["PaidAmt"]),
+                                Due = Convert.ToDecimal(r["DueAmt"])
+                            });
+                }
+            }
+            return rows;
+        }
+
+        private void OpenChallanPay_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var brokers = LoadDueBrokers();
+                if (brokers.Count == 0)
+                {
+                    MessageBox.Show("No due challans available for payment.", "Pay Challan", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var dialog = new Window
+                {
+                    Title = "Pay Challan (Broker-wise)",
+                    Width = 560,
+                    Height = 560,
+                    Owner = this,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    ResizeMode = ResizeMode.NoResize,
+                    Background = System.Windows.Media.Brushes.White
+                };
+
+                var root = new Grid { Margin = new Thickness(14) };
+                for (int i = 0; i < 9; i++) root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
+                root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                var brokerLabel = new TextBlock { Text = "Agent / Broker", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
+                var brokerBox = new ComboBox { IsEditable = true, IsTextSearchEnabled = true, Height = 28, Margin = new Thickness(0, 0, 0, 8), ItemsSource = brokers };
+                Grid.SetRow(brokerLabel, 0); Grid.SetColumn(brokerLabel, 0); root.Children.Add(brokerLabel);
+                Grid.SetRow(brokerBox, 0); Grid.SetColumn(brokerBox, 1); root.Children.Add(brokerBox);
+
+                var challanLabel = new TextBlock { Text = "Due Challan", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
+                var challanBox = new ComboBox { IsEditable = false, Height = 28, Margin = new Thickness(0, 0, 0, 8), DisplayMemberPath = "Display" };
+                Grid.SetRow(challanLabel, 1); Grid.SetColumn(challanLabel, 0); root.Children.Add(challanLabel);
+                Grid.SetRow(challanBox, 1); Grid.SetColumn(challanBox, 1); root.Children.Add(challanBox);
+
+                var modeLabel = new TextBlock { Text = "Payment Type", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
+                var modeBox = new ComboBox { Height = 28, Margin = new Thickness(0, 0, 0, 8) };
+                modeBox.Items.Add("Pay Advance");
+                modeBox.Items.Add("Pay Due");
+                modeBox.SelectedIndex = 0;
+                Grid.SetRow(modeLabel, 2); Grid.SetColumn(modeLabel, 0); root.Children.Add(modeLabel);
+                Grid.SetRow(modeBox, 2); Grid.SetColumn(modeBox, 1); root.Children.Add(modeBox);
+
+                var dueLabel = new TextBlock { Text = "Current Due", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
+                var dueText = new TextBlock { Text = "₹ 0.00", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 8) };
+                Grid.SetRow(dueLabel, 3); Grid.SetColumn(dueLabel, 0); root.Children.Add(dueLabel);
+                Grid.SetRow(dueText, 3); Grid.SetColumn(dueText, 1); root.Children.Add(dueText);
+
+                var advNeftLabel = new TextBlock { Text = "Advance (NEFT)", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
+                var advNeftBox = new TextBox { Height = 28, Text = "0", Margin = new Thickness(0, 0, 0, 8) };
+                Grid.SetRow(advNeftLabel, 4); Grid.SetColumn(advNeftLabel, 0); root.Children.Add(advNeftLabel);
+                Grid.SetRow(advNeftBox, 4); Grid.SetColumn(advNeftBox, 1); root.Children.Add(advNeftBox);
+
+                var advCashLabel = new TextBlock { Text = "Advance (Cash)", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
+                var advCashBox = new TextBox { Height = 28, Text = "0", Margin = new Thickness(0, 0, 0, 8) };
+                Grid.SetRow(advCashLabel, 5); Grid.SetColumn(advCashLabel, 0); root.Children.Add(advCashLabel);
+                Grid.SetRow(advCashBox, 5); Grid.SetColumn(advCashBox, 1); root.Children.Add(advCashBox);
+
+                var advTotalLabel = new TextBlock { Text = "Advance Total", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
+                var advTotalText = new TextBlock { Text = "₹ 0.00", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 8) };
+                Grid.SetRow(advTotalLabel, 6); Grid.SetColumn(advTotalLabel, 0); root.Children.Add(advTotalLabel);
+                Grid.SetRow(advTotalText, 6); Grid.SetColumn(advTotalText, 1); root.Children.Add(advTotalText);
+
+                var neftLabel = new TextBlock { Text = "Due Pay (NEFT)", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
+                var neftBox = new TextBox { Height = 28, Text = "0", Margin = new Thickness(0, 0, 0, 8) };
+                Grid.SetRow(neftLabel, 7); Grid.SetColumn(neftLabel, 0); root.Children.Add(neftLabel);
+                Grid.SetRow(neftBox, 7); Grid.SetColumn(neftBox, 1); root.Children.Add(neftBox);
+
+                var cashLabel = new TextBlock { Text = "Due Pay (Cash)", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
+                var cashBox = new TextBox { Height = 28, Text = "0", Margin = new Thickness(0, 0, 0, 8) };
+                Grid.SetRow(cashLabel, 8); Grid.SetColumn(cashLabel, 0); root.Children.Add(cashLabel);
+                Grid.SetRow(cashBox, 8); Grid.SetColumn(cashBox, 1); root.Children.Add(cashBox);
+
+                var paidToLabel = new TextBlock { Text = "Paid To", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
+                var paidToBox = new TextBox { Height = 28, Margin = new Thickness(0, 0, 0, 8) };
+                Grid.SetRow(paidToLabel, 9); Grid.SetColumn(paidToLabel, 0); root.Children.Add(paidToLabel);
+                Grid.SetRow(paidToBox, 9); Grid.SetColumn(paidToBox, 1); root.Children.Add(paidToBox);
+
+                var remarksLabel = new TextBlock { Text = "Remarks", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Top };
+                var remarksBox = new TextBox { Height = 56, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
+                Grid.SetRow(remarksLabel, 10); Grid.SetColumn(remarksLabel, 0); root.Children.Add(remarksLabel);
+                Grid.SetRow(remarksBox, 10); Grid.SetColumn(remarksBox, 1); root.Children.Add(remarksBox);
+
+                var detailsText = new TextBlock
+                {
+                    Text = "Detention: ₹ 0.00    Hamali: ₹ 0.00    Deduction: ₹ 0.00    Less TDS: ₹ 0.00",
+                    Foreground = System.Windows.Media.Brushes.Gray,
+                    Margin = new Thickness(0, 2, 0, 8)
+                };
+                var detailsExpander = new Expander
+                {
+                    Header = "+ Show Challan Details",
+                    IsExpanded = false,
+                    Content = detailsText
+                };
+                Grid.SetRow(detailsExpander, 11); Grid.SetColumnSpan(detailsExpander, 2); root.Children.Add(detailsExpander);
+
+                var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+                var saveBtn = new Button { Content = "Save", Width = 90, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
+                var cancelBtn = new Button { Content = "Cancel", Width = 90, Height = 30 };
+                footer.Children.Add(saveBtn); footer.Children.Add(cancelBtn);
+                Grid.SetRow(footer, 12); Grid.SetColumnSpan(footer, 2); root.Children.Add(footer);
+                dialog.Content = root;
+
+                MouseButtonEventHandler zeroOverwriteClick = (s, e2) =>
+                {
+                    if (!(s is TextBox tb)) return;
+                    if (!tb.IsKeyboardFocusWithin)
+                    {
+                        e2.Handled = true;
+                        tb.Focus();
+                    }
+                };
+                KeyboardFocusChangedEventHandler zeroOverwriteFocus = (s, e2) =>
+                {
+                    if (s is TextBox tb) tb.SelectAll();
+                };
+                foreach (var tb in new[] { advNeftBox, advCashBox, neftBox, cashBox })
+                {
+                    tb.PreviewMouseLeftButtonDown += zeroOverwriteClick;
+                    tb.GotKeyboardFocus += zeroOverwriteFocus;
+                }
+
+                Action refreshForBroker = () =>
+                {
+                    var broker = (brokerBox.Text ?? string.Empty).Trim();
+                    var rows = LoadDueChallansByBroker(broker);
+                    challanBox.ItemsSource = rows;
+                    challanBox.SelectedIndex = rows.Count > 0 ? 0 : -1;
+                    paidToBox.Text = broker;
+                    dueText.Text = rows.Count > 0 ? $"₹ {rows[0].Due:N2}" : "₹ 0.00";
+                };
+
+                Action refreshAdvanceTotal = () =>
+                {
+                    var advNeft = ParseDecimal(advNeftBox.Text);
+                    var advCash = ParseDecimal(advCashBox.Text);
+                    advTotalText.Text = $"₹ {(advNeft + advCash):N2}";
+                };
+                Action refreshModeVisibility = () =>
+                {
+                    var isAdvance = string.Equals(modeBox.SelectedItem as string, "Pay Advance", StringComparison.OrdinalIgnoreCase);
+                    var advanceVis = isAdvance ? Visibility.Visible : Visibility.Collapsed;
+                    var dueVis = isAdvance ? Visibility.Collapsed : Visibility.Visible;
+                    advNeftLabel.Visibility = advanceVis; advNeftBox.Visibility = advanceVis;
+                    advCashLabel.Visibility = advanceVis; advCashBox.Visibility = advanceVis;
+                    advTotalLabel.Visibility = advanceVis; advTotalText.Visibility = advanceVis;
+                    neftLabel.Visibility = dueVis; neftBox.Visibility = dueVis;
+                    cashLabel.Visibility = dueVis; cashBox.Visibility = dueVis;
+                };
+
+                brokerBox.SelectionChanged += (_, __) => refreshForBroker();
+                brokerBox.LostFocus += (_, __) => refreshForBroker();
+                challanBox.SelectionChanged += (_, __) =>
+                {
+                    var row = challanBox.SelectedItem as DueChallanOption;
+                    dueText.Text = row != null ? $"₹ {row.Due:N2}" : "₹ 0.00";
+                    if (row != null)
+                    {
+                        using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                        {
+                            conn.Open();
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.CommandText = @"SELECT COALESCE(Detention,0), COALESCE(Hamali,0), COALESCE(Deduction,0), COALESCE(LessTDS,0)
+                                                    FROM Challans WHERE Id = @id;";
+                                cmd.Parameters.AddWithValue("@id", row.Id);
+                                using (var r = cmd.ExecuteReader())
+                                {
+                                    if (r.Read())
+                                    {
+                                        var detention = Convert.ToDecimal(r[0]);
+                                        var hamali = Convert.ToDecimal(r[1]);
+                                        var deduction = Convert.ToDecimal(r[2]);
+                                        var lessTds = Convert.ToDecimal(r[3]);
+                                        detailsText.Text = $"Detention: ₹ {detention:N2}    Hamali: ₹ {hamali:N2}    Deduction: ₹ {deduction:N2}    Less TDS: ₹ {lessTds:N2}";
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        detailsText.Text = "Detention: ₹ 0.00    Hamali: ₹ 0.00    Deduction: ₹ 0.00    Less TDS: ₹ 0.00";
+                    }
+                };
+                advNeftBox.TextChanged += (_, __) => refreshAdvanceTotal();
+                advCashBox.TextChanged += (_, __) => refreshAdvanceTotal();
+                modeBox.SelectionChanged += (_, __) => refreshModeVisibility();
+                cancelBtn.Click += (_, __) => { dialog.DialogResult = false; dialog.Close(); };
+                saveBtn.Click += (_, __) =>
+                {
+                    var selected = challanBox.SelectedItem as DueChallanOption;
+                    if (selected == null)
+                    {
+                        MessageBox.Show("Select a due challan.", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+
+                    decimal advanceNeft = ParseDecimal(advNeftBox.Text);
+                    decimal advanceCash = ParseDecimal(advCashBox.Text);
+                    decimal advance = advanceNeft + advanceCash;
+                    decimal neft = ParseDecimal(neftBox.Text);
+                    decimal cash = ParseDecimal(cashBox.Text);
+                    var isAdvanceMode = string.Equals(modeBox.SelectedItem as string, "Pay Advance", StringComparison.OrdinalIgnoreCase);
+                    if (isAdvanceMode)
+                    {
+                        neft = 0m;
+                        cash = 0m;
+                    }
+                    else
+                    {
+                        advanceNeft = 0m;
+                        advanceCash = 0m;
+                        advance = 0m;
+                    }
+                    if (advance <= 0m && neft <= 0m && cash <= 0m)
+                    {
+                        MessageBox.Show("Enter payment amount in at least one field.", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+
+                    using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                    {
+                        conn.Open();
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.CommandText = @"
+UPDATE Challans
+SET AdvanceAmount = COALESCE(AdvanceAmount,0) + @adv,
+    AdvanceNEFT = COALESCE(AdvanceNEFT,0) + @advNeft,
+    AdvanceCash = COALESCE(AdvanceCash,0) + @advCash,
+    BalancePaidNEFT = COALESCE(BalancePaidNEFT,0) + @neft,
+    BalancePaidCash = COALESCE(BalancePaidCash,0) + @cash,
+    BalancePaidDate = @paidDate,
+    PaidTo = CASE WHEN TRIM(COALESCE(@paidTo,'')) = '' THEN PaidTo ELSE @paidTo END,
+    Remarks = CASE
+                WHEN TRIM(COALESCE(@remarks,'')) = '' THEN Remarks
+                WHEN TRIM(COALESCE(Remarks,'')) = '' THEN @remarks
+                ELSE Remarks || ' | ' || @remarks
+              END
+WHERE Id = @id;";
+                            cmd.Parameters.AddWithValue("@adv", advance);
+                            cmd.Parameters.AddWithValue("@advNeft", advanceNeft);
+                            cmd.Parameters.AddWithValue("@advCash", advanceCash);
+                            cmd.Parameters.AddWithValue("@neft", neft);
+                            cmd.Parameters.AddWithValue("@cash", cash);
+                            cmd.Parameters.AddWithValue("@paidDate", DateTime.Today.ToString("yyyy-MM-dd"));
+                            cmd.Parameters.AddWithValue("@paidTo", (paidToBox.Text ?? string.Empty).Trim());
+                            cmd.Parameters.AddWithValue("@remarks", (remarksBox.Text ?? string.Empty).Trim());
+                            cmd.Parameters.AddWithValue("@id", selected.Id);
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+
+                    VM?.RefreshAfterDelete();
+                    SyncAllChallanBillingFromLR(true);
+                    UpdatePageUI();
+                    RefreshDashboard();
+                    dialog.DialogResult = true;
+                    dialog.Close();
+                };
+
+                brokerBox.SelectedIndex = 0;
+                refreshAdvanceTotal();
+                refreshModeVisibility();
+                refreshForBroker();
+                dialog.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to open challan pay dialog: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         // === Bill Ledger handlers ===
@@ -1173,6 +1787,20 @@ HAVING DueAmt > 0;";
         {
             try
             {
+                MouseButtonEventHandler overwriteZeroOnClick = (s, e2) =>
+                {
+                    if (!(s is TextBox tb)) return;
+                    if (!tb.IsKeyboardFocusWithin)
+                    {
+                        e2.Handled = true;
+                        tb.Focus();
+                    }
+                };
+                KeyboardFocusChangedEventHandler overwriteZeroOnFocus = (s, e2) =>
+                {
+                    if (s is TextBox tb) tb.SelectAll();
+                };
+
                 var dialog = new Window
                 {
                     Title = "Receive Bill Amount",
@@ -1211,18 +1839,24 @@ HAVING DueAmt > 0;";
 
                 var rcvdLabel = new TextBlock { Text = "Received", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
                 var rcvdBox = new TextBox { Height = 28, Text = "0", Margin = new Thickness(0, 0, 0, 8) };
+                rcvdBox.PreviewMouseLeftButtonDown += overwriteZeroOnClick;
+                rcvdBox.GotKeyboardFocus += overwriteZeroOnFocus;
                 Grid.SetRow(rcvdLabel, 3); Grid.SetColumn(rcvdLabel, 0);
                 Grid.SetRow(rcvdBox, 3); Grid.SetColumn(rcvdBox, 1);
                 root.Children.Add(rcvdLabel); root.Children.Add(rcvdBox);
 
                 var tdsLabel = new TextBlock { Text = "TDS", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
                 var tdsBox = new TextBox { Height = 28, Text = "0", Margin = new Thickness(0, 0, 0, 8) };
+                tdsBox.PreviewMouseLeftButtonDown += overwriteZeroOnClick;
+                tdsBox.GotKeyboardFocus += overwriteZeroOnFocus;
                 Grid.SetRow(tdsLabel, 4); Grid.SetColumn(tdsLabel, 0);
                 Grid.SetRow(tdsBox, 4); Grid.SetColumn(tdsBox, 1);
                 root.Children.Add(tdsLabel); root.Children.Add(tdsBox);
 
                 var dedLabel = new TextBlock { Text = "Deduction", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
                 var dedBox = new TextBox { Height = 28, Text = "0", Margin = new Thickness(0, 0, 0, 8) };
+                dedBox.PreviewMouseLeftButtonDown += overwriteZeroOnClick;
+                dedBox.GotKeyboardFocus += overwriteZeroOnFocus;
                 Grid.SetRow(dedLabel, 5); Grid.SetColumn(dedLabel, 0);
                 Grid.SetRow(dedBox, 5); Grid.SetColumn(dedBox, 1);
                 root.Children.Add(dedLabel); root.Children.Add(dedBox);
@@ -1256,7 +1890,7 @@ HAVING DueAmt > 0;";
                 root.Children.Add(recvDateLabel); root.Children.Add(recvDate);
 
                 var remarksLabel = new TextBlock { Text = "Remarks (Other)", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Top };
-                var remarksBox = new TextBox { Height = 56, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8), IsEnabled = false };
+                var remarksBox = new TextBox { Height = 56, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
                 Grid.SetRow(remarksLabel, 10); Grid.SetColumn(remarksLabel, 0);
                 Grid.SetRow(remarksBox, 10); Grid.SetColumn(remarksBox, 1);
                 root.Children.Add(remarksLabel); root.Children.Add(remarksBox);
@@ -1371,12 +2005,7 @@ HAVING DueAmt > 0;";
                 rcvdBox.TextChanged += (_, __) => recomputeDue();
                 tdsBox.TextChanged += (_, __) => recomputeDue();
                 dedBox.TextChanged += (_, __) => recomputeDue();
-                mopBox.SelectionChanged += (_, __) =>
-                {
-                    var mop = (mopBox.SelectedItem as string) ?? "NEFT";
-                    remarksBox.IsEnabled = string.Equals(mop, "OTHER", StringComparison.OrdinalIgnoreCase);
-                    if (!remarksBox.IsEnabled) remarksBox.Text = string.Empty;
-                };
+                mopBox.SelectionChanged += (_, __) => { };
 
                 saveBtn.Click += (_, __) =>
                 {
@@ -1402,12 +2031,6 @@ HAVING DueAmt > 0;";
                         MessageBox.Show("Amounts cannot be negative.", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
                         return;
                     }
-                    if (string.Equals(mop, "OTHER", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(remarksBox.Text))
-                    {
-                        MessageBox.Show("Enter remarks for 'OTHER' payment mode.", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        return;
-                    }
-
                     ApplyReceiveOnBill(selected.BillNo, rcvd, tds, ded, mop, mr, recvDt, remarksBox.Text ?? string.Empty);
                     BillVM?.RefreshAfterDelete();
                     BillUpdatePageUI();
@@ -1613,13 +2236,19 @@ HAVING DueAmt > 0;";
                                                     DED = COALESCE(DED, 0) + @ded,
                                                     MOP = @mop,
                                                     MR = @mr,
+                                                    Remarks = CASE
+                                                                WHEN TRIM(COALESCE(@remarks,'')) = '' THEN Remarks
+                                                                WHEN TRIM(COALESCE(Remarks,'')) = '' THEN @remarks
+                                                                ELSE Remarks || ' | ' || @remarks
+                                                              END,
                                                     Date = @dt
                                                 WHERE Id = @id;";
                             upd.Parameters.AddWithValue("@rcvd", partR);
                             upd.Parameters.AddWithValue("@tds", partT);
                             upd.Parameters.AddWithValue("@ded", partD);
-                            upd.Parameters.AddWithValue("@mop", string.Equals(mop, "OTHER", StringComparison.OrdinalIgnoreCase) ? ("OTHER: " + otherRemarks.Trim()) : mop);
+                            upd.Parameters.AddWithValue("@mop", (object)mop ?? DBNull.Value);
                             upd.Parameters.AddWithValue("@mr", (object)mr ?? DBNull.Value);
+                            upd.Parameters.AddWithValue("@remarks", (otherRemarks ?? string.Empty).Trim());
                             upd.Parameters.AddWithValue("@dt", receivedDate.ToString("o"));
                             upd.Parameters.AddWithValue("@id", row.Id);
                             upd.ExecuteNonQuery();
@@ -1656,7 +2285,7 @@ HAVING DueAmt > 0;";
         private static readonly HashSet<string> BillFilterableHeaders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "BILL NO.", "BILL DATE", "PARTY", "LR NO.", "LR DATE", "FROM", "TO", "Vehicle Type",
-            "FREIGHT", "DETENTION", "HML", "OTHR", "TOTAL", "RCVD", "TDS", "DED", "DUE", "MOP", "MR", "RECEIVED DATE"
+            "FREIGHT", "DETENTION", "HML", "OTHR", "TOTAL", "RCVD", "TDS", "DED", "DUE", "MOP", "MR", "RECEIVED DATE", "REMARKS"
         };
 
         private IEnumerable<string> GetBillHeaderFilterValues(string headerName)
@@ -1693,6 +2322,7 @@ HAVING DueAmt > 0;";
                 case "MOP": return (entry.MOP ?? string.Empty).Trim();
                 case "MR": return (entry.MR ?? string.Empty).Trim();
                 case "RECEIVED DATE": return entry.Date.ToString("dd-MMM-yyyy");
+                case "REMARKS": return (entry.Remarks ?? string.Empty).Trim();
                 default: return string.Empty;
             }
         }
@@ -1788,6 +2418,7 @@ HAVING DueAmt > 0;";
 
         private void BillLedgerGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
+            if (IsInColumnHeaderResizeGripper(e.OriginalSource as DependencyObject)) return;
             var source = e.OriginalSource as DependencyObject;
             while (source != null && !(source is DataGridColumnHeader)) source = System.Windows.Media.VisualTreeHelper.GetParent(source);
             var header = source as DataGridColumnHeader;
@@ -1896,6 +2527,18 @@ HAVING DueAmt > 0;";
                 var copyCell = new MenuItem { Header = "Copy Cell" };
                 copyCell.Click += (_, __) => CopyCurrentCellFromGrid(BillLedgerGrid);
                 menu.Items.Add(copyCell);
+
+                var cellHeader = NormalizeHeaderForSort((cell.Column?.Header ?? string.Empty).ToString());
+                if (string.Equals(cellHeader, "BILL NO.", StringComparison.OrdinalIgnoreCase))
+                {
+                    var billEntry = cell.DataContext as BillEntry;
+                    if (billEntry != null)
+                    {
+                        var addComment = new MenuItem { Header = "View / Add Comment" };
+                        addComment.Click += (_, __) => OpenBillCommentPopup(billEntry);
+                        menu.Items.Add(addComment);
+                    }
+                }
                 menu.IsOpen = true;
                 return;
             }
@@ -2316,6 +2959,7 @@ WHERE Id = @id;";
                             DED = ParseDecimal(GetCol(parts, colMap, "DED", 0) ?? GetCol(parts, colMap, "DED")),
                             MOP = GetCol(parts, colMap, "MOP", 0) ?? GetCol(parts, colMap, "MOP"),
                             MR = GetCol(parts, colMap, "MR", 0) ?? GetCol(parts, colMap, "MR"),
+                            Remarks = GetCol(parts, colMap, "Remarks", 0) ?? GetCol(parts, colMap, "REMARKS"),
                             Date = ParseDate(GetCol(parts, colMap, "Date", 0) ?? GetCol(parts, colMap, "DATE")),
                         };
                         repo.Upsert(entry);
@@ -2501,6 +3145,7 @@ WHERE Id = @id;";
 
         private void LedgerGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
+            if (IsInColumnHeaderResizeGripper(e.OriginalSource as DependencyObject)) return;
             var source = e.OriginalSource as DependencyObject;
             while (source != null && !(source is DataGridColumnHeader)) source = System.Windows.Media.VisualTreeHelper.GetParent(source);
             var header = source as DataGridColumnHeader;
@@ -2614,6 +3259,18 @@ WHERE Id = @id;";
                 var copyCell = new MenuItem { Header = "Copy Cell" };
                 copyCell.Click += (_, __) => CopyCurrentCellFromGrid(LedgerGrid);
                 menu.Items.Add(copyCell);
+
+                var cellHeader = NormalizeChallanHeaderName((cell.Column?.Header ?? string.Empty).ToString());
+                if (string.Equals(cellHeader, "Challan No", StringComparison.OrdinalIgnoreCase))
+                {
+                    var challanEntry = cell.DataContext as ChallanEntry;
+                    if (challanEntry != null)
+                    {
+                        var addComment = new MenuItem { Header = "View / Add Comment" };
+                        addComment.Click += (_, __) => OpenChallanCommentPopup(challanEntry);
+                        menu.Items.Add(addComment);
+                    }
+                }
                 menu.IsOpen = true;
                 return;
             }
@@ -2902,11 +3559,130 @@ WHERE Id = @id;";
 
         private void LRUpdatePageUI() { if (LRVM == null) return; if (LRRecordCountText != null) LRRecordCountText.Text = $"Records: {LRVM.FilteredEntriesCount}"; LRRefreshFilteredSummary(); if (_lrHeaderFilters.Count > 0) ApplyLRHeaderFilter(); }
         private void LRRefreshFilteredSummary() { if (LRVM == null) return; if (LRSearchedRecordsTextBlock != null) LRSearchedRecordsTextBlock.Text = $"Records: {LRVM.FilteredEntriesCount}"; if (LRSearchedTotalDueTextBlock != null) { LRSearchedTotalDueTextBlock.Text = $"Filtered Balance: ₹ {LRVM.FilteredTotalBalance:N2}"; LRSearchedTotalDueTextBlock.Visibility = Visibility.Visible; } }
-        private void LedgerGrid_SelectedCellsChanged(object sender, SelectedCellsChangedEventArgs e) { if (LedgerGrid.SelectedCells.Count < 2) { SelectedSumTextBlock.Visibility = Visibility.Collapsed; return; } var distinctRows = LedgerGrid.SelectedCells.Select(c => c.Item).Distinct().Count(); if (distinctRows < 2) { SelectedSumTextBlock.Visibility = Visibility.Collapsed; return; } decimal totalSum = 0; bool hasNumbers = false; var cache = new Dictionary<string, System.Reflection.PropertyInfo>(); foreach (var cellInfo in LedgerGrid.SelectedCells) { var item = cellInfo.Item; var column = cellInfo.Column as DataGridBoundColumn; if (column?.Binding is System.Windows.Data.Binding binding) { var path = binding.Path.Path; if (!cache.TryGetValue(path, out var prop)) { prop = item.GetType().GetProperty(path); cache[path] = prop; } if (prop != null) { var val = prop.GetValue(item); if (val is decimal || val is int || val is long || val is double) { totalSum += Convert.ToDecimal(val); hasNumbers = true; } } } } if (hasNumbers) { SelectedSumTextBlock.Text = $"Selected Sum: ₹ {totalSum:N2}"; SelectedSumTextBlock.Visibility = Visibility.Visible; } else SelectedSumTextBlock.Visibility = Visibility.Collapsed; }
+        private void LedgerGrid_SelectedCellsChanged(object sender, SelectedCellsChangedEventArgs e) { if (LedgerGrid.SelectedCells.Count < 2) { SelectedSumTextBlock.Visibility = Visibility.Collapsed; return; } decimal totalSum = 0; bool hasNumbers = false; var cache = new Dictionary<string, System.Reflection.PropertyInfo>(); foreach (var cellInfo in LedgerGrid.SelectedCells) { var item = cellInfo.Item; var column = cellInfo.Column as DataGridBoundColumn; if (column?.Binding is System.Windows.Data.Binding binding) { var path = binding.Path.Path; if (!cache.TryGetValue(path, out var prop)) { prop = item.GetType().GetProperty(path); cache[path] = prop; } if (prop != null) { var val = prop.GetValue(item); if (val is decimal || val is int || val is long || val is double) { totalSum += Convert.ToDecimal(val); hasNumbers = true; } } } } if (hasNumbers) { SelectedSumTextBlock.Text = $"Selected Sum: ₹ {totalSum:N2}"; SelectedSumTextBlock.Visibility = Visibility.Visible; } else SelectedSumTextBlock.Visibility = Visibility.Collapsed; }
         private void LedgerGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e) { if (e.EditAction != DataGridEditAction.Commit) return; var entry = e.Row.Item as ChallanEntry; if (entry == null || entry.Id <= 0) return; try { if (e.EditingElement is TextBox textBox) { var binding = textBox.GetBindingExpression(TextBox.TextProperty); binding?.UpdateSource(); } VM?.GetRepository().Upsert(entry); SyncAllChallanBillingFromLR(); } catch { } }
         private void LedgerGrid_Sorting(object sender, DataGridSortingEventArgs e) { e.Handled = true; var col = e.Column; string propName = (col as DataGridTextColumn)?.Binding is System.Windows.Data.Binding b ? b.Path?.Path : (col as DataGridTemplateColumn)?.SortMemberPath; if (string.IsNullOrEmpty(propName) || col.CanUserSort == false) return; bool sameColumn = VM?.GetSortColumn() == propName; bool ascending = !sameColumn || !(VM?.IsCurrentSortAscending ?? true); foreach (var c in LedgerGrid.Columns) { string h = (c.Header?.ToString() ?? "").Replace(" ▲", "").Replace(" ▼", ""); c.Header = h; c.SortDirection = null; } col.SortDirection = ascending ? System.ComponentModel.ListSortDirection.Ascending : System.ComponentModel.ListSortDirection.Descending; col.Header = col.Header?.ToString() + (ascending ? " ▲" : " ▼"); VM?.SetSort(propName, ascending); }
-        private void LRLedgerGrid_SelectedCellsChanged(object sender, SelectedCellsChangedEventArgs e) { if (LRLedgerGrid.SelectedCells.Count < 2) { LRSelectedSumTextBlock.Visibility = Visibility.Collapsed; return; } var distinctRows = LRLedgerGrid.SelectedCells.Select(c => c.Item).Distinct().Count(); if (distinctRows < 2) { LRSelectedSumTextBlock.Visibility = Visibility.Collapsed; return; } decimal totalSum = 0; bool hasNumbers = false; var cache = new Dictionary<string, System.Reflection.PropertyInfo>(); foreach (var cellInfo in LRLedgerGrid.SelectedCells) { var item = cellInfo.Item; var column = cellInfo.Column as DataGridBoundColumn; if (column?.Binding is System.Windows.Data.Binding binding) { var path = binding.Path.Path; if (!cache.TryGetValue(path, out var prop)) { prop = item.GetType().GetProperty(path); cache[path] = prop; } if (prop != null) { var val = prop.GetValue(item); if (val is decimal || val is int || val is long || val is double) { totalSum += Convert.ToDecimal(val); hasNumbers = true; } } } } if (hasNumbers) { LRSelectedSumTextBlock.Text = $"Selected: ₹ {totalSum:N2}"; LRSelectedSumTextBlock.Visibility = Visibility.Visible; } else LRSelectedSumTextBlock.Visibility = Visibility.Collapsed; }
-        private void LRLedgerGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e) { if (e.EditAction != DataGridEditAction.Commit) return; var entry = e.Row.Item as LREntry; if (entry == null || entry.Id <= 0) return; try { if (e.EditingElement is TextBox textBox) { var binding = textBox.GetBindingExpression(TextBox.TextProperty); binding?.UpdateSource(); } if (LRVM != null) { new LRRepository().Upsert(entry); SyncLinkedBillsFromLREntry(entry); SyncAllChallanBillingFromLR(); } } catch { } }
+        private void LRLedgerGrid_SelectedCellsChanged(object sender, SelectedCellsChangedEventArgs e) { if (LRLedgerGrid.SelectedCells.Count < 2) { LRSelectedSumTextBlock.Visibility = Visibility.Collapsed; return; } decimal totalSum = 0; bool hasNumbers = false; var cache = new Dictionary<string, System.Reflection.PropertyInfo>(); foreach (var cellInfo in LRLedgerGrid.SelectedCells) { var item = cellInfo.Item; var column = cellInfo.Column as DataGridBoundColumn; if (column?.Binding is System.Windows.Data.Binding binding) { var path = binding.Path.Path; if (!cache.TryGetValue(path, out var prop)) { prop = item.GetType().GetProperty(path); cache[path] = prop; } if (prop != null) { var val = prop.GetValue(item); if (val is decimal || val is int || val is long || val is double) { totalSum += Convert.ToDecimal(val); hasNumbers = true; } } } } if (hasNumbers) { LRSelectedSumTextBlock.Text = $"Selected: ₹ {totalSum:N2}"; LRSelectedSumTextBlock.Visibility = Visibility.Visible; } else LRSelectedSumTextBlock.Visibility = Visibility.Collapsed; }
+        private void LRLedgerGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
+        {
+            if (e.EditAction != DataGridEditAction.Commit) return;
+            var entry = e.Row.Item as LREntry;
+            if (entry == null || entry.Id <= 0) return;
+
+            try
+            {
+                if (e.EditingElement is TextBox textBox)
+                {
+                    var binding = textBox.GetBindingExpression(TextBox.TextProperty);
+                    binding?.UpdateSource();
+                }
+
+                // Keep GST values normalized in uppercase.
+                entry.ConsignorGST = (entry.ConsignorGST ?? string.Empty).Trim().ToUpperInvariant();
+                entry.ConsigneeGST = (entry.ConsigneeGST ?? string.Empty).Trim().ToUpperInvariant();
+
+                if (LRVM != null)
+                {
+                    new LRRepository().Upsert(entry);
+                    SyncLinkedBillsFromLREntry(entry);
+                    SyncAllChallanBillingFromLR();
+                }
+            }
+            catch { }
+        }
+
+        private void LRLedgerGrid_PreparingCellForEdit(object sender, DataGridPreparingCellForEditEventArgs e)
+        {
+            if (!(e.EditingElement is TextBox textBox) || e.Column == null) return;
+            var bindingPath = GetColumnBindingPath(e.Column) ?? string.Empty;
+
+            // Overwrite mode for numeric LR fields so typing replaces default 0.
+            if (string.Equals(bindingPath, "Weight", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(bindingPath, "PKG", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(bindingPath, "TotalFreight", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(bindingPath, "Hamali", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(bindingPath, "Detention", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(bindingPath, "Others", StringComparison.OrdinalIgnoreCase))
+            {
+                textBox.Dispatcher.BeginInvoke(new Action(() => textBox.SelectAll()), System.Windows.Threading.DispatcherPriority.Input);
+            }
+        }
+
+        private void LRNumericTextBox_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        {
+            if (sender is TextBox tb)
+            {
+                tb.SelectAll();
+            }
+        }
+
+        private void LRNumericTextBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (!(sender is TextBox tb)) return;
+            if (!tb.IsKeyboardFocusWithin)
+            {
+                e.Handled = true;
+                tb.Focus();
+            }
+        }
+        private void LRLedgerGrid_BeginningEdit(object sender, DataGridBeginningEditEventArgs e)
+        {
+            if (e?.Column == null) return;
+
+            var bindingPath = GetColumnBindingPath(e.Column) ?? string.Empty;
+            var headerName = NormalizeHeaderForSort((e.Column.Header ?? string.Empty).ToString());
+
+            bool locked =
+                string.Equals(bindingPath, "From", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(bindingPath, "To", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(bindingPath, "VehicleNo", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(bindingPath, "VehicleType", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(bindingPath, "CHNo", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(headerName, "From", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(headerName, "To", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(headerName, "Vehicle No.", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(headerName, "Type", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(headerName, "CH No.", StringComparison.OrdinalIgnoreCase);
+
+            if (!locked) return;
+
+            e.Cancel = true;
+            MessageBox.Show(
+                "This field can only be changed from Challan Ledger.\nPlease edit the related challan to update it.",
+                "Locked Field",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        private void LRLedgerGrid_PreviewMouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            var source = e.OriginalSource as DependencyObject;
+            while (source != null && !(source is DataGridCell)) source = System.Windows.Media.VisualTreeHelper.GetParent(source);
+            var cell = source as DataGridCell;
+            if (cell?.Column == null) return;
+
+            var bindingPath = GetColumnBindingPath(cell.Column) ?? string.Empty;
+            var headerName = NormalizeHeaderForSort((cell.Column.Header ?? string.Empty).ToString());
+
+            bool locked =
+                string.Equals(bindingPath, "From", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(bindingPath, "To", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(bindingPath, "VehicleNo", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(bindingPath, "VehicleType", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(bindingPath, "CHNo", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(headerName, "From", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(headerName, "To", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(headerName, "Vehicle No.", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(headerName, "Type", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(headerName, "CH No.", StringComparison.OrdinalIgnoreCase);
+
+            if (!locked) return;
+            e.Handled = true;
+            MessageBox.Show(
+                "This field can only be changed from Challan Ledger.\nPlease edit the related challan to update it.",
+                "Locked Field",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
         private void SyncLinkedBillsFromLREntry(LREntry entry)
         {
             if (entry == null || string.IsNullOrWhiteSpace(entry.LRNo)) return;
@@ -3089,7 +3865,9 @@ WHERE LRNo IN ({string.Join(",", pNames)});";
                             {
                                 if (lrByNo.TryGetValue(lrNo, out var total)) billAmount += total;
                             }
-                            var margin = billAmount - ch.LorryHire + ch.Detention + ch.Hamali;
+                            var margin = billAmount != 0m
+                                ? (billAmount - ch.LorryHire + ch.Detention + ch.Hamali)
+                                : 0m;
 
                             using (var upd = conn.CreateCommand())
                             {
@@ -3134,6 +3912,7 @@ WHERE LRNo IN ({string.Join(",", pNames)});";
         private void LRLedgerGrid_Sorting(object sender, DataGridSortingEventArgs e) { e.Handled = true; var col = e.Column; string propName = (col as DataGridTextColumn)?.Binding is System.Windows.Data.Binding b ? b.Path?.Path : (col as DataGridTemplateColumn)?.SortMemberPath; if (string.IsNullOrEmpty(propName) || col.CanUserSort == false) return; bool sameColumn = LRVM?.GetSortColumn() == propName; bool ascending = !sameColumn || !(LRVM?.IsCurrentSortAscending ?? true); foreach (var c in LRLedgerGrid.Columns) { string h = (c.Header?.ToString() ?? "").Replace(" ▲", "").Replace(" ▼", ""); c.Header = h; c.SortDirection = null; } col.SortDirection = ascending ? System.ComponentModel.ListSortDirection.Ascending : System.ComponentModel.ListSortDirection.Descending; col.Header = col.Header?.ToString() + (ascending ? " ▲" : " ▼"); LRVM?.SetSort(propName, ascending); }
         private void LRLedgerGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
+            if (IsInColumnHeaderResizeGripper(e.OriginalSource as DependencyObject)) return;
             var source = e.OriginalSource as DependencyObject;
             while (source != null && !(source is DataGridColumnHeader)) source = System.Windows.Media.VisualTreeHelper.GetParent(source);
             var header = source as DataGridColumnHeader;
@@ -3166,6 +3945,20 @@ WHERE LRNo IN ({string.Join(",", pNames)});";
             _lrHeaderDragSelecting = false;
             _lrDragStartDisplayIndex = -1;
             _lrDragAppendMode = false;
+        }
+
+        private static bool IsInColumnHeaderResizeGripper(DependencyObject source)
+        {
+            var walker = source;
+            while (walker != null)
+            {
+                if (walker is Thumb) return true;
+                var fe = walker as FrameworkElement;
+                var name = fe?.Name ?? string.Empty;
+                if (name.IndexOf("Gripper", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                walker = System.Windows.Media.VisualTreeHelper.GetParent(walker);
+            }
+            return false;
         }
 
         private void SelectLRColumnsByDisplayRange(int startDisplayIndex, int endDisplayIndex, bool appendMode)
@@ -3242,6 +4035,18 @@ WHERE LRNo IN ({string.Join(",", pNames)});";
                 var copyCell = new MenuItem { Header = "Copy Cell" };
                 copyCell.Click += (_, __) => CopyCurrentCellFromGrid(LRLedgerGrid);
                 menu.Items.Add(copyCell);
+
+                var cellHeader = NormalizeChallanHeaderName((cell.Column?.Header ?? string.Empty).ToString());
+                if (string.Equals(cellHeader, "LR No.", StringComparison.OrdinalIgnoreCase))
+                {
+                    var lrEntry = cell.DataContext as LREntry;
+                    if (lrEntry != null)
+                    {
+                        var addComment = new MenuItem { Header = "View / Add Comment" };
+                        addComment.Click += (_, __) => OpenLRCommentPopup(lrEntry);
+                        menu.Items.Add(addComment);
+                    }
+                }
                 menu.IsOpen = true;
                 return;
             }
@@ -3698,8 +4503,25 @@ DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','
 
             ApplyLRSortClean("LRNo", false);
             EnsureLRColumnVisible("Total Freight", 90);
+            EnforceLRLockedColumnsReadOnly();
             LRUpdatePageUI();
             ApplyLRHeaderFilter();
+        }
+        private void EnforceLRLockedColumnsReadOnly()
+        {
+            if (LRLedgerGrid == null) return;
+            foreach (var col in LRLedgerGrid.Columns)
+            {
+                var h = NormalizeHeaderForSort((col.Header ?? string.Empty).ToString());
+                if (string.Equals(h, "From", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(h, "To", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(h, "Vehicle No.", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(h, "Type", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(h, "CH No.", StringComparison.OrdinalIgnoreCase))
+                {
+                    col.IsReadOnly = true;
+                }
+            }
         }
         private void EnsureLRColumnVisible(string headerName, double minWidth)
         {
@@ -3768,8 +4590,36 @@ DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','
         }
         private void DeleteSelected_Click(object sender, RoutedEventArgs e) { if (LedgerGrid == null) return; var selected = LedgerGrid.SelectedItems.Cast<ChallanEntry>().ToList(); if (selected.Count == 0) { MessageBox.Show("Select Challan entries to delete.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information); return; } if (MessageBox.Show($"Delete {selected.Count} challan entr{(selected.Count == 1 ? "y" : "ies")}?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return; foreach (var entry in selected) { try { using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString)) { conn.Open(); using (var cmd = conn.CreateCommand()) { cmd.CommandText = "DELETE FROM Challans WHERE Id = @id"; cmd.Parameters.AddWithValue("@id", entry.Id); cmd.ExecuteNonQuery(); } } } catch { } } VM.RefreshAfterDelete(); RefreshFilteredSummary(); RefreshDashboard(); }
         private void LedgerPreviewKeyDown(object sender, KeyEventArgs e) { DataGrid_PreviewKeyDown(sender, e); }
-        private void AddChallanComment_Click(object sender, RoutedEventArgs e) { var entry = (sender as System.Windows.Controls.MenuItem)?.Tag as ChallanEntry; if (entry == null || entry.Id <= 0) return; var popup = new CommentPopupWindow(entry.Id, entry.ChallanNumber); popup.Owner = this; popup.ShowDialog(); VM?.RefreshAfterDelete(); }
-        private void AddLRComment_Click(object sender, RoutedEventArgs e) { var entry = (sender as System.Windows.Controls.MenuItem)?.Tag as LREntry; if (entry == null || entry.Id <= 0) return; var popup = new LRCommentPopupWindow(entry.Id, entry.LRNo); popup.Owner = this; popup.ShowDialog(); LRVM?.RefreshAfterDelete(); }
+        private void OpenChallanCommentPopup(ChallanEntry entry)
+        {
+            if (entry == null || entry.Id <= 0) return;
+            var popup = new CommentPopupWindow(entry.Id, entry.ChallanNumber);
+            popup.Owner = this;
+            popup.ShowDialog();
+            VM?.RefreshAfterDelete();
+        }
+
+        private void OpenLRCommentPopup(LREntry entry)
+        {
+            if (entry == null || entry.Id <= 0) return;
+            var popup = new LRCommentPopupWindow(entry.Id, entry.LRNo);
+            popup.Owner = this;
+            popup.ShowDialog();
+            LRVM?.RefreshAfterDelete();
+        }
+
+        private void OpenBillCommentPopup(BillEntry entry)
+        {
+            if (entry == null || entry.Id <= 0) return;
+            var title = string.IsNullOrWhiteSpace(entry.BillNo) ? $"Bill Id {entry.Id}" : $"Bill {entry.BillNo}";
+            var popup = new BillCommentPopupWindow(entry.Id, title);
+            popup.Owner = this;
+            popup.ShowDialog();
+            BillVM?.RefreshAfterDelete();
+        }
+
+        private void AddChallanComment_Click(object sender, RoutedEventArgs e) { var entry = (sender as System.Windows.Controls.MenuItem)?.Tag as ChallanEntry; OpenChallanCommentPopup(entry); }
+        private void AddLRComment_Click(object sender, RoutedEventArgs e) { var entry = (sender as System.Windows.Controls.MenuItem)?.Tag as LREntry; OpenLRCommentPopup(entry); }
         private void DashboardMakeLR_Click(object sender, RoutedEventArgs e)
         {
             var btn = sender as System.Windows.Controls.Button;

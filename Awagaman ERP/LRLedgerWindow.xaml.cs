@@ -21,6 +21,7 @@ namespace Awagaman_ERP
 
             Loaded += (s, e) =>
             {
+                EnforceLockedColumnsReadOnly();
                 RefreshFilteredSummary();
 
                 var view = CollectionViewSource.GetDefaultView(LedgerGrid.ItemsSource) as System.Collections.Specialized.INotifyCollectionChanged;
@@ -29,6 +30,22 @@ namespace Awagaman_ERP
                     view.CollectionChanged += (s2, e2) => RefreshFilteredSummary();
                 }
             };
+        }
+        private void EnforceLockedColumnsReadOnly()
+        {
+            if (LedgerGrid == null) return;
+            foreach (var col in LedgerGrid.Columns)
+            {
+                var h = ((col.Header ?? string.Empty).ToString() ?? string.Empty).Trim();
+                if (string.Equals(h, "From", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(h, "To", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(h, "Vehicle No.", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(h, "Type", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(h, "CH No.", StringComparison.OrdinalIgnoreCase))
+                {
+                    col.IsReadOnly = true;
+                }
+            }
         }
 
         private void OpenLRForm_Click(object sender, RoutedEventArgs e)
@@ -135,6 +152,35 @@ namespace Awagaman_ERP
             {
                 SearchedTotalDueTextBlock.Visibility = (VM.FilteredEntriesCount < VM.Entries.Count) ? Visibility.Visible : Visibility.Collapsed;
             }
+        }
+
+        private void LedgerGrid_BeginningEdit(object sender, DataGridBeginningEditEventArgs e)
+        {
+            if (e?.Column == null) return;
+            var col = e.Column as DataGridBoundColumn;
+            var path = (col?.Binding as Binding)?.Path?.Path ?? string.Empty;
+            var header = (e.Column.Header ?? string.Empty).ToString();
+
+            bool locked =
+                string.Equals(path, "From", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(path, "To", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(path, "VehicleNo", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(path, "VehicleType", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(path, "CHNo", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(header, "From", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(header, "To", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(header, "Vehicle No.", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(header, "Type", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(header, "CH No.", StringComparison.OrdinalIgnoreCase);
+
+            if (!locked) return;
+
+            e.Cancel = true;
+            MessageBox.Show(
+                "This field can only be changed from Challan Ledger.\nPlease edit the related challan to update it.",
+                "Locked Field",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
 
         private void LedgerGrid_SelectedCellsChanged(object sender, SelectedCellsChangedEventArgs e)

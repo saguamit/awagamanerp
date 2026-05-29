@@ -20,6 +20,10 @@
             <Setter Property="Padding" Value="4,2" />
             <Setter Property="BorderBrush" Value="#CCC" />
         </Style>
+        <Style x:Key="NumericInputTextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource InputTextBoxStyle}">
+            <EventSetter Event="PreviewMouseLeftButtonDown" Handler="NumericTextBox_PreviewMouseLeftButtonDown" />
+            <EventSetter Event="GotKeyboardFocus" Handler="NumericTextBox_GotKeyboardFocus" />
+        </Style>
         <Style x:Key="InputDatePickerStyle" TargetType="DatePicker">
             <Setter Property="Height" Value="28" />
             <Setter Property="FontSize" Value="13" />
@@ -58,7 +62,7 @@
                                 <Run Text="Bill No" />
                                 <Run Text=" *" Foreground="#D32F2F" />
                             </TextBlock>
-                            <TextBox Text="{Binding BillNo, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                            <TextBox Text="{Binding BillNo, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" LostFocus="BillNoBox_LostFocus" />
                         </StackPanel>
                         <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,12">
                             <TextBlock Text="Bill Date" Style="{StaticResource FieldLabelStyle}" />
@@ -71,7 +75,7 @@
                                 <Run Text=" *" Foreground="#D32F2F" />
                             </TextBlock>
                             <Grid>
-                                <TextBox x:Name="BillPartyBox" Text="{Binding Party, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" TextChanged="BillPartyBox_TextChanged" PreviewKeyDown="BillPartyBox_PreviewKeyDown" />
+                                <TextBox x:Name="BillPartyBox" Text="{Binding Party, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" IsReadOnly="True" ToolTip="Auto-filled from selected LR party" />
                                 <Popup x:Name="BillPartyPopup" PlacementTarget="{Binding ElementName=BillPartyBox}" Placement="Bottom" StaysOpen="False" Width="{Binding ActualWidth, ElementName=BillPartyBox}">
                                     <Border BorderBrush="#AAA" BorderThickness="1" Background="White" CornerRadius="4">
                                         <ListBox x:Name="BillPartySuggestionList" MaxHeight="200" FontSize="13" SelectionChanged="BillPartySuggestionList_SelectionChanged" />
@@ -133,33 +137,33 @@
 
                         <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,12">
                             <TextBlock Text="Freight" Style="{StaticResource FieldLabelStyle}" />
-                            <TextBox Text="{Binding Freight, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                            <TextBox Text="{Binding Freight, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource NumericInputTextBoxStyle}" />
                         </StackPanel>
                         <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,12">
                             <TextBlock Text="Detention" Style="{StaticResource FieldLabelStyle}" />
-                            <TextBox Text="{Binding Detention, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                            <TextBox Text="{Binding Detention, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource NumericInputTextBoxStyle}" />
                         </StackPanel>
                         <StackPanel Grid.Row="0" Grid.Column="4" Margin="0,0,0,12">
                             <TextBlock Text="HML" Style="{StaticResource FieldLabelStyle}" />
-                            <TextBox Text="{Binding HML, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                            <TextBox Text="{Binding HML, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource NumericInputTextBoxStyle}" />
                         </StackPanel>
 
                         <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,0,12">
                             <TextBlock Text="OTHR" Style="{StaticResource FieldLabelStyle}" />
-                            <TextBox Text="{Binding OTHR, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                            <TextBox Text="{Binding OTHR, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource NumericInputTextBoxStyle}" />
                         </StackPanel>
                         <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,0,0,12">
                             <TextBlock Text="RCVD" Style="{StaticResource FieldLabelStyle}" />
-                            <TextBox Text="{Binding RCVD, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                            <TextBox Text="{Binding RCVD, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource NumericInputTextBoxStyle}" />
                         </StackPanel>
                         <StackPanel Grid.Row="1" Grid.Column="4" Margin="0,0,0,12">
                             <TextBlock Text="TDS" Style="{StaticResource FieldLabelStyle}" />
-                            <TextBox Text="{Binding TDS, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                            <TextBox Text="{Binding TDS, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource NumericInputTextBoxStyle}" />
                         </StackPanel>
 
                         <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,0,12">
                             <TextBlock Text="DED" Style="{StaticResource FieldLabelStyle}" />
-                            <TextBox Text="{Binding DED, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                            <TextBox Text="{Binding DED, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource NumericInputTextBoxStyle}" />
                         </StackPanel>
                         <StackPanel Grid.Row="2" Grid.Column="2" Margin="0,0,0,12">
                             <TextBlock Text="MOP" Style="{StaticResource FieldLabelStyle}" />

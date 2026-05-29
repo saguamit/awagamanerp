@@ -279,9 +279,9 @@ namespace Awagaman_ERP.Models
 
         public void RecalculateBalance()
         {
-            var effectiveHire = LorryHire - LessTDS;
-            var adjustments = Detention + Hamali - Deduction;
-            Balance = effectiveHire + adjustments - AdvanceAmount;
+            // Balance formula per ledger rule:
+            // Balance = Lorry Hire - Less TDS - Advance
+            Balance = LorryHire - LessTDS - AdvanceAmount;
             OnPropertyChanged(nameof(Balance));
             RecalculateDue();
         }
@@ -306,7 +306,7 @@ namespace Awagaman_ERP.Models
 
         private void RecalculateDue()
         {
-            Due = Balance - BalancePaid;
+            Due = (Balance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash;
             OnPropertyChanged(nameof(Due));
         }
 
