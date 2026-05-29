@@ -110,8 +110,13 @@ CREATE TABLE IF NOT EXISTS LREntries (
     ToLocation TEXT,
     VehicleNo TEXT,
     VehicleType TEXT,
-    Weight REAL NOT NULL,
+    SizeL REAL NOT NULL DEFAULT 0,
+    SizeW REAL NOT NULL DEFAULT 0,
+    SizeH REAL NOT NULL DEFAULT 0,
+    ActualWeight REAL NOT NULL DEFAULT 0,
+    ChargedWeight REAL NOT NULL DEFAULT 0,
     PKG INTEGER NOT NULL,
+    PkgType TEXT,
     Description TEXT,
     Invoice TEXT,
     CHNo TEXT,
@@ -129,6 +134,7 @@ CREATE TABLE IF NOT EXISTS LREntries (
     BillParty TEXT,
     Broker TEXT,
     FrtType TEXT,
+    PayType TEXT,
     Comm REAL NOT NULL,
     Paid TEXT
 );");
@@ -156,6 +162,13 @@ CREATE TABLE IF NOT EXISTS TrackingEntries (
                     try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Others REAL NOT NULL DEFAULT 0;"); } catch { }
                     try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN TDS REAL NOT NULL DEFAULT 0;"); } catch { }
                     try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Ded REAL NOT NULL DEFAULT 0;"); } catch { }
+                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN SizeL REAL NOT NULL DEFAULT 0;"); } catch { }
+                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN SizeW REAL NOT NULL DEFAULT 0;"); } catch { }
+                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN SizeH REAL NOT NULL DEFAULT 0;"); } catch { }
+                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN ActualWeight REAL NOT NULL DEFAULT 0;"); } catch { }
+                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN ChargedWeight REAL NOT NULL DEFAULT 0;"); } catch { }
+                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN PkgType TEXT;"); } catch { }
+                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN PayType TEXT;"); } catch { }
 
                     ExecuteNonQuery(connection, @"
 CREATE TABLE IF NOT EXISTS ReportingTracks (

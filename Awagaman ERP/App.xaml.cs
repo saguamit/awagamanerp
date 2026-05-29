@@ -16,7 +16,7 @@ namespace Awagaman_ERP
         {
             base.OnStartup(e);
             TryRegisterSyncfusionLicense();
-            _ = CheckForUpdatesAsync();
+            _ = CheckForUpdatesAsync(showUpToDateMessage: false);
         }
 
         private static void TryRegisterSyncfusionLicense()
@@ -40,14 +40,33 @@ namespace Awagaman_ERP
             }
         }
 
-        private async Task CheckForUpdatesAsync()
+        internal static Task CheckForUpdatesOnDemandAsync()
+        {
+            return CheckForUpdatesAsync(showUpToDateMessage: true);
+        }
+
+        private static async Task CheckForUpdatesAsync(bool showUpToDateMessage)
         {
             try
             {
                 var current = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0, 0);
                 var latest = await GetLatestReleaseAsync();
-                if (latest == null || latest.Version == null || string.IsNullOrWhiteSpace(latest.DownloadUrl)) return;
-                if (latest.Version <= current) return;
+                if (latest == null || latest.Version == null || string.IsNullOrWhiteSpace(latest.DownloadUrl))
+                {
+                    if (showUpToDateMessage)
+                    {
+                        MessageBox.Show("Unable to check updates right now.", "Update Check", MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
+                    return;
+                }
+                if (latest.Version <= current)
+                {
+                    if (showUpToDateMessage)
+                    {
+                        MessageBox.Show($"You are on the latest version.\nCurrent: {current}", "No Update", MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
+                    return;
+                }
 
                 var result = MessageBox.Show(
                     $"A newer version is available.\n\nCurrent: {current}\nLatest: {latest.Version}\n\nDo you want to download and install the update now?",
@@ -65,7 +84,10 @@ namespace Awagaman_ERP
             }
             catch
             {
-                // Non-fatal by design.
+                if (showUpToDateMessage)
+                {
+                    MessageBox.Show("Unable to check updates right now.", "Update Check", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
             }
         }
 

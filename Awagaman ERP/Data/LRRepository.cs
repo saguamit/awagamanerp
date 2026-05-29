@@ -120,8 +120,13 @@ namespace Awagaman_ERP.Data
                 To = reader["ToLocation"] as string,
                 VehicleNo = reader["VehicleNo"] as string,
                 VehicleType = reader["VehicleType"] as string,
-                Weight = Convert.ToDecimal(reader["Weight"]),
+                SizeL = Convert.ToDecimal(reader["SizeL"]),
+                SizeW = Convert.ToDecimal(reader["SizeW"]),
+                SizeH = Convert.ToDecimal(reader["SizeH"]),
+                ActualWeight = Convert.ToDecimal(reader["ActualWeight"]),
+                ChargedWeight = Convert.ToDecimal(reader["ChargedWeight"]),
                 PKG = Convert.ToInt32(reader["PKG"]),
+                PkgType = reader["PkgType"] as string,
                 Description = reader["Description"] as string,
                 Invoice = reader["Invoice"] as string,
                 CHNo = reader["CHNo"] as string,
@@ -139,6 +144,7 @@ namespace Awagaman_ERP.Data
                 BillParty = reader["BillParty"] as string,
                 Broker = reader["Broker"] as string,
                 FrtType = reader["FrtType"] as string,
+                PayType = reader["PayType"] as string,
                 Comm = Convert.ToDecimal(reader["Comm"]),
                 Paid = reader["Paid"] as string
             };
@@ -162,13 +168,13 @@ namespace Awagaman_ERP.Data
 INSERT INTO LREntries (
     Sr, LRNo, Date, ConsignorName, ConsignorAddress, ConsignorGST,
     ConsigneeName, ConsigneeAddress, ConsigneeGST, FromLocation, ToLocation,
-    VehicleNo, VehicleType, Weight, PKG, Description, Invoice, CHNo,
-    TotalFreight, Hamali, Detention, Others, NEFT, CASH, TDS, Ded, BillNo, BillDate, BILL, BillParty, Broker, FrtType, Comm, Paid
+    VehicleNo, VehicleType, SizeL, SizeW, SizeH, ActualWeight, ChargedWeight, PKG, PkgType, Description, Invoice, CHNo,
+    TotalFreight, Hamali, Detention, Others, NEFT, CASH, TDS, Ded, BillNo, BillDate, BILL, BillParty, Broker, FrtType, PayType, Comm, Paid
 ) VALUES (
     @Sr, @LRNo, @Date, @ConsignorName, @ConsignorAddress, @ConsignorGST,
     @ConsigneeName, @ConsigneeAddress, @ConsigneeGST, @FromLocation, @ToLocation,
-    @VehicleNo, @VehicleType, @Weight, @PKG, @Description, @Invoice, @CHNo,
-    @TotalFreight, @Hamali, @Detention, @Others, @NEFT, @CASH, @TDS, @Ded, @BillNo, @BillDate, @BILL, @BillParty, @Broker, @FrtType, @Comm, @Paid
+    @VehicleNo, @VehicleType, @SizeL, @SizeW, @SizeH, @ActualWeight, @ChargedWeight, @PKG, @PkgType, @Description, @Invoice, @CHNo,
+    @TotalFreight, @Hamali, @Detention, @Others, @NEFT, @CASH, @TDS, @Ded, @BillNo, @BillDate, @BILL, @BillParty, @Broker, @FrtType, @PayType, @Comm, @Paid
 );
 SELECT last_insert_rowid();";
                     AddParameters(command, entry);
@@ -191,8 +197,13 @@ UPDATE LREntries SET
     ToLocation = @ToLocation,
     VehicleNo = @VehicleNo,
     VehicleType = @VehicleType,
-    Weight = @Weight,
+    SizeL = @SizeL,
+    SizeW = @SizeW,
+    SizeH = @SizeH,
+    ActualWeight = @ActualWeight,
+    ChargedWeight = @ChargedWeight,
     PKG = @PKG,
+    PkgType = @PkgType,
     Description = @Description,
     Invoice = @Invoice,
     CHNo = @CHNo,
@@ -210,6 +221,7 @@ UPDATE LREntries SET
     BillParty = @BillParty,
     Broker = @Broker,
     FrtType = @FrtType,
+    PayType = @PayType,
     Comm = @Comm,
     Paid = @Paid
 WHERE Id = @Id;";
@@ -261,8 +273,13 @@ WHERE Id = @Id;";
             command.Parameters.AddWithValue("@ToLocation", (object)entry.To ?? DBNull.Value);
             command.Parameters.AddWithValue("@VehicleNo", (object)entry.VehicleNo ?? DBNull.Value);
             command.Parameters.AddWithValue("@VehicleType", (object)entry.VehicleType ?? DBNull.Value);
-            command.Parameters.AddWithValue("@Weight", entry.Weight);
+            command.Parameters.AddWithValue("@SizeL", entry.SizeL);
+            command.Parameters.AddWithValue("@SizeW", entry.SizeW);
+            command.Parameters.AddWithValue("@SizeH", entry.SizeH);
+            command.Parameters.AddWithValue("@ActualWeight", entry.ActualWeight);
+            command.Parameters.AddWithValue("@ChargedWeight", entry.ChargedWeight);
             command.Parameters.AddWithValue("@PKG", entry.PKG);
+            command.Parameters.AddWithValue("@PkgType", (object)entry.PkgType ?? DBNull.Value);
             command.Parameters.AddWithValue("@Description", (object)entry.Description ?? DBNull.Value);
             command.Parameters.AddWithValue("@Invoice", (object)entry.Invoice ?? DBNull.Value);
             command.Parameters.AddWithValue("@CHNo", (object)entry.CHNo ?? DBNull.Value);
@@ -280,6 +297,7 @@ WHERE Id = @Id;";
             command.Parameters.AddWithValue("@BillParty", (object)entry.BillParty ?? DBNull.Value);
             command.Parameters.AddWithValue("@Broker", (object)entry.Broker ?? DBNull.Value);
             command.Parameters.AddWithValue("@FrtType", (object)entry.FrtType ?? DBNull.Value);
+            command.Parameters.AddWithValue("@PayType", (object)entry.PayType ?? DBNull.Value);
             command.Parameters.AddWithValue("@Comm", entry.Comm);
             command.Parameters.AddWithValue("@Paid", (object)entry.Paid ?? DBNull.Value);
         }
@@ -325,8 +343,13 @@ LRNo {dir}, Sr, Id";
                 case "to": return $"ToLocation {dir}, Sr, Id";
                 case "vehicleno": return $"VehicleNo {dir}, Sr, Id";
                 case "vehicletype": return $"VehicleType {dir}, Sr, Id";
-                case "weight": return $"Weight {dir}, Sr, Id";
+                case "sizel": return $"SizeL {dir}, Sr, Id";
+                case "sizew": return $"SizeW {dir}, Sr, Id";
+                case "sizeh": return $"SizeH {dir}, Sr, Id";
+                case "actualweight": return $"ActualWeight {dir}, Sr, Id";
+                case "chargedweight": return $"ChargedWeight {dir}, Sr, Id";
                 case "pkg": return $"PKG {dir}, Sr, Id";
+                case "pkgtype": return $"PkgType {dir}, Sr, Id";
                 case "description": return $"Description {dir}, Sr, Id";
                 case "invoice": return $"Invoice {dir}, Sr, Id";
                 case "chno": return $"CHNo {dir}, Sr, Id";
@@ -346,6 +369,7 @@ LRNo {dir}, Sr, Id";
                 case "billparty": return $"BillParty {dir}, Sr, Id";
                 case "broker": return $"Broker {dir}, Sr, Id";
                 case "frttype": return $"FrtType {dir}, Sr, Id";
+                case "paytype": return $"PayType {dir}, Sr, Id";
                 case "comm": return $"Comm {dir}, Sr, Id";
                 case "paid": return $"Paid {dir}, Sr, Id";
                 default: return "Sr, Id";

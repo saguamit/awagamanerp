@@ -20,8 +20,13 @@ namespace Awagaman_ERP.Models
         private string _to;
         private string _vehicleNo;
         private string _vehicleType;
-        private decimal _weight;
+        private decimal _sizeL;
+        private decimal _sizeW;
+        private decimal _sizeH;
+        private decimal _actualWeight;
+        private decimal _chargedWeight;
         private int _pkg;
+        private string _pkgType;
         private string _description;
         private string _invoice;
         private string _chNo;
@@ -39,6 +44,7 @@ namespace Awagaman_ERP.Models
         private string _billParty;
         private string _broker;
         private string _frtType;
+        private string _payType;
         private decimal _comm;
         private string _paid;
 
@@ -59,8 +65,13 @@ namespace Awagaman_ERP.Models
         public string To { get => _to; set { _to = value; OnPropertyChanged(); } }
         public string VehicleNo { get => _vehicleNo; set { _vehicleNo = value; OnPropertyChanged(); } }
         public string VehicleType { get => _vehicleType; set { _vehicleType = value; OnPropertyChanged(); } }
-        public decimal Weight { get => _weight; set { _weight = value; OnPropertyChanged(); } }
+        public decimal SizeL { get => _sizeL; set { _sizeL = value; OnPropertyChanged(); } }
+        public decimal SizeW { get => _sizeW; set { _sizeW = value; OnPropertyChanged(); } }
+        public decimal SizeH { get => _sizeH; set { _sizeH = value; OnPropertyChanged(); } }
+        public decimal ActualWeight { get => _actualWeight; set { _actualWeight = value; OnPropertyChanged(); } }
+        public decimal ChargedWeight { get => _chargedWeight; set { _chargedWeight = value; OnPropertyChanged(); } }
         public int PKG { get => _pkg; set { _pkg = value; OnPropertyChanged(); } }
+        public string PkgType { get => _pkgType; set { _pkgType = value; OnPropertyChanged(); } }
         public string Description { get => _description; set { _description = value; OnPropertyChanged(); } }
         public string Invoice { get => _invoice; set { _invoice = value; OnPropertyChanged(); } }
         public string CHNo { get => _chNo; set { _chNo = value; OnPropertyChanged(); } }
@@ -111,6 +122,7 @@ namespace Awagaman_ERP.Models
         public string BillParty { get => _billParty; set { _billParty = value; OnPropertyChanged(); } }
         public string Broker { get => _broker; set { _broker = value; OnPropertyChanged(); } }
         public string FrtType { get => _frtType; set { _frtType = value; OnPropertyChanged(); } }
+        public string PayType { get => _payType; set { _payType = value; OnPropertyChanged(); } }
         public decimal Comm { get => _comm; set { _comm = value; OnPropertyChanged(); } }
         public string Paid { get => _paid; set { _paid = value; OnPropertyChanged(); } }
 

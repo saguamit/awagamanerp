@@ -1663,7 +1663,7 @@
 
                                         <DataGridTextColumn Header="Type" Binding="{Binding VehicleType}" Width="80" IsReadOnly="True" />
 
-                                        <DataGridTextColumn Header="WEIGHT" Binding="{Binding Weight}" Width="70">
+                                        <DataGridTextColumn Header="L" Binding="{Binding SizeL}" Width="60">
                                             <DataGridTextColumn.EditingElementStyle>
                                                 <Style TargetType="TextBox">
                                                     <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
@@ -1672,7 +1672,7 @@
                                             </DataGridTextColumn.EditingElementStyle>
                                         </DataGridTextColumn>
 
-                                        <DataGridTextColumn Header="PKG" Binding="{Binding PKG}" Width="50">
+                                        <DataGridTextColumn Header="W" Binding="{Binding SizeW}" Width="60">
                                             <DataGridTextColumn.EditingElementStyle>
                                                 <Style TargetType="TextBox">
                                                     <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
@@ -1680,6 +1680,43 @@
                                                 </Style>
                                             </DataGridTextColumn.EditingElementStyle>
                                         </DataGridTextColumn>
+
+                                        <DataGridTextColumn Header="H" Binding="{Binding SizeH}" Width="60">
+                                            <DataGridTextColumn.EditingElementStyle>
+                                                <Style TargetType="TextBox">
+                                                    <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                    <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                                </Style>
+                                            </DataGridTextColumn.EditingElementStyle>
+                                        </DataGridTextColumn>
+
+                                        <DataGridTextColumn Header="Actual Weight" Binding="{Binding ActualWeight}" Width="100">
+                                            <DataGridTextColumn.EditingElementStyle>
+                                                <Style TargetType="TextBox">
+                                                    <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                    <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                                </Style>
+                                            </DataGridTextColumn.EditingElementStyle>
+                                        </DataGridTextColumn>
+
+                                        <DataGridTextColumn Header="Charged Weight" Binding="{Binding ChargedWeight}" Width="110">
+                                            <DataGridTextColumn.EditingElementStyle>
+                                                <Style TargetType="TextBox">
+                                                    <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                    <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                                </Style>
+                                            </DataGridTextColumn.EditingElementStyle>
+                                        </DataGridTextColumn>
+
+                                        <DataGridTextColumn Header="No. of Pkg" Binding="{Binding PKG}" Width="80">
+                                            <DataGridTextColumn.EditingElementStyle>
+                                                <Style TargetType="TextBox">
+                                                    <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                    <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                                </Style>
+                                            </DataGridTextColumn.EditingElementStyle>
+                                        </DataGridTextColumn>
+                                        <DataGridTextColumn Header="Pkg Type" Binding="{Binding PkgType}" Width="90" />
 
                                         <DataGridTextColumn Header="DESCRIPTION" Binding="{Binding Description}" Width="120" />
 
@@ -1734,6 +1771,8 @@
                                         <DataGridTextColumn Header="Broker" Binding="{Binding Broker}" Width="110" />
 
                                         <DataGridTextColumn Header="Frt Type" Binding="{Binding FrtType}" Width="80" />
+
+                                        <DataGridTextColumn Header="To Pay/To Be Billed" Binding="{Binding PayType}" Width="130" />
 
                                         <DataGridTextColumn Header="comm" Binding="{Binding Comm}" Width="70" />
 
@@ -1881,6 +1920,10 @@
             </Border>
 
         </Grid>
+
+        <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,10,6" Background="#F3F4F6" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="3" Padding="6,2">
+            <TextBlock x:Name="AppVersionText" Text="v -" FontSize="11" Foreground="#6B7280" Cursor="Hand" ToolTip="Click to check for updates" MouseLeftButtonUp="AppVersionText_MouseLeftButtonUp" />
+        </Border>
 
     </Grid>
 

@@ -91,8 +91,13 @@ namespace Awagaman_ERP
                     To = entryToEdit.To,
                     VehicleNo = entryToEdit.VehicleNo,
                     VehicleType = entryToEdit.VehicleType,
-                    Weight = entryToEdit.Weight,
+                    SizeL = entryToEdit.SizeL,
+                    SizeW = entryToEdit.SizeW,
+                    SizeH = entryToEdit.SizeH,
+                    ActualWeight = entryToEdit.ActualWeight,
+                    ChargedWeight = entryToEdit.ChargedWeight,
                     PKG = entryToEdit.PKG,
+                    PkgType = entryToEdit.PkgType,
                     Description = entryToEdit.Description,
                     Invoice = entryToEdit.Invoice,
                     CHNo = entryToEdit.CHNo,
@@ -110,6 +115,7 @@ namespace Awagaman_ERP
                     BillParty = entryToEdit.BillParty,
                     Broker = entryToEdit.Broker,
                     FrtType = entryToEdit.FrtType,
+                    PayType = entryToEdit.PayType,
                     Comm = entryToEdit.Comm,
                     Paid = entryToEdit.Paid
                 };
@@ -121,6 +127,7 @@ namespace Awagaman_ERP
             }
 
             DataContext = this;
+            ApplyChallanDetailsFromCHNo();
             RefreshChallanLorryHire(clearWhenMissing: false);
         }
 
@@ -228,8 +235,25 @@ namespace Awagaman_ERP
         {
             if (e?.PropertyName == nameof(LREntry.CHNo))
             {
+                ApplyChallanDetailsFromCHNo();
                 RefreshChallanLorryHire(clearWhenMissing: false);
             }
+        }
+
+        private void ApplyChallanDetailsFromCHNo()
+        {
+            try
+            {
+                var challan = FindChallanByNumber(CurrentEntry?.CHNo);
+                if (challan == null) return;
+
+                CurrentEntry.From = challan.From;
+                CurrentEntry.To = challan.To;
+                CurrentEntry.VehicleNo = challan.VehicleNumber;
+                CurrentEntry.VehicleType = challan.VehicleType;
+                CurrentEntry.Broker = challan.BrokerName;
+            }
+            catch { }
         }
 
         private void RefreshChallanLorryHire(bool clearWhenMissing)

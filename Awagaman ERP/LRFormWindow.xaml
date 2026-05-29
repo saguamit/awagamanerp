@@ -270,16 +270,16 @@
                             </Grid.ColumnDefinitions>
                             
                             <StackPanel Grid.Column="0">
-                                <TextBlock Text="WEIGHT" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CurrentEntry.Weight, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
+                                <TextBlock Text="L" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.SizeL, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
-                                <TextBlock Text="PKG" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CurrentEntry.PKG, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
+                                <TextBlock Text="W" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.SizeW, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
                             </StackPanel>
                             <StackPanel Grid.Column="4">
-                                <TextBlock Text="DESCRIPTION" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CurrentEntry.Description, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                                <TextBlock Text="H" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.SizeH, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
                             </StackPanel>
                         </Grid>
                         
@@ -292,12 +292,62 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
+                                <TextBlock Text="Actual Weight" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.ActualWeight, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Charged Weight" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.ChargedWeight, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="4">
+                                <TextBlock Text="No. of Pkg" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.PKG, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="To Pay / To Be Billed" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.PayType, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
                                 <TextBlock Text="CH No." Style="{StaticResource FieldLabelStyle}" />
                                 <TextBox Text="{Binding CurrentEntry.CHNo, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" IsReadOnly="True" />
                             </StackPanel>
-                            <StackPanel Grid.Column="2">
+                            <StackPanel Grid.Column="4">
                                 <TextBlock Text="Invoice" Style="{StaticResource FieldLabelStyle}" />
                                 <TextBox Text="{Binding CurrentEntry.Invoice, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Pkg Type" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.PkgType, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="DESCRIPTION" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.Description, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
                             </StackPanel>
                         </Grid>
                         </StackPanel>
