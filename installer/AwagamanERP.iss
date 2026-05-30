@@ -1,5 +1,5 @@
 #define MyAppName "Awagaman ERP"
-#define MyAppVersion "1.0.3"
+#define MyAppVersion "1.0.7"
 #define MyAppPublisher "Awagaman ERP"
 #define MyAppExeName "Awagaman ERP.exe"
 #define MySourceDir "c:\amit sagu\awagaman project\ATL ERP\Awagaman ERP\bin\Release"
@@ -31,6 +31,7 @@ Source: "c:\amit sagu\awagaman project\ATL ERP\installer\prereqs\VC_redist.x86.e
 Source: "{#MySourceDir}\Awagaman ERP.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\Awagaman ERP.exe.config"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MySourceDir}\*.png"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\de\*"; DestDir: "{app}\de"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MySourceDir}\x64\*"; DestDir: "{app}\x64"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MySourceDir}\x86\*"; DestDir: "{app}\x86"; Flags: ignoreversion recursesubdirs createallsubdirs
