@@ -6270,13 +6270,16 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
         private static string LRFormatLayoutPath =>
             System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Awagaman ERP", "lr_format_layout.txt");
 
-        private static Dictionary<string, LRFieldLayout> LoadLRFormatLayout()
+        private static string LRFormatDefaultLayoutPath =>
+            System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lr_format_layout.default.txt");
+
+        private static Dictionary<string, LRFieldLayout> LoadLRFormatLayoutFromFile(string path)
         {
             var map = new Dictionary<string, LRFieldLayout>(StringComparer.OrdinalIgnoreCase);
             try
             {
-                if (!System.IO.File.Exists(LRFormatLayoutPath)) return map;
-                foreach (var line in System.IO.File.ReadAllLines(LRFormatLayoutPath))
+                if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path)) return map;
+                foreach (var line in System.IO.File.ReadAllLines(path))
                 {
                     var parts = (line ?? string.Empty).Split('|');
                     if (parts.Length < 3) continue;
@@ -6297,6 +6300,14 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             }
             catch { }
             return map;
+        }
+
+        private static Dictionary<string, LRFieldLayout> LoadLRFormatLayout()
+        {
+            // Priority: user-saved layout (LocalAppData) -> packaged default layout (app folder).
+            var userMap = LoadLRFormatLayoutFromFile(LRFormatLayoutPath);
+            if (userMap.Count > 0) return userMap;
+            return LoadLRFormatLayoutFromFile(LRFormatDefaultLayoutPath);
         }
 
         private static void SaveLRFormatLayout(Dictionary<string, LRFieldLayout> map)
