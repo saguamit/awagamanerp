@@ -798,7 +798,7 @@
                                         <TextBlock Text="{Binding FilteredTotalDue, StringFormat=₹ {0:N2}}" FontSize="13" Foreground="#DC2626" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
                                     </StackPanel>
                                 </StackPanel>
-                                <Button Grid.Column="1" Content="+ Create Bill" Style="{StaticResource GreenButtonStyle}" Click="OpenBillForm_Click" />
+                                <Button Grid.Column="1" Content="+ Generate Bill" Style="{StaticResource GreenButtonStyle}" Click="OpenBillForm_Click" />
                             </Grid>
                         </Border>
                         <Border Grid.Row="1" Background="#FAFAFA" BorderBrush="{StaticResource BorderLight}" BorderThickness="0,0,0,1" Padding="16,8">
@@ -1663,7 +1663,7 @@
 
                                         <DataGridTextColumn Header="Type" Binding="{Binding VehicleType}" Width="80" IsReadOnly="True" />
 
-                                        <DataGridTextColumn Header="L" Binding="{Binding SizeL}" Width="60">
+                                        <DataGridTextColumn Header="L" Binding="{Binding SizeL, StringFormat=0.####################}" Width="60">
                                             <DataGridTextColumn.EditingElementStyle>
                                                 <Style TargetType="TextBox">
                                                     <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
@@ -1672,7 +1672,7 @@
                                             </DataGridTextColumn.EditingElementStyle>
                                         </DataGridTextColumn>
 
-                                        <DataGridTextColumn Header="W" Binding="{Binding SizeW}" Width="60">
+                                        <DataGridTextColumn Header="W" Binding="{Binding SizeW, StringFormat=0.####################}" Width="60">
                                             <DataGridTextColumn.EditingElementStyle>
                                                 <Style TargetType="TextBox">
                                                     <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
@@ -1681,7 +1681,7 @@
                                             </DataGridTextColumn.EditingElementStyle>
                                         </DataGridTextColumn>
 
-                                        <DataGridTextColumn Header="H" Binding="{Binding SizeH}" Width="60">
+                                        <DataGridTextColumn Header="H" Binding="{Binding SizeH, StringFormat=0.####################}" Width="60">
                                             <DataGridTextColumn.EditingElementStyle>
                                                 <Style TargetType="TextBox">
                                                     <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
@@ -1690,7 +1690,7 @@
                                             </DataGridTextColumn.EditingElementStyle>
                                         </DataGridTextColumn>
 
-                                        <DataGridTextColumn Header="Actual Weight" Binding="{Binding ActualWeight}" Width="100">
+                                        <DataGridTextColumn Header="Actual Weight" Binding="{Binding ActualWeight, StringFormat=0.####################}" Width="100">
                                             <DataGridTextColumn.EditingElementStyle>
                                                 <Style TargetType="TextBox">
                                                     <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
@@ -1699,7 +1699,7 @@
                                             </DataGridTextColumn.EditingElementStyle>
                                         </DataGridTextColumn>
 
-                                        <DataGridTextColumn Header="Charged Weight" Binding="{Binding ChargedWeight}" Width="110">
+                                        <DataGridTextColumn Header="Charged Weight" Binding="{Binding ChargedWeight, StringFormat=0.####################}" Width="110">
                                             <DataGridTextColumn.EditingElementStyle>
                                                 <Style TargetType="TextBox">
                                                     <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
@@ -1721,6 +1721,7 @@
                                         <DataGridTextColumn Header="DESCRIPTION" Binding="{Binding Description}" Width="120" />
 
                                         <DataGridTextColumn Header="Invoice" Binding="{Binding Invoice}" Width="100" />
+                                        <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="100" />
 
                                         <DataGridTextColumn Header="CH No." Binding="{Binding CHNo}" Width="90" IsReadOnly="True" />
 

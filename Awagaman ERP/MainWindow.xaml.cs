@@ -13,6 +13,7 @@ using System.Windows.Controls.Primitives;
 using System.Text;
 using MahApps.Metro.Controls;
 using System.Reflection;
+using System.Windows.Media;
 
 namespace Awagaman_ERP
 {
@@ -334,8 +335,12 @@ namespace Awagaman_ERP
                 }
             }
 
-            // For Tab, let standard handling work but commit first
-            if (e.Key == Key.Tab) { grid.CommitEdit(DataGridEditingUnit.Row, true); return; }
+            // For Tab, let standard handling work but commit first.
+            if (e.Key == Key.Tab)
+            {
+                if (!TryCommitGridEdits(grid)) e.Handled = true;
+                return;
+            }
 
             if (grid.CurrentCell.Column == null) return;
             var colIdx = grid.Columns.IndexOf(grid.CurrentCell.Column);
@@ -348,14 +353,37 @@ namespace Awagaman_ERP
             else if (e.Key == Key.Up && rowIdx > 0) newRow = rowIdx - 1;
             else if (e.Key == Key.Down && rowIdx < grid.Items.Count - 1) newRow = rowIdx + 1;
             else if (e.Key == Key.Enter && rowIdx < grid.Items.Count - 1) newRow = rowIdx + 1;
-            else if (e.Key == Key.Enter && rowIdx >= grid.Items.Count - 1) { grid.CommitEdit(DataGridEditingUnit.Row, true); return; }
+            else if (e.Key == Key.Enter && rowIdx >= grid.Items.Count - 1)
+            {
+                TryCommitGridEdits(grid);
+                return;
+            }
             else return;
 
             e.Handled = true;
-            grid.CommitEdit(DataGridEditingUnit.Row, true);
+            if (!TryCommitGridEdits(grid))
+            {
+                // Keep focus on current cell when commit fails (e.g., partially typed numeric value)
+                return;
+            }
             var newItem = grid.Items[newRow];
             grid.CurrentCell = new DataGridCellInfo(newItem, grid.Columns[newCol]);
             grid.BeginEdit();
+        }
+
+        private static bool TryCommitGridEdits(DataGrid grid)
+        {
+            try
+            {
+                if (grid == null) return false;
+                grid.CommitEdit(DataGridEditingUnit.Cell, true);
+                grid.CommitEdit(DataGridEditingUnit.Row, true);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static string GetColumnBindingPath(DataGridColumn col)
@@ -2544,6 +2572,15 @@ HAVING DueAmt > 0;";
                 var copyRows = new MenuItem { Header = "Copy Row(s)" };
                 copyRows.Click += (_, __) => CopySelectedRowsFromGrid(BillLedgerGrid);
                 menu.Items.Add(copyRows);
+
+                var selectedBill = (row?.Item ?? BillLedgerGrid.SelectedItem) as BillEntry;
+                if (selectedBill != null)
+                {
+                    menu.Items.Add(new Separator());
+                    var viewBillFormat = new MenuItem { Header = "View Bill Format" };
+                    viewBillFormat.Click += (_, __) => OpenBillFormatPreview(selectedBill);
+                    menu.Items.Add(viewBillFormat);
+                }
                 menu.IsOpen = true;
                 return;
             }
@@ -2560,6 +2597,10 @@ HAVING DueAmt > 0;";
                     var billEntry = cell.DataContext as BillEntry;
                     if (billEntry != null)
                     {
+                        var viewBillFormat = new MenuItem { Header = "View Bill Format" };
+                        viewBillFormat.Click += (_, __) => OpenBillFormatPreview(billEntry);
+                        menu.Items.Add(viewBillFormat);
+
                         var addComment = new MenuItem { Header = "View / Add Comment" };
                         addComment.Click += (_, __) => OpenBillCommentPopup(billEntry);
                         menu.Items.Add(addComment);
@@ -4306,7 +4347,7 @@ WHERE LRNo IN ({string.Join(",", pNames)});";
         private static readonly HashSet<string> LRFilterableHeaders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "LR No.", "Date", "Consignor Name", "Consignee Name", "From", "To", "Vehicle No.", "Type",
-            "L", "W", "H", "Actual Weight", "Charged Weight", "No. of Pkg", "Pkg Type", "DESCRIPTION", "Invoice", "CH No.", "Total Freight", "Hamali", "Detention",
+            "L", "W", "H", "Actual Weight", "Charged Weight", "No. of Pkg", "Pkg Type", "DESCRIPTION", "Invoice", "Value", "CH No.", "Total Freight", "Hamali", "Detention",
             "Others", "Total Bill", "Bill No.", "Bill Date", "Bill Party", "Broker", "Frt Type", "To Pay/To Be Billed", "comm", "Paid"
         };
 
@@ -4332,15 +4373,16 @@ WHERE LRNo IN ({string.Join(",", pNames)});";
                 case "To": return (entry.To ?? string.Empty).Trim();
                 case "Vehicle No.": return (entry.VehicleNo ?? string.Empty).Trim();
                 case "Type": return (entry.VehicleType ?? string.Empty).Trim();
-                case "L": return entry.SizeL.ToString("N2");
-                case "W": return entry.SizeW.ToString("N2");
-                case "H": return entry.SizeH.ToString("N2");
-                case "Actual Weight": return entry.ActualWeight.ToString("N2");
-                case "Charged Weight": return entry.ChargedWeight.ToString("N2");
+                case "L": return entry.SizeL.ToString("0.####################");
+                case "W": return entry.SizeW.ToString("0.####################");
+                case "H": return entry.SizeH.ToString("0.####################");
+                case "Actual Weight": return entry.ActualWeight.ToString("0.####################");
+                case "Charged Weight": return entry.ChargedWeight.ToString("0.####################");
                 case "No. of Pkg": return entry.PKG.ToString();
                 case "Pkg Type": return (entry.PkgType ?? string.Empty).Trim();
                 case "DESCRIPTION": return (entry.Description ?? string.Empty).Trim();
                 case "Invoice": return (entry.Invoice ?? string.Empty).Trim();
+                case "Value": return (entry.Value ?? string.Empty).Trim();
                 case "CH No.": return (entry.CHNo ?? string.Empty).Trim();
                 case "Total Freight": return entry.TotalFreight.ToString("N2");
                 case "Hamali": return entry.Hamali.ToString("N2");
@@ -4636,7 +4678,7 @@ DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','
             ApplyLRHeaderFilterIndicators();
             LRRefreshFilteredSummary();
         }
-        private void ImportLR_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select LR Import File" }; if (dialog.ShowDialog() != true) return; try { var lines = System.IO.File.ReadAllLines(dialog.FileName); if (lines.Length < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = SplitCsvLine(lines[0]); var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new LRRepository(); int imported = 0, errors = 0; var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = lines.Length - 1; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; for (int i = 1; i < lines.Length; i++) { try {                         var parts = SplitCsvLine(lines[i]); var entry = new LREntry(); entry.LRNo = GetCol(parts, colMap, "LRNo") ?? GetCol(parts, colMap, "LRNO") ?? GetCol(parts, colMap, "LR"); entry.Date = ParseDate(GetCol(parts, colMap, "Date") ?? GetCol(parts, colMap, "DATE")); entry.ConsignorName = GetCol(parts, colMap, "ConsignorName") ?? GetCol(parts, colMap, "Consignor"); entry.ConsignorAddress = GetCol(parts, colMap, "ConsignorAddress"); entry.ConsignorGST = GetCol(parts, colMap, "ConsignorGST"); entry.ConsigneeName = GetCol(parts, colMap, "ConsigneeName") ?? GetCol(parts, colMap, "Consignee"); entry.ConsigneeAddress = GetCol(parts, colMap, "ConsigneeAddress"); entry.ConsigneeGST = GetCol(parts, colMap, "ConsigneeGST"); entry.From = GetCol(parts, colMap, "From") ?? GetCol(parts, colMap, "FROM"); entry.To = GetCol(parts, colMap, "To") ?? GetCol(parts, colMap, "TO"); entry.VehicleNo = GetCol(parts, colMap, "VehicleNo") ?? GetCol(parts, colMap, "Vehicle"); entry.VehicleType = GetCol(parts, colMap, "VehicleType") ?? GetCol(parts, colMap, "Type"); entry.SizeL = ParseDecimal(GetCol(parts, colMap, "L") ?? GetCol(parts, colMap, "SizeL")); entry.SizeW = ParseDecimal(GetCol(parts, colMap, "W") ?? GetCol(parts, colMap, "SizeW")); entry.SizeH = ParseDecimal(GetCol(parts, colMap, "H") ?? GetCol(parts, colMap, "SizeH")); entry.ActualWeight = ParseDecimal(GetCol(parts, colMap, "ActualWeight") ?? GetCol(parts, colMap, "Actual Weight")); entry.ChargedWeight = ParseDecimal(GetCol(parts, colMap, "ChargedWeight") ?? GetCol(parts, colMap, "Charged Weight")); int.TryParse(GetCol(parts, colMap, "PKG"), out int pkg); entry.PKG = pkg; entry.PkgType = GetCol(parts, colMap, "PkgType") ?? GetCol(parts, colMap, "PackageType") ?? GetCol(parts, colMap, "Pkg Type"); entry.Description = GetCol(parts, colMap, "Description"); entry.Invoice = GetCol(parts, colMap, "Invoice"); entry.CHNo = GetCol(parts, colMap, "CHNo") ?? GetCol(parts, colMap, "CHNO") ?? GetCol(parts, colMap, "ChallanNo"); entry.TotalFreight = ParseDecimal(GetCol(parts, colMap, "TotalFreight") ?? GetCol(parts, colMap, "Freight")); entry.Hamali = ParseDecimal(GetCol(parts, colMap, "Hamali")); entry.Detention = ParseDecimal(GetCol(parts, colMap, "Detention")); entry.Others = ParseDecimal(GetCol(parts, colMap, "Others") ?? GetCol(parts, colMap, "Other") ?? GetCol(parts, colMap, "OTHR")); entry.NEFT = ParseDecimal(GetCol(parts, colMap, "NEFT")); entry.CASH = ParseDecimal(GetCol(parts, colMap, "CASH")); entry.TDS = ParseDecimal(GetCol(parts, colMap, "TDS")); entry.Ded = ParseDecimal(GetCol(parts, colMap, "Ded") ?? GetCol(parts, colMap, "DED")); entry.BillNo = GetCol(parts, colMap, "BillNo") ?? GetCol(parts, colMap, "BILLNO"); entry.BillDate = ParseNullableDate(GetCol(parts, colMap, "BillDate")); entry.BILL = ParseDecimal(GetCol(parts, colMap, "BILL")); entry.BillParty = GetCol(parts, colMap, "BillParty"); entry.Broker = GetCol(parts, colMap, "Broker"); entry.FrtType = GetCol(parts, colMap, "FrtType") ?? GetCol(parts, colMap, "FrtType"); entry.PayType = GetCol(parts, colMap, "PayType") ?? GetCol(parts, colMap, "ToPayToBeBilled") ?? GetCol(parts, colMap, "To Pay/To Be Billed"); entry.Comm = ParseDecimal(GetCol(parts, colMap, "Comm")); entry.Paid = GetCol(parts, colMap, "Paid"); repo.Upsert(entry); imported++; } catch { errors++; } if (progress != null) progress.Value = i; } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) status.Text = $"Imported: {imported}, Errors: {errors}"; LRVM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); LRUpdatePageUI(); MessageBox.Show($"Import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
+        private void ImportLR_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select LR Import File" }; if (dialog.ShowDialog() != true) return; try { var lines = System.IO.File.ReadAllLines(dialog.FileName); if (lines.Length < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = SplitCsvLine(lines[0]); var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new LRRepository(); int imported = 0, errors = 0; var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = lines.Length - 1; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; for (int i = 1; i < lines.Length; i++) { try {                         var parts = SplitCsvLine(lines[i]); var entry = new LREntry(); entry.LRNo = GetCol(parts, colMap, "LRNo") ?? GetCol(parts, colMap, "LRNO") ?? GetCol(parts, colMap, "LR"); entry.Date = ParseDate(GetCol(parts, colMap, "Date") ?? GetCol(parts, colMap, "DATE")); entry.ConsignorName = GetCol(parts, colMap, "ConsignorName") ?? GetCol(parts, colMap, "Consignor"); entry.ConsignorAddress = GetCol(parts, colMap, "ConsignorAddress"); entry.ConsignorGST = GetCol(parts, colMap, "ConsignorGST"); entry.ConsigneeName = GetCol(parts, colMap, "ConsigneeName") ?? GetCol(parts, colMap, "Consignee"); entry.ConsigneeAddress = GetCol(parts, colMap, "ConsigneeAddress"); entry.ConsigneeGST = GetCol(parts, colMap, "ConsigneeGST"); entry.From = GetCol(parts, colMap, "From") ?? GetCol(parts, colMap, "FROM"); entry.To = GetCol(parts, colMap, "To") ?? GetCol(parts, colMap, "TO"); entry.VehicleNo = GetCol(parts, colMap, "VehicleNo") ?? GetCol(parts, colMap, "Vehicle"); entry.VehicleType = GetCol(parts, colMap, "VehicleType") ?? GetCol(parts, colMap, "Type"); entry.SizeL = ParseDecimal(GetCol(parts, colMap, "L") ?? GetCol(parts, colMap, "SizeL")); entry.SizeW = ParseDecimal(GetCol(parts, colMap, "W") ?? GetCol(parts, colMap, "SizeW")); entry.SizeH = ParseDecimal(GetCol(parts, colMap, "H") ?? GetCol(parts, colMap, "SizeH")); entry.ActualWeight = ParseDecimal(GetCol(parts, colMap, "ActualWeight") ?? GetCol(parts, colMap, "Actual Weight")); entry.ChargedWeight = ParseDecimal(GetCol(parts, colMap, "ChargedWeight") ?? GetCol(parts, colMap, "Charged Weight")); int.TryParse(GetCol(parts, colMap, "PKG"), out int pkg); entry.PKG = pkg; entry.PkgType = GetCol(parts, colMap, "PkgType") ?? GetCol(parts, colMap, "PackageType") ?? GetCol(parts, colMap, "Pkg Type"); entry.Description = GetCol(parts, colMap, "Description"); entry.Invoice = GetCol(parts, colMap, "Invoice"); entry.Value = GetCol(parts, colMap, "Value"); entry.CHNo = GetCol(parts, colMap, "CHNo") ?? GetCol(parts, colMap, "CHNO") ?? GetCol(parts, colMap, "ChallanNo"); entry.TotalFreight = ParseDecimal(GetCol(parts, colMap, "TotalFreight") ?? GetCol(parts, colMap, "Freight")); entry.Hamali = ParseDecimal(GetCol(parts, colMap, "Hamali")); entry.Detention = ParseDecimal(GetCol(parts, colMap, "Detention")); entry.Others = ParseDecimal(GetCol(parts, colMap, "Others") ?? GetCol(parts, colMap, "Other") ?? GetCol(parts, colMap, "OTHR")); entry.NEFT = ParseDecimal(GetCol(parts, colMap, "NEFT")); entry.CASH = ParseDecimal(GetCol(parts, colMap, "CASH")); entry.TDS = ParseDecimal(GetCol(parts, colMap, "TDS")); entry.Ded = ParseDecimal(GetCol(parts, colMap, "Ded") ?? GetCol(parts, colMap, "DED")); entry.BillNo = GetCol(parts, colMap, "BillNo") ?? GetCol(parts, colMap, "BILLNO"); entry.BillDate = ParseNullableDate(GetCol(parts, colMap, "BillDate")); entry.BILL = ParseDecimal(GetCol(parts, colMap, "BILL")); entry.BillParty = GetCol(parts, colMap, "BillParty"); entry.Broker = GetCol(parts, colMap, "Broker"); entry.FrtType = GetCol(parts, colMap, "FrtType") ?? GetCol(parts, colMap, "FrtType"); entry.PayType = GetCol(parts, colMap, "PayType") ?? GetCol(parts, colMap, "ToPayToBeBilled") ?? GetCol(parts, colMap, "To Pay/To Be Billed"); entry.Comm = ParseDecimal(GetCol(parts, colMap, "Comm")); entry.Paid = GetCol(parts, colMap, "Paid"); repo.Upsert(entry); imported++; } catch { errors++; } if (progress != null) progress.Value = i; } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) status.Text = $"Imported: {imported}, Errors: {errors}"; LRVM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); LRUpdatePageUI(); MessageBox.Show($"Import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
         private void ShowLRColumnsMenu_Click(object sender, RoutedEventArgs e) { if (!(sender is System.Windows.Controls.Button button)) return; _lrColumnsMenu = BuildLRColumnsMenu(); _lrColumnsMenu.PlacementTarget = button; _lrColumnsMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom; _lrColumnsMenu.IsOpen = true; }
         private static string LRSettingsPath => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Awagaman ERP", "lr_column_settings.json");
         private void SaveLRColumnSettings() { try { var lines = new List<string>(); lines.Add($"_SortColumn:{LRVM?.GetSortColumn() ?? ""}"); lines.Add($"_SortAscending:{LRVM?.IsCurrentSortAscending}"); foreach (var col in LRLedgerGrid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" ▲", "").Replace(" ▼", "").Trim(); if (!string.IsNullOrEmpty(h)) lines.Add(col.Visibility == Visibility.Visible ? $"1:{h}:{(int)col.Width.DisplayValue}" : $"0:{h}:{(int)col.Width.DisplayValue}"); } var dir = System.IO.Path.GetDirectoryName(LRSettingsPath); if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir); System.IO.File.WriteAllText(LRSettingsPath, string.Join("\n", lines)); } catch { } }
@@ -4953,16 +4995,17 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                     ("route_to", "To", 430, 214, 180, 24, $"{entry.To}"),
                     ("vehicle", "Vehicle No", 42, 242, 180, 24, $"{entry.VehicleNo}"),
                     ("vehicle_type", "Type", 430, 242, 140, 24, $"{entry.VehicleType}"),
-                    ("actual_weight", "Actual Weight", 42, 270, 180, 24, $"{entry.ActualWeight:N2}"),
-                    ("charged_weight", "Charged Weight", 250, 270, 160, 24, $"{entry.ChargedWeight:N2}"),
+                    ("actual_weight", "Actual Weight", 42, 270, 180, 24, $"{entry.ActualWeight:0.####################}"),
+                    ("charged_weight", "Charged Weight", 250, 270, 160, 24, $"{entry.ChargedWeight:0.####################}"),
                     ("pay_type", "To Pay/To Be Billed", 430, 270, 260, 24, $"{entry.PayType}"),
                     ("no_of_pkg", "No. of Pkg", 42, 298, 160, 24, $"{entry.PKG}"),
                     ("package_type", "Package Type", 250, 298, 160, 24, $"{entry.PkgType}"),
-                    ("size_l", "L", 430, 298, 70, 24, $"{entry.SizeL:N2}"),
-                    ("size_w", "W", 520, 298, 70, 24, $"{entry.SizeW:N2}"),
-                    ("size_h", "H", 610, 298, 70, 24, $"{entry.SizeH:N2}"),
+                    ("size_l", "L", 430, 298, 70, 24, $"{entry.SizeL:0.####################}"),
+                    ("size_w", "W", 520, 298, 70, 24, $"{entry.SizeW:0.####################}"),
+                    ("size_h", "H", 610, 298, 70, 24, $"{entry.SizeH:0.####################}"),
                     ("description", "Description", 42, 326, 480, 48, $"{entry.Description}"),
-                    ("invoice", "Invoice", 42, 354, 320, 24, $"{entry.Invoice}")
+                    ("invoice", "Invoice", 42, 354, 220, 24, $"{entry.Invoice}"),
+                    ("value", "Value", 280, 354, 140, 24, $"{entry.Value}")
                 };
 
                 var savedLayout = LoadLRFormatLayout();
@@ -5493,6 +5536,727 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             }
         }
 
+        private sealed class BillPreviewData
+        {
+            public string Party { get; set; }
+            public string PartyAddress { get; set; }
+            public string PartyGST { get; set; }
+            public string PartyStateCode { get; set; }
+            public string BillNo { get; set; }
+            public string BillDate { get; set; }
+            public string Total { get; set; }
+            public string TotalWords { get; set; }
+            public List<BillPreviewLine> Lines { get; set; }
+        }
+
+        private sealed class BillPreviewLine
+        {
+            public string LRNo { get; set; }
+            public string LRDate { get; set; }
+            public string Invoice { get; set; }
+            public string Vehicle { get; set; }
+            public string From { get; set; }
+            public string To { get; set; }
+            public string FreightRoute { get; set; }
+            public string ChargesBreakdown { get; set; }
+            public string WeightOrType { get; set; }
+            public string Rate { get; set; }
+            public string Amount { get; set; }
+        }
+
+        private void OpenBillFormatPreview(BillEntry entry)
+        {
+            if (entry == null) return;
+            try
+            {
+                var party = new PartyRepository().FindByName(entry.Party ?? string.Empty);
+                var billRows = GetBillEntriesForBillNo(entry.BillNo);
+                if (billRows.Count == 0) billRows.Add(entry);
+
+                var totalAmount = billRows.Sum(x => x.Total);
+                var stateCode = ((party?.GSTNo ?? string.Empty).Trim().Length >= 2)
+                    ? (party.GSTNo.Trim().Substring(0, 2))
+                    : string.Empty;
+
+                var preview = new BillPreviewData
+                {
+                    Party = (entry.Party ?? string.Empty).Trim(),
+                    PartyAddress = (party?.Address ?? string.Empty).Trim(),
+                    PartyGST = (party?.GSTNo ?? string.Empty).Trim(),
+                    PartyStateCode = stateCode,
+                    BillNo = (entry.BillNo ?? string.Empty).Trim(),
+                    BillDate = entry.BillDate.ToString("dd-MMM-yyyy"),
+                    Total = totalAmount.ToString("N2"),
+                    TotalWords = NumberToWords((long)Math.Round(totalAmount, 0)) + " Only",
+                    Lines = billRows
+                    .Where(x => x.Total != 0m)
+                    .Select(x => new BillPreviewLine
+                    {
+                        LRNo = (x.LRNo ?? string.Empty).Trim(),
+                        LRDate = x.LRDate.HasValue ? x.LRDate.Value.ToString("dd.MM.yy") : string.Empty,
+                        Invoice = GetLRInvoice(x.LRNo),
+                        Vehicle = GetLRVehicleNo(x.LRNo),
+                        From = (x.From ?? string.Empty).Trim(),
+                        To = (x.To ?? string.Empty).Trim(),
+                        FreightRoute = $"From: {(x.From ?? string.Empty).Trim()}    To: {(x.To ?? string.Empty).Trim()}",
+                        ChargesBreakdown = BuildChargesLabelLines(x.HML, x.Detention, x.OTHR),
+                        WeightOrType = (x.VehicleType ?? string.Empty).Trim(),
+                        Rate = string.Empty,
+                        Amount = BuildAmountLines(x.Freight, x.HML, x.Detention, x.OTHR)
+                    })
+                    .ToList()
+                };
+
+                var dialog = new Window
+                {
+                    Title = $"Bill View - {preview.BillNo}",
+                    Owner = this,
+                    Width = 1180,
+                    Height = 840,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Background = System.Windows.Media.Brushes.White
+                };
+
+                var root = new Grid { Margin = new Thickness(10) };
+                root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+                var viewer = new ScrollViewer
+                {
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    Background = Brushes.White
+                };
+
+                var page = BuildBillPrintVisual(preview);
+                viewer.Content = page;
+                Grid.SetRow(viewer, 0);
+                root.Children.Add(viewer);
+
+                var closeRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
+                var actionsBtn = new Button { Content = "Actions ▾", Width = 110, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
+                var closeBtn = new Button { Content = "Close", Width = 90, Height = 30 };
+                Action doPrint = () =>
+                {
+                    try
+                    {
+                        var printServer = new System.Printing.LocalPrintServer();
+                        var queue = printServer.DefaultPrintQueue;
+                        if (queue == null)
+                        {
+                            MessageBox.Show("No default printer found.", "Print", MessageBoxButton.OK, MessageBoxImage.Warning);
+                            return;
+                        }
+
+                        var fixedDoc = BuildBillFixedDocument(preview, 1122, 793); // A4 Landscape @96 DPI
+                        var writer = System.Printing.PrintQueue.CreateXpsDocumentWriter(queue);
+                        writer.Write(fixedDoc.DocumentPaginator);
+                        MessageBox.Show($"Print job sent to: {queue.FullName}", "Print", MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Print failed: " + ex.Message, "Print Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                };
+                var actionsMenu = new ContextMenu();
+                var miPreview = new MenuItem { Header = "Print Preview" };
+                miPreview.Click += (_, __) => ShowBillPrintPreview(preview);
+                actionsMenu.Items.Add(miPreview);
+
+                var miPrint = new MenuItem { Header = "Print" };
+                miPrint.Click += (_, __) => doPrint();
+                actionsMenu.Items.Add(miPrint);
+                actionsMenu.Items.Add(new Separator());
+
+                var miDownload = new MenuItem { Header = "Download" };
+                miDownload.Click += (_, __) =>
+                {
+                    try
+                    {
+                        var sfd = new Microsoft.Win32.SaveFileDialog
+                        {
+                            Title = "Download Bill Format",
+                            Filter = "PNG Image|*.png|PDF Document|*.pdf",
+                            FileName = $"{((preview?.BillNo ?? "Bill").Replace("/", "-"))}"
+                        };
+                        if (sfd.ShowDialog(dialog) != true) return;
+                        var ext = (System.IO.Path.GetExtension(sfd.FileName) ?? string.Empty).ToLowerInvariant();
+                        var pageForExport = BuildBillPrintVisual(preview);
+                        var bmpOut = RenderElementToBitmap(pageForExport, 1122, 793);
+                        if (ext == ".pdf") SaveBitmapAsPdf(bmpOut, sfd.FileName);
+                        else SaveBitmapAsPng(bmpOut, sfd.FileName);
+                        MessageBox.Show("Bill format downloaded.", "Download", MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Download failed: " + ex.Message, "Download Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                };
+                actionsMenu.Items.Add(miDownload);
+
+                var miWhatsapp = new MenuItem { Header = "WhatsApp" };
+                miWhatsapp.Click += (_, __) =>
+                {
+                    try
+                    {
+                        var tempPng = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"Bill_{(preview?.BillNo ?? "Bill").Replace("/", "-")}.png");
+                        var pageForExport = BuildBillPrintVisual(preview);
+                        var bmpOut = RenderElementToBitmap(pageForExport, 1122, 793);
+                        SaveBitmapAsPng(bmpOut, tempPng);
+                        var text = Uri.EscapeDataString($"Bill {preview?.BillNo}\nFile: {tempPng}");
+                        var uri = $"https://wa.me/?text={text}";
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri) { UseShellExecute = true });
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Unable to open WhatsApp share: " + ex.Message, "WhatsApp", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                };
+                actionsMenu.Items.Add(miWhatsapp);
+
+                var miEmail = new MenuItem { Header = "Email" };
+                miEmail.Click += (_, __) =>
+                {
+                    try
+                    {
+                        var tempPng = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"Bill_{(preview?.BillNo ?? "Bill").Replace("/", "-")}.png");
+                        var pageForExport = BuildBillPrintVisual(preview);
+                        var bmpOut = RenderElementToBitmap(pageForExport, 1122, 793);
+                        SaveBitmapAsPng(bmpOut, tempPng);
+                        var subject = Uri.EscapeDataString($"Bill {preview?.BillNo}");
+                        var body = Uri.EscapeDataString($"Please find the bill file.\n\nSaved at:\n{tempPng}");
+                        var uri = $"mailto:?subject={subject}&body={body}";
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri) { UseShellExecute = true });
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Unable to open email share: " + ex.Message, "Email", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                };
+                actionsMenu.Items.Add(miEmail);
+
+                actionsBtn.Click += (_, __) =>
+                {
+                    actionsBtn.ContextMenu = actionsMenu;
+                    actionsMenu.PlacementTarget = actionsBtn;
+                    actionsMenu.IsOpen = true;
+                };
+                closeBtn.Click += (_, __) => dialog.Close();
+                closeRow.Children.Add(actionsBtn);
+                closeRow.Children.Add(closeBtn);
+                Grid.SetRow(closeRow, 1);
+                root.Children.Add(closeRow);
+
+                dialog.Content = root;
+                dialog.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to open bill format view: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void ShowBillPrintPreview(BillPreviewData preview)
+        {
+            try
+            {
+                var win = new Window
+                {
+                    Title = $"Print Preview - Bill {preview?.BillNo}",
+                    Owner = this,
+                    Width = 980,
+                    Height = 760,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Background = Brushes.White
+                };
+                var pageVisual = BuildBillPrintVisual(preview);
+                pageVisual.Width = 793; // A4 @96 DPI
+                pageVisual.Measure(new Size(793, 1122));
+                pageVisual.Arrange(new Rect(new Point(0, 0), new Size(793, 1122)));
+                pageVisual.UpdateLayout();
+
+                var viewer = new ScrollViewer
+                {
+                    Content = pageVisual,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    Background = Brushes.DimGray,
+                    Padding = new Thickness(16)
+                };
+                win.Content = viewer;
+                win.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to open print preview: " + ex.Message, "Preview Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private System.Windows.Documents.FixedDocument BuildBillFixedDocument(BillPreviewData preview, double pageWidth, double pageHeight)
+        {
+            var printRoot = BuildBillPrintVisual(preview);
+            printRoot.Width = pageWidth;
+            printRoot.Measure(new Size(pageWidth, pageHeight));
+            printRoot.Arrange(new Rect(new Point(0, 0), new Size(pageWidth, pageHeight)));
+            printRoot.UpdateLayout();
+
+            var fixedDoc = new System.Windows.Documents.FixedDocument();
+            var fixedPage = new System.Windows.Documents.FixedPage
+            {
+                Width = pageWidth,
+                Height = pageHeight
+            };
+            System.Windows.Documents.FixedPage.SetLeft(printRoot, 0);
+            System.Windows.Documents.FixedPage.SetTop(printRoot, 0);
+            fixedPage.Children.Add(printRoot);
+
+            var pageContent = new System.Windows.Documents.PageContent();
+            ((System.Windows.Markup.IAddChild)pageContent).AddChild(fixedPage);
+            fixedDoc.Pages.Add(pageContent);
+            return fixedDoc;
+        }
+
+        private static System.Windows.Media.Imaging.RenderTargetBitmap RenderElementToBitmap(FrameworkElement element, int pixelWidth, int pixelHeight)
+        {
+            element.Width = pixelWidth;
+            element.Measure(new Size(pixelWidth, pixelHeight));
+            element.Arrange(new Rect(new Point(0, 0), new Size(pixelWidth, pixelHeight)));
+            element.UpdateLayout();
+            var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                pixelWidth, pixelHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            rtb.Render(element);
+            return rtb;
+        }
+
+        private static void SaveBitmapAsPng(System.Windows.Media.Imaging.BitmapSource imageBmp, string path)
+        {
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(imageBmp));
+            using (var fs = new System.IO.FileStream(path, System.IO.FileMode.Create, System.IO.FileAccess.Write))
+            {
+                encoder.Save(fs);
+            }
+        }
+
+        private static void SaveBitmapAsPdf(System.Windows.Media.Imaging.BitmapSource imageBmp, string path)
+        {
+            byte[] jpegBytes;
+            using (var ms = new System.IO.MemoryStream())
+            {
+                var jpeg = new System.Windows.Media.Imaging.JpegBitmapEncoder { QualityLevel = 90 };
+                jpeg.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(imageBmp));
+                jpeg.Save(ms);
+                jpegBytes = ms.ToArray();
+            }
+
+            int pxW = imageBmp.PixelWidth;
+            int pxH = imageBmp.PixelHeight;
+            var pageW = pxW * 72.0 / 96.0;
+            var pageH = pxH * 72.0 / 96.0;
+            var content = $"q {pageW:F2} 0 0 {pageH:F2} 0 0 cm /Im0 Do Q";
+
+            var offsets = new List<long>();
+            using (var fs = new System.IO.FileStream(path, System.IO.FileMode.Create, System.IO.FileAccess.Write))
+            using (var bw = new System.IO.BinaryWriter(fs, Encoding.ASCII))
+            {
+                void WriteAscii(string s) => bw.Write(Encoding.ASCII.GetBytes(s));
+                offsets.Add(0);
+                WriteAscii("%PDF-1.4\n");
+
+                offsets.Add(fs.Position);
+                WriteAscii("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+                offsets.Add(fs.Position);
+                WriteAscii("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+                offsets.Add(fs.Position);
+                WriteAscii($"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {pageW:F2} {pageH:F2}] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>\nendobj\n");
+
+                var contentBytes = Encoding.ASCII.GetBytes(content);
+                offsets.Add(fs.Position);
+                WriteAscii($"4 0 obj\n<< /Length {contentBytes.Length} >>\nstream\n");
+                bw.Write(contentBytes);
+                WriteAscii("\nendstream\nendobj\n");
+
+                offsets.Add(fs.Position);
+                WriteAscii($"5 0 obj\n<< /Type /XObject /Subtype /Image /Width {pxW} /Height {pxH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {jpegBytes.Length} >>\nstream\n");
+                bw.Write(jpegBytes);
+                WriteAscii("\nendstream\nendobj\n");
+
+                var xrefStart = fs.Position;
+                WriteAscii($"xref\n0 {offsets.Count}\n");
+                WriteAscii("0000000000 65535 f \n");
+                for (int i = 1; i < offsets.Count; i++) WriteAscii($"{offsets[i]:D10} 00000 n \n");
+                WriteAscii($"trailer\n<< /Size {offsets.Count} /Root 1 0 R >>\nstartxref\n{xrefStart}\n%%EOF");
+            }
+        }
+
+        private FrameworkElement BuildBillPrintVisual(BillPreviewData preview)
+        {
+            var page = new Border
+            {
+                Width = 1100,
+                Padding = new Thickness(24),
+                Background = Brushes.White,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(180, 180, 180)),
+                BorderThickness = new Thickness(1)
+            };
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            page.Child = root;
+
+            // Fixed-position header using positions derived from provided bill format.xlsx.
+            var topCanvas = new Canvas { Height = 150, Margin = new Thickness(0, 0, 0, 6) };
+            var billMetaBox = new Border
+            {
+                BorderBrush = Brushes.Black,
+                BorderThickness = new Thickness(1),
+                Background = Brushes.White,
+                Width = 300,
+                Height = 72
+            };
+            var billMetaGrid = new Grid();
+            billMetaGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            billMetaGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            billMetaGrid.Children.Add(new Border { BorderBrush = Brushes.Black, BorderThickness = new Thickness(0, 0, 0, 1) });
+            var billNoText = new TextBlock
+            {
+                Text = $"Bill No. : {preview.BillNo}",
+                FontSize = 14,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.Black,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(8, 0, 8, 0)
+            };
+            billMetaGrid.Children.Add(billNoText);
+
+            var billDateText = new TextBlock
+            {
+                Text = $"Date : {preview.BillDate}",
+                FontSize = 14,
+                Foreground = Brushes.Black,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(8, 0, 8, 0)
+            };
+            Grid.SetRow(billDateText, 1);
+            billMetaGrid.Children.Add(billDateText);
+            billMetaBox.Child = billMetaGrid;
+            Canvas.SetLeft(billMetaBox, 24);   // left aligned as requested
+            Canvas.SetTop(billMetaBox, 24);
+            topCanvas.Children.Add(billMetaBox);
+
+            var toText = new TextBlock
+            {
+                Text = "To",
+                FontSize = 16,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.Black
+            };
+            Canvas.SetLeft(toText, 360);      // Excel: row4 around col E
+            Canvas.SetTop(toText, 4);
+            topCanvas.Children.Add(toText);
+
+            var partyBox = new Border
+            {
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+                Margin = new Thickness(0)
+            };
+            var partyStack = new StackPanel();
+            partyStack.Children.Add(new TextBlock { Text = preview.Party, FontSize = 15, FontWeight = FontWeights.Bold, TextWrapping = TextWrapping.Wrap });
+            if (!string.IsNullOrWhiteSpace(preview.PartyAddress))
+                partyStack.Children.Add(new TextBlock { Text = preview.PartyAddress, FontSize = 13, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
+            partyStack.Children.Add(new TextBlock { Text = $"Party GST No. : {preview.PartyGST}", FontSize = 13, Margin = new Thickness(0, 4, 0, 0) });
+            partyStack.Children.Add(new TextBlock { Text = $"State Code : {preview.PartyStateCode}", FontSize = 13, Margin = new Thickness(0, 2, 0, 0) });
+            partyBox.Child = partyStack;
+
+            Canvas.SetLeft(partyBox, 430);      // Excel: row5-row8 around col F-L area
+            Canvas.SetTop(partyBox, 26);
+            partyBox.Width = 610;
+            topCanvas.Children.Add(partyBox);
+
+            root.Children.Add(topCanvas);
+
+            var grid = new DataGrid
+            {
+                AutoGenerateColumns = false,
+                CanUserAddRows = false,
+                CanUserDeleteRows = false,
+                IsReadOnly = true,
+                HeadersVisibility = DataGridHeadersVisibility.Column,
+                GridLinesVisibility = DataGridGridLinesVisibility.All,
+                BorderBrush = Brushes.Black,
+                BorderThickness = new Thickness(1),
+                RowHeight = 76,
+                FontSize = 13,
+                ItemsSource = preview.Lines
+            };
+            var centeredHeaderStyle = new Style(typeof(DataGridColumnHeader));
+            centeredHeaderStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Center));
+            centeredHeaderStyle.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
+            centeredHeaderStyle.Setters.Add(new Setter(Control.FontWeightProperty, FontWeights.SemiBold));
+            grid.ColumnHeaderStyle = centeredHeaderStyle;
+
+            var centeredTextStyle = new Style(typeof(TextBlock));
+            centeredTextStyle.Setters.Add(new Setter(TextBlock.TextAlignmentProperty, TextAlignment.Center));
+            centeredTextStyle.Setters.Add(new Setter(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center));
+            centeredTextStyle.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
+
+            grid.Columns.Add(new DataGridTextColumn { Header = "C/N No", Binding = new Binding("LRNo"), Width = 90, ElementStyle = centeredTextStyle });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Date", Binding = new Binding("LRDate"), Width = 90, ElementStyle = centeredTextStyle });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Invoice No", Binding = new Binding("Invoice"), Width = 150, ElementStyle = centeredTextStyle });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Vehicle No.", Binding = new Binding("Vehicle"), Width = 110, ElementStyle = centeredTextStyle });
+            var freightHeader = new StackPanel { Orientation = Orientation.Vertical };
+            freightHeader.Children.Add(new TextBlock
+            {
+                Text = "FREIGHT CHARGES FOR TRANSPORTATION",
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                TextAlignment = TextAlignment.Center
+            });
+            var freightHeaderSub = new Grid { Margin = new Thickness(4, 2, 4, 0) };
+            freightHeaderSub.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            freightHeaderSub.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var fromHdr = new TextBlock { Text = "From", HorizontalAlignment = HorizontalAlignment.Left, FontSize = 11 };
+            var toHdr = new TextBlock { Text = "To", HorizontalAlignment = HorizontalAlignment.Right, FontSize = 11 };
+            Grid.SetColumn(fromHdr, 0);
+            Grid.SetColumn(toHdr, 1);
+            freightHeaderSub.Children.Add(fromHdr);
+            freightHeaderSub.Children.Add(toHdr);
+            freightHeader.Children.Add(freightHeaderSub);
+
+            var freightCellTemplate = new DataTemplate();
+            var freightCellStack = new FrameworkElementFactory(typeof(StackPanel));
+            freightCellStack.SetValue(StackPanel.OrientationProperty, Orientation.Vertical);
+            freightCellStack.SetValue(FrameworkElement.MarginProperty, new Thickness(4, 0, 4, 0));
+
+            var routeRow = new FrameworkElementFactory(typeof(DockPanel));
+            routeRow.SetValue(DockPanel.LastChildFillProperty, true);
+
+            var toCell = new FrameworkElementFactory(typeof(TextBlock));
+            toCell.SetBinding(TextBlock.TextProperty, new Binding("To"));
+            toCell.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap);
+            toCell.SetValue(TextBlock.WidthProperty, 120.0);
+            toCell.SetValue(TextBlock.TextAlignmentProperty, TextAlignment.Center);
+            toCell.SetValue(TextBlock.FontWeightProperty, FontWeights.SemiBold);
+            toCell.SetValue(DockPanel.DockProperty, Dock.Right);
+
+            var fromCell = new FrameworkElementFactory(typeof(TextBlock));
+            fromCell.SetBinding(TextBlock.TextProperty, new Binding("From"));
+            fromCell.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap);
+            fromCell.SetValue(TextBlock.WidthProperty, 120.0);
+            fromCell.SetValue(TextBlock.TextAlignmentProperty, TextAlignment.Center);
+            fromCell.SetValue(TextBlock.FontWeightProperty, FontWeights.SemiBold);
+            fromCell.SetValue(DockPanel.DockProperty, Dock.Left);
+
+            routeRow.AppendChild(fromCell);
+            routeRow.AppendChild(toCell);
+
+            var chargesCell = new FrameworkElementFactory(typeof(TextBlock));
+            chargesCell.SetBinding(TextBlock.TextProperty, new Binding("ChargesBreakdown"));
+            chargesCell.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap);
+            chargesCell.SetValue(TextBlock.FontSizeProperty, 13.0);
+            chargesCell.SetValue(TextBlock.MarginProperty, new Thickness(0, 2, 0, 0));
+            chargesCell.SetValue(TextBlock.ForegroundProperty, Brushes.Black);
+            chargesCell.SetValue(TextBlock.TextAlignmentProperty, TextAlignment.Center);
+            chargesCell.SetValue(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+
+            freightCellStack.AppendChild(routeRow);
+            freightCellStack.AppendChild(chargesCell);
+            freightCellTemplate.VisualTree = freightCellStack;
+
+            grid.Columns.Add(new DataGridTemplateColumn
+            {
+                Header = freightHeader,
+                CellTemplate = freightCellTemplate,
+                Width = 290
+            });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Weight", Binding = new Binding("WeightOrType"), Width = 110, ElementStyle = centeredTextStyle });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Rate", Binding = new Binding("Rate"), Width = 90, ElementStyle = centeredTextStyle });
+            var amountTemplate = new DataTemplate();
+            var amountText = new FrameworkElementFactory(typeof(TextBlock));
+            amountText.SetBinding(TextBlock.TextProperty, new Binding("Amount"));
+            amountText.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap);
+            amountText.SetValue(TextBlock.TextAlignmentProperty, TextAlignment.Center);
+            amountText.SetValue(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            amountText.SetValue(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Top);
+            amountText.SetValue(TextBlock.MarginProperty, new Thickness(2, 0, 2, 0));
+            amountTemplate.VisualTree = amountText;
+            grid.Columns.Add(new DataGridTemplateColumn { Header = "Amount", CellTemplate = amountTemplate, Width = 110 });
+            Grid.SetRow(grid, 2);
+            root.Children.Add(grid);
+
+            var totalRow = new Grid { Margin = new Thickness(0, 8, 0, 0) };
+            totalRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            totalRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            totalRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
+            totalRow.Children.Add(new TextBlock { Text = $"Rupees in Words : {preview.TotalWords}", FontSize = 13, FontWeight = FontWeights.SemiBold });
+            var totalLabel = new TextBlock { Text = "Total", FontSize = 13, FontWeight = FontWeights.Bold, Margin = new Thickness(12, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(totalLabel, 1);
+            totalRow.Children.Add(totalLabel);
+            var totalValue = new Border
+            {
+                BorderBrush = Brushes.Black,
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(8, 4, 8, 4),
+                Child = new TextBlock { Text = preview.Total, FontSize = 13, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Right }
+            };
+            Grid.SetColumn(totalValue, 2);
+            totalRow.Children.Add(totalValue);
+            Grid.SetRow(totalRow, 3);
+            root.Children.Add(totalRow);
+
+            var footer = new Grid { Margin = new Thickness(0, 22, 0, 0) };
+            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(340) });
+            footer.Children.Add(new TextBlock { Text = "Encl…………Ack / ment", FontSize = 12 });
+            var sign = new TextBlock { Text = "For Awagaman Trans Logistics", FontSize = 13, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Right };
+            Grid.SetColumn(sign, 1);
+            footer.Children.Add(sign);
+            Grid.SetRow(footer, 4);
+            root.Children.Add(footer);
+
+            return page;
+        }
+
+        private List<BillEntry> GetBillEntriesForBillNo(string billNo)
+        {
+            var key = (billNo ?? string.Empty).Trim();
+            var rows = new List<BillEntry>();
+            if (key.Length == 0) return rows;
+            try
+            {
+                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                {
+                    conn.Open();
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = @"SELECT Id, Sr, BillNo, BillDate, Party, LRNo, LRDate, FromLoc, ToLoc, VehicleType, Freight, Detention, HML, OTHR, RCVD, TDS, DED, MOP, MR, Remarks, Date
+                                            FROM Bills
+                                            WHERE TRIM(COALESCE(BillNo,'')) = @bill
+                                            ORDER BY Sr, Id;";
+                        cmd.Parameters.AddWithValue("@bill", key);
+                        using (var r = cmd.ExecuteReader())
+                        {
+                            while (r.Read())
+                            {
+                                rows.Add(new BillEntry
+                                {
+                                    Id = Convert.ToInt32(r["Id"]),
+                                    Sr = Convert.ToInt32(r["Sr"]),
+                                    BillNo = r["BillNo"] as string,
+                                    BillDate = DateTime.TryParse(r["BillDate"] as string, out var bd) ? bd : DateTime.Today,
+                                    Party = r["Party"] as string,
+                                    LRNo = r["LRNo"] as string,
+                                    LRDate = DateTime.TryParse(r["LRDate"] as string, out var ld) ? ld : (DateTime?)null,
+                                    From = r["FromLoc"] as string,
+                                    To = r["ToLoc"] as string,
+                                    VehicleType = r["VehicleType"] as string,
+                                    Freight = Convert.ToDecimal(r["Freight"]),
+                                    Detention = Convert.ToDecimal(r["Detention"]),
+                                    HML = Convert.ToDecimal(r["HML"]),
+                                    OTHR = Convert.ToDecimal(r["OTHR"]),
+                                    RCVD = Convert.ToDecimal(r["RCVD"]),
+                                    TDS = Convert.ToDecimal(r["TDS"]),
+                                    DED = Convert.ToDecimal(r["DED"]),
+                                    MOP = r["MOP"] as string,
+                                    MR = r["MR"] as string,
+                                    Remarks = r["Remarks"] as string,
+                                    Date = DateTime.TryParse(r["Date"] as string, out var dt) ? dt : DateTime.Today
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+            return rows;
+        }
+
+        private static string NumberToWords(long number)
+        {
+            if (number == 0) return "Zero";
+            if (number < 0) return "Minus " + NumberToWords(Math.Abs(number));
+            string[] units = { "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen" };
+            string[] tens = { "", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety" };
+            if (number < 20) return units[number];
+            if (number < 100) return tens[number / 10] + (number % 10 > 0 ? " " + units[number % 10] : "");
+            if (number < 1000) return units[number / 100] + " Hundred" + (number % 100 > 0 ? " " + NumberToWords(number % 100) : "");
+            if (number < 100000) return NumberToWords(number / 1000) + " Thousand" + (number % 1000 > 0 ? " " + NumberToWords(number % 1000) : "");
+            if (number < 10000000) return NumberToWords(number / 100000) + " Lakh" + (number % 100000 > 0 ? " " + NumberToWords(number % 100000) : "");
+            return NumberToWords(number / 10000000) + " Crore" + (number % 10000000 > 0 ? " " + NumberToWords(number % 10000000) : "");
+        }
+
+        private static string BuildChargesLabelLines(decimal hamali, decimal detention, decimal other)
+        {
+            var lines = new List<string>();
+            if (hamali != 0m) lines.Add("Hamali");
+            if (detention != 0m) lines.Add("Detention");
+            if (other != 0m) lines.Add("Other");
+            return string.Join("\n", lines);
+        }
+
+        private static string BuildAmountLines(decimal freight, decimal hamali, decimal detention, decimal other)
+        {
+            var lines = new List<string>();
+            if (freight != 0m) lines.Add(freight.ToString("0.##"));
+            if (hamali != 0m) lines.Add(hamali.ToString("0.##"));
+            if (detention != 0m) lines.Add(detention.ToString("0.##"));
+            if (other != 0m) lines.Add(other.ToString("0.##"));
+            return string.Join("\n", lines);
+        }
+
+        private string GetLRInvoice(string lrNo)
+        {
+            var key = (lrNo ?? string.Empty).Trim();
+            if (key.Length == 0) return string.Empty;
+            try
+            {
+                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                {
+                    conn.Open();
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT Invoice FROM LREntries WHERE TRIM(COALESCE(LRNo,'')) = @lr LIMIT 1;";
+                        cmd.Parameters.AddWithValue("@lr", key);
+                        var obj = cmd.ExecuteScalar();
+                        return (obj == null || obj == DBNull.Value) ? string.Empty : Convert.ToString(obj);
+                    }
+                }
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private string GetLRVehicleNo(string lrNo)
+        {
+            var key = (lrNo ?? string.Empty).Trim();
+            if (key.Length == 0) return string.Empty;
+            try
+            {
+                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                {
+                    conn.Open();
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT VehicleNo FROM LREntries WHERE TRIM(COALESCE(LRNo,'')) = @lr LIMIT 1;";
+                        cmd.Parameters.AddWithValue("@lr", key);
+                        var obj = cmd.ExecuteScalar();
+                        return (obj == null || obj == DBNull.Value) ? string.Empty : Convert.ToString(obj);
+                    }
+                }
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
         private sealed class LRFieldLayout
         {
             public double X { get; set; }
@@ -5559,6 +6323,22 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                 System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\LR format.png")),
                 System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\..\LR format.png")),
                 System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\..\..\LR format.png"))
+            };
+            foreach (var p in candidates)
+            {
+                if (System.IO.File.Exists(p)) return p;
+            }
+            return string.Empty;
+        }
+
+        private static string ResolveBillFormatTemplatePath()
+        {
+            var candidates = new[]
+            {
+                System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bill format.png"),
+                System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\bill format.png")),
+                System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\..\bill format.png")),
+                System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\..\..\bill format.png"))
             };
             foreach (var p in candidates)
             {

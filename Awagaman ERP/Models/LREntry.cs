@@ -29,6 +29,7 @@ namespace Awagaman_ERP.Models
         private string _pkgType;
         private string _description;
         private string _invoice;
+        private string _value;
         private string _chNo;
         private decimal _totalFreight;
         private decimal _hamali;
@@ -74,6 +75,7 @@ namespace Awagaman_ERP.Models
         public string PkgType { get => _pkgType; set { _pkgType = value; OnPropertyChanged(); } }
         public string Description { get => _description; set { _description = value; OnPropertyChanged(); } }
         public string Invoice { get => _invoice; set { _invoice = value; OnPropertyChanged(); } }
+        public string Value { get => _value; set { _value = value; OnPropertyChanged(); } }
         public string CHNo { get => _chNo; set { _chNo = value; OnPropertyChanged(); } }
         
         public decimal TotalFreight 

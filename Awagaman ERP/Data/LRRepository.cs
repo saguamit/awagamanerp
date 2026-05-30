@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Globalization;
 using Awagaman_ERP.Models;
 
 namespace Awagaman_ERP.Data
@@ -120,15 +121,16 @@ namespace Awagaman_ERP.Data
                 To = reader["ToLocation"] as string,
                 VehicleNo = reader["VehicleNo"] as string,
                 VehicleType = reader["VehicleType"] as string,
-                SizeL = Convert.ToDecimal(reader["SizeL"]),
-                SizeW = Convert.ToDecimal(reader["SizeW"]),
-                SizeH = Convert.ToDecimal(reader["SizeH"]),
-                ActualWeight = Convert.ToDecimal(reader["ActualWeight"]),
-                ChargedWeight = Convert.ToDecimal(reader["ChargedWeight"]),
+                SizeL = NormalizeDisplayDecimal(Convert.ToDecimal(reader["SizeL"])),
+                SizeW = NormalizeDisplayDecimal(Convert.ToDecimal(reader["SizeW"])),
+                SizeH = NormalizeDisplayDecimal(Convert.ToDecimal(reader["SizeH"])),
+                ActualWeight = NormalizeDisplayDecimal(Convert.ToDecimal(reader["ActualWeight"])),
+                ChargedWeight = NormalizeDisplayDecimal(Convert.ToDecimal(reader["ChargedWeight"])),
                 PKG = Convert.ToInt32(reader["PKG"]),
                 PkgType = reader["PkgType"] as string,
                 Description = reader["Description"] as string,
                 Invoice = reader["Invoice"] as string,
+                Value = reader["Value"] as string,
                 CHNo = reader["CHNo"] as string,
                 TotalFreight = Convert.ToDecimal(reader["TotalFreight"]),
                 Hamali = Convert.ToDecimal(reader["Hamali"]),
@@ -168,12 +170,12 @@ namespace Awagaman_ERP.Data
 INSERT INTO LREntries (
     Sr, LRNo, Date, ConsignorName, ConsignorAddress, ConsignorGST,
     ConsigneeName, ConsigneeAddress, ConsigneeGST, FromLocation, ToLocation,
-    VehicleNo, VehicleType, SizeL, SizeW, SizeH, ActualWeight, ChargedWeight, PKG, PkgType, Description, Invoice, CHNo,
+    VehicleNo, VehicleType, Weight, SizeL, SizeW, SizeH, ActualWeight, ChargedWeight, PKG, PkgType, Description, Invoice, Value, CHNo,
     TotalFreight, Hamali, Detention, Others, NEFT, CASH, TDS, Ded, BillNo, BillDate, BILL, BillParty, Broker, FrtType, PayType, Comm, Paid
 ) VALUES (
     @Sr, @LRNo, @Date, @ConsignorName, @ConsignorAddress, @ConsignorGST,
     @ConsigneeName, @ConsigneeAddress, @ConsigneeGST, @FromLocation, @ToLocation,
-    @VehicleNo, @VehicleType, @SizeL, @SizeW, @SizeH, @ActualWeight, @ChargedWeight, @PKG, @PkgType, @Description, @Invoice, @CHNo,
+    @VehicleNo, @VehicleType, @Weight, @SizeL, @SizeW, @SizeH, @ActualWeight, @ChargedWeight, @PKG, @PkgType, @Description, @Invoice, @Value, @CHNo,
     @TotalFreight, @Hamali, @Detention, @Others, @NEFT, @CASH, @TDS, @Ded, @BillNo, @BillDate, @BILL, @BillParty, @Broker, @FrtType, @PayType, @Comm, @Paid
 );
 SELECT last_insert_rowid();";
@@ -197,6 +199,7 @@ UPDATE LREntries SET
     ToLocation = @ToLocation,
     VehicleNo = @VehicleNo,
     VehicleType = @VehicleType,
+    Weight = @Weight,
     SizeL = @SizeL,
     SizeW = @SizeW,
     SizeH = @SizeH,
@@ -206,6 +209,7 @@ UPDATE LREntries SET
     PkgType = @PkgType,
     Description = @Description,
     Invoice = @Invoice,
+    Value = @Value,
     CHNo = @CHNo,
     TotalFreight = @TotalFreight,
     Hamali = @Hamali,
@@ -273,6 +277,7 @@ WHERE Id = @Id;";
             command.Parameters.AddWithValue("@ToLocation", (object)entry.To ?? DBNull.Value);
             command.Parameters.AddWithValue("@VehicleNo", (object)entry.VehicleNo ?? DBNull.Value);
             command.Parameters.AddWithValue("@VehicleType", (object)entry.VehicleType ?? DBNull.Value);
+            command.Parameters.AddWithValue("@Weight", entry.ActualWeight);
             command.Parameters.AddWithValue("@SizeL", entry.SizeL);
             command.Parameters.AddWithValue("@SizeW", entry.SizeW);
             command.Parameters.AddWithValue("@SizeH", entry.SizeH);
@@ -282,6 +287,7 @@ WHERE Id = @Id;";
             command.Parameters.AddWithValue("@PkgType", (object)entry.PkgType ?? DBNull.Value);
             command.Parameters.AddWithValue("@Description", (object)entry.Description ?? DBNull.Value);
             command.Parameters.AddWithValue("@Invoice", (object)entry.Invoice ?? DBNull.Value);
+            command.Parameters.AddWithValue("@Value", (object)entry.Value ?? DBNull.Value);
             command.Parameters.AddWithValue("@CHNo", (object)entry.CHNo ?? DBNull.Value);
             command.Parameters.AddWithValue("@TotalFreight", entry.TotalFreight);
             command.Parameters.AddWithValue("@Hamali", entry.Hamali);
@@ -312,6 +318,13 @@ WHERE Id = @Id;";
         {
             var raw = value as string;
             return DateTime.TryParse(raw, out var parsed) ? parsed : (DateTime?)null;
+        }
+
+        // Remove trailing zeros at value level so grids that fall back to default ToString
+        // still show 75 instead of 75.00 for these dimension/weight fields.
+        private static decimal NormalizeDisplayDecimal(decimal value)
+        {
+            return decimal.Parse(value.ToString("0.####################", CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
         }
 
         private static string BuildOrderBy(string sortColumn, bool ascending)
@@ -352,6 +365,7 @@ LRNo {dir}, Sr, Id";
                 case "pkgtype": return $"PkgType {dir}, Sr, Id";
                 case "description": return $"Description {dir}, Sr, Id";
                 case "invoice": return $"Invoice {dir}, Sr, Id";
+                case "value": return $"Value {dir}, Sr, Id";
                 case "chno": return $"CHNo {dir}, Sr, Id";
                 case "totalfreight": return $"TotalFreight {dir}, Sr, Id";
                 case "hamali": return $"Hamali {dir}, Sr, Id";

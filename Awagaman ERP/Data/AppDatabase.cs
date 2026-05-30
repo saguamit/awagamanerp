@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS LREntries (
     ToLocation TEXT,
     VehicleNo TEXT,
     VehicleType TEXT,
+    Weight REAL NOT NULL DEFAULT 0,
     SizeL REAL NOT NULL DEFAULT 0,
     SizeW REAL NOT NULL DEFAULT 0,
     SizeH REAL NOT NULL DEFAULT 0,
@@ -119,6 +120,7 @@ CREATE TABLE IF NOT EXISTS LREntries (
     PkgType TEXT,
     Description TEXT,
     Invoice TEXT,
+    Value TEXT,
     CHNo TEXT,
     TotalFreight REAL NOT NULL,
     Hamali REAL NOT NULL DEFAULT 0,
@@ -157,6 +159,8 @@ CREATE TABLE IF NOT EXISTS TrackingEntries (
 );");
 
                     try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Invoice TEXT;"); } catch { }
+                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Value TEXT;"); } catch { }
+                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Weight REAL NOT NULL DEFAULT 0;"); } catch { }
                     try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Hamali REAL NOT NULL DEFAULT 0;"); } catch { }
                     try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Detention REAL NOT NULL DEFAULT 0;"); } catch { }
                     try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Others REAL NOT NULL DEFAULT 0;"); } catch { }

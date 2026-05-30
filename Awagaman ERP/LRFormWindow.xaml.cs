@@ -100,6 +100,7 @@ namespace Awagaman_ERP
                     PkgType = entryToEdit.PkgType,
                     Description = entryToEdit.Description,
                     Invoice = entryToEdit.Invoice,
+                    Value = entryToEdit.Value,
                     CHNo = entryToEdit.CHNo,
                     TotalFreight = entryToEdit.TotalFreight,
                     Hamali = entryToEdit.Hamali,

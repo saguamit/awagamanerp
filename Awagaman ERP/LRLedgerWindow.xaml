@@ -233,14 +233,16 @@
                                     <DataGridTextColumn Header="Vehicle No." Binding="{Binding VehicleNo}" Width="100" IsReadOnly="True" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
                                     <DataGridTextColumn Header="Type" Binding="{Binding VehicleType}" Width="80" IsReadOnly="True" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
                                     
-                                    <DataGridTextColumn Header="L" Binding="{Binding SizeL}" Width="60" />
-                                    <DataGridTextColumn Header="W" Binding="{Binding SizeW}" Width="60" />
-                                    <DataGridTextColumn Header="H" Binding="{Binding SizeH}" Width="60" />
-                                    <DataGridTextColumn Header="Actual Weight" Binding="{Binding ActualWeight}" Width="90" />
-                                    <DataGridTextColumn Header="Charged Weight" Binding="{Binding ChargedWeight}" Width="100" />
+                                    <DataGridTextColumn Header="L" Binding="{Binding SizeL, StringFormat=0.####################}" Width="60" />
+                                    <DataGridTextColumn Header="W" Binding="{Binding SizeW, StringFormat=0.####################}" Width="60" />
+                                    <DataGridTextColumn Header="H" Binding="{Binding SizeH, StringFormat=0.####################}" Width="60" />
+                                    <DataGridTextColumn Header="Actual Weight" Binding="{Binding ActualWeight, StringFormat=0.####################}" Width="90" />
+                                    <DataGridTextColumn Header="Charged Weight" Binding="{Binding ChargedWeight, StringFormat=0.####################}" Width="100" />
                                     <DataGridTextColumn Header="No. of Pkg" Binding="{Binding PKG}" Width="80" />
                                     <DataGridTextColumn Header="Pkg Type" Binding="{Binding PkgType}" Width="90" />
                                     <DataGridTextColumn Header="DESCRIPTION" Binding="{Binding Description}" Width="120" />
+                                    <DataGridTextColumn Header="Invoice" Binding="{Binding Invoice}" Width="100" />
+                                    <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="100" />
                                     
                                     <DataGridTextColumn Header="CH No." Binding="{Binding CHNo}" Width="90" IsReadOnly="True" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
                                     
