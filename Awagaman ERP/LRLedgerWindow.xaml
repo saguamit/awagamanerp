@@ -8,6 +8,7 @@
         xmlns:dgx="urn:tom-englert.de/DataGridExtensions"
         mc:Ignorable="d"
         Title="LR Ledger" Height="768" Width="1366" WindowStartupLocation="CenterScreen" 
+        Icon="logo.png"
         Background="#F3F4F6">
     <Controls:MetroWindow.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
@@ -117,8 +118,8 @@
                 </Grid.RowDefinitions>
                 <Border Grid.Row="0" BorderBrush="{StaticResource BorderLight}" BorderThickness="0,0,0,1" Padding="20">
                     <StackPanel>
-                        <TextBlock Text="AWAGAMAN" Foreground="{StaticResource ThemeBlue}" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" />
-                        <TextBlock Text="Subhash Kumar" Foreground="{StaticResource ThemeBlue}" FontSize="12" HorizontalAlignment="Center" Margin="0,8,0,0" />
+                        <Image Source="logo.png" Width="62" Height="62" Stretch="Uniform" HorizontalAlignment="Center" />
+                        <TextBlock Text="Awagaman Trans Logistics" Foreground="{StaticResource ThemeBlue}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" Margin="0,8,0,0" />
                     </StackPanel>
                 </Border>
                 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden">

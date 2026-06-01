@@ -35,6 +35,7 @@ namespace Awagaman_ERP.Models
         private decimal _hamali;
         private decimal _detention;
         private decimal _others;
+        private decimal _stCharge;
         private decimal _tds;
         private decimal _ded;
         private decimal _neft;
@@ -102,6 +103,7 @@ namespace Awagaman_ERP.Models
         public decimal Hamali { get => _hamali; set { _hamali = value; OnPropertyChanged(); OnPropertyChanged(nameof(TotalBill)); OnPropertyChanged(nameof(Bal)); } }
         public decimal Detention { get => _detention; set { _detention = value; OnPropertyChanged(); OnPropertyChanged(nameof(TotalBill)); OnPropertyChanged(nameof(Bal)); } }
         public decimal Others { get => _others; set { _others = value; OnPropertyChanged(); OnPropertyChanged(nameof(TotalBill)); OnPropertyChanged(nameof(Bal)); } }
+        public decimal StCharge { get => _stCharge; set { _stCharge = value; OnPropertyChanged(); OnPropertyChanged(nameof(TotalBill)); OnPropertyChanged(nameof(Bal)); } }
         public decimal TDS { get => _tds; set { _tds = value; OnPropertyChanged(); OnPropertyChanged(nameof(Bal)); } }
         public decimal Ded { get => _ded; set { _ded = value; OnPropertyChanged(); OnPropertyChanged(nameof(Bal)); } }
         public decimal CASH 
@@ -115,7 +117,7 @@ namespace Awagaman_ERP.Models
             } 
         }
         
-        public decimal TotalBill => TotalFreight + Detention + Hamali + Others;
+        public decimal TotalBill => TotalFreight + Detention + Hamali + Others + StCharge;
         public decimal Bal => (NEFT + CASH) - TDS + Ded;
         
         public string BillNo { get => _billNo; set { _billNo = value; OnPropertyChanged(); } }

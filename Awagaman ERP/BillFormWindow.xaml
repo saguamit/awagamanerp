@@ -4,6 +4,7 @@
         xmlns:Controls="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
         Title="Generate Bill"
         Height="650" Width="900"
+        Icon="logo.png"
         WindowStartupLocation="CenterOwner"
         Background="#EEEEEE"
         BorderThickness="1"

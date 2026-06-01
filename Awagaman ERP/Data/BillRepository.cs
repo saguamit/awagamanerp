@@ -27,6 +27,7 @@ namespace Awagaman_ERP.Data
                 Detention = GetDecimal(r["Detention"]),
                 HML = GetDecimal(r["HML"]),
                 OTHR = GetDecimal(r["OTHR"]),
+                StCharge = GetDecimal(r["StCharge"]),
                 RCVD = GetDecimal(r["RCVD"]),
                 TDS = GetDecimal(r["TDS"]),
                 DED = GetDecimal(r["DED"]),
@@ -98,14 +99,14 @@ namespace Awagaman_ERP.Data
                 if (e.Id <= 0)
                 {
                     cmd.CommandText = @"INSERT INTO Bills (Sr, BillNo, BillDate, Party, LRNo, LRDate, FromLoc, ToLoc, VehicleType,
-                        Freight, Detention, HML, OTHR, RCVD, TDS, DED, MOP, MR, Remarks, Date) VALUES (@Sr,@BillNo,@BillDate,@Party,@LRNo,@LRDate,@FromLoc,@ToLoc,@VehicleType,
-                        @Freight,@Detention,@HML,@OTHR,@RCVD,@TDS,@DED,@MOP,@MR,@Remarks,@Date); SELECT last_insert_rowid();";
+                        Freight, Detention, HML, OTHR, StCharge, RCVD, TDS, DED, MOP, MR, Remarks, Date) VALUES (@Sr,@BillNo,@BillDate,@Party,@LRNo,@LRDate,@FromLoc,@ToLoc,@VehicleType,
+                        @Freight,@Detention,@HML,@OTHR,@StCharge,@RCVD,@TDS,@DED,@MOP,@MR,@Remarks,@Date); SELECT last_insert_rowid();";
                 }
                 else
                 {
                     cmd.CommandText = @"UPDATE Bills SET Sr=@Sr, BillNo=@BillNo, BillDate=@BillDate, Party=@Party, LRNo=@LRNo, LRDate=@LRDate,
                         FromLoc=@FromLoc, ToLoc=@ToLoc, VehicleType=@VehicleType, Freight=@Freight, Detention=@Detention,
-                        HML=@HML, OTHR=@OTHR, RCVD=@RCVD, TDS=@TDS, DED=@DED, MOP=@MOP, MR=@MR, Remarks=@Remarks, Date=@Date WHERE Id=@Id;";
+                        HML=@HML, OTHR=@OTHR, StCharge=@StCharge, RCVD=@RCVD, TDS=@TDS, DED=@DED, MOP=@MOP, MR=@MR, Remarks=@Remarks, Date=@Date WHERE Id=@Id;";
                     cmd.Parameters.AddWithValue("@Id", e.Id);
                 }
                 cmd.Parameters.AddWithValue("@Sr", e.Sr);
@@ -121,6 +122,7 @@ namespace Awagaman_ERP.Data
                 cmd.Parameters.AddWithValue("@Detention", e.Detention);
                 cmd.Parameters.AddWithValue("@HML", e.HML);
                 cmd.Parameters.AddWithValue("@OTHR", e.OTHR);
+                cmd.Parameters.AddWithValue("@StCharge", e.StCharge);
                 cmd.Parameters.AddWithValue("@RCVD", e.RCVD);
                 cmd.Parameters.AddWithValue("@TDS", e.TDS);
                 cmd.Parameters.AddWithValue("@DED", e.DED);
@@ -197,11 +199,12 @@ LRNo {d}, Sr, Id";
                 case "detention": return $"Detention {d}, Sr, Id";
                 case "hml": return $"HML {d}, Sr, Id";
                 case "othr": return $"OTHR {d}, Sr, Id";
-                case "total": return $"(Freight+Detention+HML+OTHR) {d}, Sr, Id";
+                case "stcharge": return $"StCharge {d}, Sr, Id";
+                case "total": return $"(Freight+Detention+HML+OTHR+StCharge) {d}, Sr, Id";
                 case "rcvd": return $"RCVD {d}, Sr, Id";
                 case "tds": return $"TDS {d}, Sr, Id";
                 case "ded": return $"DED {d}, Sr, Id";
-                case "due": return $"(Freight+Detention+HML+OTHR-RCVD-TDS-DED) {d}, Sr, Id";
+                case "due": return $"(Freight+Detention+HML+OTHR+StCharge-RCVD-TDS-DED) {d}, Sr, Id";
                 case "mop": return $"MOP {d}, Sr, Id";
                 case "mr": return $"MR {d}, Sr, Id";
                 case "remarks": return $"Remarks {d}, Sr, Id";

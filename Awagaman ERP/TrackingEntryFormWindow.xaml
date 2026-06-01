@@ -6,6 +6,7 @@
         xmlns:Controls="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
         mc:Ignorable="d"
         Title="Tracking Entry Details" Height="650" Width="800" WindowStartupLocation="CenterOwner"
+        Icon="logo.png"
         Background="#EEEEEE" Focusable="True" Loaded="Window_Loaded">
     <Controls:MetroWindow.Resources>
         <SolidColorBrush x:Key="ThemeBlue" Color="#18609A" />

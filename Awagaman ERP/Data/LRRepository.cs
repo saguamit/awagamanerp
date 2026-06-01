@@ -136,6 +136,7 @@ namespace Awagaman_ERP.Data
                 Hamali = Convert.ToDecimal(reader["Hamali"]),
                 Detention = Convert.ToDecimal(reader["Detention"]),
                 Others = Convert.ToDecimal(reader["Others"]),
+                StCharge = Convert.ToDecimal(reader["StCharge"]),
                 NEFT = Convert.ToDecimal(reader["NEFT"]),
                 CASH = Convert.ToDecimal(reader["CASH"]),
                 TDS = Convert.ToDecimal(reader["TDS"]),
@@ -171,12 +172,12 @@ INSERT INTO LREntries (
     Sr, LRNo, Date, ConsignorName, ConsignorAddress, ConsignorGST,
     ConsigneeName, ConsigneeAddress, ConsigneeGST, FromLocation, ToLocation,
     VehicleNo, VehicleType, Weight, SizeL, SizeW, SizeH, ActualWeight, ChargedWeight, PKG, PkgType, Description, Invoice, Value, CHNo,
-    TotalFreight, Hamali, Detention, Others, NEFT, CASH, TDS, Ded, BillNo, BillDate, BILL, BillParty, Broker, FrtType, PayType, Comm, Paid
+    TotalFreight, Hamali, Detention, Others, StCharge, NEFT, CASH, TDS, Ded, BillNo, BillDate, BILL, BillParty, Broker, FrtType, PayType, Comm, Paid
 ) VALUES (
     @Sr, @LRNo, @Date, @ConsignorName, @ConsignorAddress, @ConsignorGST,
     @ConsigneeName, @ConsigneeAddress, @ConsigneeGST, @FromLocation, @ToLocation,
     @VehicleNo, @VehicleType, @Weight, @SizeL, @SizeW, @SizeH, @ActualWeight, @ChargedWeight, @PKG, @PkgType, @Description, @Invoice, @Value, @CHNo,
-    @TotalFreight, @Hamali, @Detention, @Others, @NEFT, @CASH, @TDS, @Ded, @BillNo, @BillDate, @BILL, @BillParty, @Broker, @FrtType, @PayType, @Comm, @Paid
+    @TotalFreight, @Hamali, @Detention, @Others, @StCharge, @NEFT, @CASH, @TDS, @Ded, @BillNo, @BillDate, @BILL, @BillParty, @Broker, @FrtType, @PayType, @Comm, @Paid
 );
 SELECT last_insert_rowid();";
                     AddParameters(command, entry);
@@ -215,6 +216,7 @@ UPDATE LREntries SET
     Hamali = @Hamali,
     Detention = @Detention,
     Others = @Others,
+    StCharge = @StCharge,
     NEFT = @NEFT,
     CASH = @CASH,
     TDS = @TDS,
@@ -293,6 +295,7 @@ WHERE Id = @Id;";
             command.Parameters.AddWithValue("@Hamali", entry.Hamali);
             command.Parameters.AddWithValue("@Detention", entry.Detention);
             command.Parameters.AddWithValue("@Others", entry.Others);
+            command.Parameters.AddWithValue("@StCharge", entry.StCharge);
             command.Parameters.AddWithValue("@NEFT", entry.NEFT);
             command.Parameters.AddWithValue("@CASH", entry.CASH);
             command.Parameters.AddWithValue("@TDS", entry.TDS);
@@ -371,7 +374,8 @@ LRNo {dir}, Sr, Id";
                 case "hamali": return $"Hamali {dir}, Sr, Id";
                 case "detention": return $"Detention {dir}, Sr, Id";
                 case "others": return $"Others {dir}, Sr, Id";
-                case "totalbill": return $"(TotalFreight + Detention + Hamali + Others) {dir}, Sr, Id";
+                case "stcharge": return $"StCharge {dir}, Sr, Id";
+                case "totalbill": return $"(TotalFreight + Detention + Hamali + Others + StCharge) {dir}, Sr, Id";
                 case "neft": return $"NEFT {dir}, Sr, Id";
                 case "cash": return $"CASH {dir}, Sr, Id";
                 case "tds": return $"TDS {dir}, Sr, Id";

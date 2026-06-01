@@ -9,6 +9,7 @@
         Title="LR Entry"
         Height="760"
         Width="1180"
+        Icon="logo.png"
         MinWidth="1040"
         MinHeight="700"
         WindowState="Normal"
@@ -370,6 +371,8 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="16" />
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
 
                             <StackPanel Grid.Column="0">
@@ -387,6 +390,10 @@
                             <StackPanel Grid.Column="6">
                                 <TextBlock Text="Others" Style="{StaticResource FieldLabelStyle}" />
                                 <TextBox Text="{Binding CurrentEntry.Others, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="8">
+                                <TextBlock Text="St. Charge" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding CurrentEntry.StCharge, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" GotKeyboardFocus="NumericBox_GotKeyboardFocus" PreviewMouseLeftButtonDown="NumericBox_PreviewMouseLeftButtonDown" />
                             </StackPanel>
                         </Grid>
 

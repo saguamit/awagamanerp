@@ -264,6 +264,7 @@
       <Link>bill format.xlsx</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <Resource Include="logo.png" />
     <None Include="lr_format_layout.default.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

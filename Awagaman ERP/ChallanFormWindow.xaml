@@ -9,6 +9,7 @@
         Title="Delivery Challan Entry"
         Height="680"
         Width="960"
+        Icon="logo.png"
         WindowState="Maximized"
         WindowStartupLocation="CenterOwner"
         Background="#EEEEEE"

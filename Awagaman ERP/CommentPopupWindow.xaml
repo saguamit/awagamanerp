@@ -4,6 +4,7 @@
         xmlns:Controls="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
         Title="Comments"
         Height="400" Width="400"
+        Icon="logo.png"
         WindowStartupLocation="CenterOwner"
         Background="#FAFAFA"
         BorderThickness="1" BorderBrush="#18609A">

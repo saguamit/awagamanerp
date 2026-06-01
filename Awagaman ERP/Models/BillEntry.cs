@@ -20,6 +20,7 @@ namespace Awagaman_ERP.Models
         private decimal _detention;
         private decimal _hml;
         private decimal _othr;
+        private decimal _stCharge;
         private decimal _rcvd;
         private decimal _tds;
         private decimal _ded;
@@ -43,6 +44,7 @@ namespace Awagaman_ERP.Models
         public decimal Detention { get => _detention; set { _detention = value; OnPropertyChanged(); OnPropertyChanged(nameof(Total)); OnPropertyChanged(nameof(Due)); } }
         public decimal HML { get => _hml; set { _hml = value; OnPropertyChanged(); OnPropertyChanged(nameof(Total)); OnPropertyChanged(nameof(Due)); } }
         public decimal OTHR { get => _othr; set { _othr = value; OnPropertyChanged(); OnPropertyChanged(nameof(Total)); OnPropertyChanged(nameof(Due)); } }
+        public decimal StCharge { get => _stCharge; set { _stCharge = value; OnPropertyChanged(); OnPropertyChanged(nameof(Total)); OnPropertyChanged(nameof(Due)); } }
         public decimal RCVD { get => _rcvd; set { _rcvd = value; OnPropertyChanged(); OnPropertyChanged(nameof(Due)); } }
         public decimal TDS { get => _tds; set { _tds = value; OnPropertyChanged(); OnPropertyChanged(nameof(Due)); } }
         public decimal DED { get => _ded; set { _ded = value; OnPropertyChanged(); OnPropertyChanged(nameof(Due)); } }
@@ -50,7 +52,7 @@ namespace Awagaman_ERP.Models
         public string MR { get => _mr; set { _mr = value; OnPropertyChanged(); } }
         public string Remarks { get => _remarks; set { _remarks = value; OnPropertyChanged(); } }
         public DateTime Date { get => _date; set { _date = value; OnPropertyChanged(); } }
-        public decimal Total => Freight + Detention + HML + OTHR;
+        public decimal Total => Freight + Detention + HML + OTHR + StCharge;
         public decimal Due => Total - RCVD - TDS - DED;
 
         [System.Xml.Serialization.XmlIgnore]

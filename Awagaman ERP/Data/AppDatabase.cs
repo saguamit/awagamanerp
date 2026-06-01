@@ -126,6 +126,7 @@ CREATE TABLE IF NOT EXISTS LREntries (
     Hamali REAL NOT NULL DEFAULT 0,
     Detention REAL NOT NULL DEFAULT 0,
     Others REAL NOT NULL DEFAULT 0,
+    StCharge REAL NOT NULL DEFAULT 0,
     NEFT REAL NOT NULL,
     CASH REAL NOT NULL,
     TDS REAL NOT NULL DEFAULT 0,
@@ -164,6 +165,7 @@ CREATE TABLE IF NOT EXISTS TrackingEntries (
                     try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Hamali REAL NOT NULL DEFAULT 0;"); } catch { }
                     try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Detention REAL NOT NULL DEFAULT 0;"); } catch { }
                     try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Others REAL NOT NULL DEFAULT 0;"); } catch { }
+                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN StCharge REAL NOT NULL DEFAULT 0;"); } catch { }
                     try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN TDS REAL NOT NULL DEFAULT 0;"); } catch { }
                     try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Ded REAL NOT NULL DEFAULT 0;"); } catch { }
                     try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN SizeL REAL NOT NULL DEFAULT 0;"); } catch { }
@@ -237,6 +239,7 @@ CREATE TABLE IF NOT EXISTS Parties (
     Detention REAL DEFAULT 0,
     HML REAL DEFAULT 0,
     OTHR REAL DEFAULT 0,
+    StCharge REAL DEFAULT 0,
     RCVD REAL DEFAULT 0,
     TDS REAL DEFAULT 0,
     DED REAL DEFAULT 0,
@@ -246,6 +249,7 @@ CREATE TABLE IF NOT EXISTS Parties (
     Date TEXT
 );");
                     try { ExecuteNonQuery(connection, "ALTER TABLE Bills ADD COLUMN Remarks TEXT;"); } catch { }
+                    try { ExecuteNonQuery(connection, "ALTER TABLE Bills ADD COLUMN StCharge REAL DEFAULT 0;"); } catch { }
 
                     ExecuteNonQuery(connection, @"
 CREATE TABLE IF NOT EXISTS CBSAccounts (
@@ -319,8 +323,10 @@ CREATE TABLE IF NOT EXISTS VehicleLedger (
                         Id INTEGER PRIMARY KEY AUTOINCREMENT, Sr INTEGER NOT NULL, BillNo TEXT, BillDate TEXT,
                         Party TEXT, LRNo TEXT, LRDate TEXT, FromLoc TEXT, ToLoc TEXT, VehicleType TEXT,
                         Freight REAL DEFAULT 0, Detention REAL DEFAULT 0, HML REAL DEFAULT 0, OTHR REAL DEFAULT 0,
+                        StCharge REAL DEFAULT 0,
                         RCVD REAL DEFAULT 0, TDS REAL DEFAULT 0, DED REAL DEFAULT 0, MOP TEXT, MR TEXT, Remarks TEXT, Date TEXT);");
                     try { ExecuteNonQuery(c, "ALTER TABLE Bills ADD COLUMN Remarks TEXT;"); } catch { }
+                    try { ExecuteNonQuery(c, "ALTER TABLE Bills ADD COLUMN StCharge REAL DEFAULT 0;"); } catch { }
                     ExecuteNonQuery(c, @"CREATE TABLE IF NOT EXISTS BillComments (
                         Id INTEGER PRIMARY KEY AUTOINCREMENT, BillId INTEGER NOT NULL,
                         Comment TEXT NOT NULL, CreatedAt TEXT NOT NULL);");

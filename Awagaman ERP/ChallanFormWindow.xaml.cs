@@ -12,6 +12,7 @@ namespace Awagaman_ERP
     public partial class ChallanFormWindow : MetroWindow
     {
         public ChallanEntry Result { get; private set; }
+        public bool WasSaved { get; private set; }
         private IEnumerable<ChallanEntry> _allEntries;
         private int _editingSr;
         private readonly IChallanRepository _repository;
@@ -121,13 +122,21 @@ namespace Awagaman_ERP
             }
 
             Result.RecalculateBalance();
-            DialogResult = true;
+            WasSaved = true;
+            if (System.Windows.Interop.ComponentDispatcher.IsThreadModal)
+            {
+                DialogResult = true;
+            }
             Close();
         }
 
         private void Cancel_Click(object sender, RoutedEventArgs e)
         {
-            DialogResult = false;
+            WasSaved = false;
+            if (System.Windows.Interop.ComponentDispatcher.IsThreadModal)
+            {
+                DialogResult = false;
+            }
             Close();
         }
 

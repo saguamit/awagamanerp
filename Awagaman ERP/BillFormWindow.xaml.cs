@@ -13,6 +13,7 @@ namespace Awagaman_ERP
     public partial class BillFormWindow : MetroWindow
     {
         public BillEntry Result { get; private set; }
+        public bool WasSaved { get; private set; }
         private readonly bool _isEditMode;
         private bool _ignorePartySelection;
 
@@ -35,7 +36,7 @@ namespace Awagaman_ERP
                 LRNo = existing.LRNo, LRDate = existing.LRDate,
                 From = existing.From, To = existing.To, VehicleType = existing.VehicleType,
                 Freight = existing.Freight, Detention = existing.Detention, HML = existing.HML,
-                OTHR = existing.OTHR, RCVD = existing.RCVD, TDS = existing.TDS, DED = existing.DED,
+                OTHR = existing.OTHR, StCharge = existing.StCharge, RCVD = existing.RCVD, TDS = existing.TDS, DED = existing.DED,
                 MOP = existing.MOP, MR = existing.MR, Date = existing.Date
             };
             DataContext = Result;
@@ -59,7 +60,7 @@ namespace Awagaman_ERP
                 if (_isEditMode) return;
                 if (string.IsNullOrWhiteSpace(Result?.LRNo)) return;
                 // If values are already set explicitly, preserve them.
-                var hasManualValues = Result.Freight != 0 || Result.Detention != 0 || Result.HML != 0 || Result.OTHR != 0 || Result.RCVD != 0 || Result.TDS != 0 || Result.DED != 0;
+                var hasManualValues = Result.Freight != 0 || Result.Detention != 0 || Result.HML != 0 || Result.OTHR != 0 || Result.StCharge != 0 || Result.RCVD != 0 || Result.TDS != 0 || Result.DED != 0;
                 if (hasManualValues) return;
                 PopulateFromLRNumbers(Result.LRNo);
             }
@@ -187,7 +188,7 @@ namespace Awagaman_ERP
                         cmd.Parameters.AddWithValue(p, list[i]);
                     }
                     cmd.CommandText = $@"SELECT LRNo, Date, ConsignorName, BillParty, FromLocation, ToLocation, VehicleType,
-                        TotalFreight, Hamali, Detention, Others, NEFT, CASH, TDS, Ded
+                        TotalFreight, Hamali, Detention, Others, StCharge, NEFT, CASH, TDS, Ded
                         FROM LREntries WHERE LRNo IN ({string.Join(",", pNames)});";
                     using (var r = cmd.ExecuteReader())
                     {
@@ -206,6 +207,7 @@ namespace Awagaman_ERP
                                 Hamali = Convert.ToDecimal(r["Hamali"]),
                                 Detention = Convert.ToDecimal(r["Detention"]),
                                 Others = Convert.ToDecimal(r["Others"]),
+                                StCharge = Convert.ToDecimal(r["StCharge"]),
                                 NEFT = Convert.ToDecimal(r["NEFT"]),
                                 CASH = Convert.ToDecimal(r["CASH"]),
                                 TDS = Convert.ToDecimal(r["TDS"]),
@@ -228,6 +230,7 @@ namespace Awagaman_ERP
             Result.HML = matched.Sum(lr => lr.Hamali);
             Result.Detention = matched.Sum(lr => lr.Detention);
             Result.OTHR = matched.Sum(lr => lr.Others);
+            Result.StCharge = matched.Sum(lr => lr.StCharge);
             Result.RCVD = matched.Sum(lr => lr.NEFT + lr.CASH);
             Result.TDS = matched.Sum(lr => lr.TDS);
             Result.DED = matched.Sum(lr => lr.Ded);
@@ -254,7 +257,7 @@ namespace Awagaman_ERP
                     using (var cmd = c.CreateCommand())
                     {
                         cmd.CommandText = @"SELECT lr.Id, lr.LRNo, lr.BillNo, lr.ConsignorName, lr.BillParty, lr.FromLocation, lr.ToLocation, lr.VehicleNo, lr.VehicleType, lr.Date,
-                            lr.TotalFreight, lr.Hamali, lr.Detention, lr.Others, lr.NEFT, lr.CASH, lr.TDS, lr.Ded
+                            lr.TotalFreight, lr.Hamali, lr.Detention, lr.Others, lr.StCharge, lr.NEFT, lr.CASH, lr.TDS, lr.Ded
                             FROM LREntries lr
                             WHERE (lr.BillNo IS NULL OR lr.BillNo = '')
                             ORDER BY lr.LRNo;";
@@ -282,6 +285,7 @@ namespace Awagaman_ERP
                                     Hamali = Convert.ToDecimal(r["Hamali"]),
                                     Detention = Convert.ToDecimal(r["Detention"]),
                                     Others = Convert.ToDecimal(r["Others"]),
+                                    StCharge = Convert.ToDecimal(r["StCharge"]),
                                     NEFT = Convert.ToDecimal(r["NEFT"]),
                                     CASH = Convert.ToDecimal(r["CASH"]),
                                     TDS = Convert.ToDecimal(r["TDS"]),
@@ -397,6 +401,7 @@ namespace Awagaman_ERP
                     Result.HML += source.Sum(lr => lr.Hamali);
                     Result.Detention += source.Sum(lr => lr.Detention);
                     Result.OTHR += source.Sum(lr => lr.Others);
+                    Result.StCharge += source.Sum(lr => lr.StCharge);
                     Result.RCVD += source.Sum(lr => lr.NEFT + lr.CASH);
                     Result.TDS += source.Sum(lr => lr.TDS);
                     Result.DED += source.Sum(lr => lr.Ded);
@@ -461,13 +466,21 @@ namespace Awagaman_ERP
                 return;
             }
 
-            DialogResult = true;
+            WasSaved = true;
+            if (System.Windows.Interop.ComponentDispatcher.IsThreadModal)
+            {
+                DialogResult = true;
+            }
             Close();
         }
 
         private void Cancel_Click(object sender, RoutedEventArgs e)
         {
-            DialogResult = false;
+            WasSaved = false;
+            if (System.Windows.Interop.ComponentDispatcher.IsThreadModal)
+            {
+                DialogResult = false;
+            }
             Close();
         }
 

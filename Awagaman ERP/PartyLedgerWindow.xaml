@@ -6,6 +6,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="Party Ledger" Height="600" Width="900" WindowStartupLocation="CenterScreen"
+        Icon="logo.png"
         Background="#F3F4F6">
     <Controls:MetroWindow.Resources>
         <SolidColorBrush x:Key="ThemeBlue" Color="#18609A" />

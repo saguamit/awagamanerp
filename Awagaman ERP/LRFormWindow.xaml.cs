@@ -19,6 +19,7 @@ namespace Awagaman_ERP
         private System.Collections.Generic.IEnumerable<LREntry> _existingEntries;
         private decimal? _challanLorryHire;
         public LREntry Result { get; private set; }
+        public bool WasSaved { get; private set; }
 
         public LREntry CurrentEntry
         {
@@ -106,6 +107,7 @@ namespace Awagaman_ERP
                     Hamali = entryToEdit.Hamali,
                     Detention = entryToEdit.Detention,
                     Others = entryToEdit.Others,
+                    StCharge = entryToEdit.StCharge,
                     NEFT = entryToEdit.NEFT,
                     CASH = entryToEdit.CASH,
                     TDS = entryToEdit.TDS,
@@ -330,7 +332,11 @@ namespace Awagaman_ERP
             SavePartyIfNew(CurrentEntry.ConsigneeName, CurrentEntry.ConsigneeAddress, CurrentEntry.ConsigneeGST);
 
             Result = CurrentEntry;
-            DialogResult = true;
+            WasSaved = true;
+            if (System.Windows.Interop.ComponentDispatcher.IsThreadModal)
+            {
+                DialogResult = true;
+            }
             Close();
         }
 
@@ -542,7 +548,11 @@ WHERE TRIM(LRNo) = TRIM(@lrNo)
 
         private void Cancel_Click(object sender, RoutedEventArgs e)
         {
-            DialogResult = false;
+            WasSaved = false;
+            if (System.Windows.Interop.ComponentDispatcher.IsThreadModal)
+            {
+                DialogResult = false;
+            }
             Close();
         }
 

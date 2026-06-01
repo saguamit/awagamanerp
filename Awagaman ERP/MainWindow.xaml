@@ -21,6 +21,7 @@
         Title="Awagaman ERP - Challan Ledger" 
 
         Height="650" Width="1300"
+        Icon="logo.png"
 
         WindowState="Maximized"
 
@@ -312,13 +313,8 @@
 
                     <StackPanel>
 
-                        <Border Width="40" Height="40" CornerRadius="20" Background="#FF8C00" HorizontalAlignment="Center">
-
-                            <TextBlock Text="SU" Foreground="White" FontWeight="Bold" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
-
-                        </Border>
-
-                        <TextBlock Text="Subhash Kumar" Foreground="{StaticResource ThemeBlue}" FontSize="12" HorizontalAlignment="Center" Margin="0,8,0,0" />
+                        <Image Source="logo.png" Width="52" Height="52" Stretch="Uniform" HorizontalAlignment="Center" />
+                        <TextBlock Text="Awagaman Trans Logistics" Foreground="{StaticResource ThemeBlue}" FontSize="10" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" Margin="6,8,6,0" />
 
                     </StackPanel>
 
@@ -886,6 +882,7 @@
                                     <DataGridTextColumn Header="DETENTION" Binding="{Binding Detention, StringFormat=N2}" Width="80" IsReadOnly="True" />
                                     <DataGridTextColumn Header="HML" Binding="{Binding HML, StringFormat=N2}" Width="60" IsReadOnly="True" />
                                     <DataGridTextColumn Header="OTHR" Binding="{Binding OTHR, StringFormat=N2}" Width="60" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="St. Charge" Binding="{Binding StCharge, StringFormat=N2}" Width="80" IsReadOnly="True" />
                                     <DataGridTextColumn Header="TOTAL" Binding="{Binding Total, StringFormat=N2}" Width="80" IsReadOnly="True" Foreground="#18609A" FontWeight="SemiBold" />
                                     <DataGridTextColumn Header="RCVD" Binding="{Binding RCVD, StringFormat=N2}" Width="70" />
                                     <DataGridTextColumn Header="TDS" Binding="{Binding TDS, StringFormat=N2}" Width="60" />
@@ -991,19 +988,21 @@
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
                                 <TextBlock Grid.Column="0" Text="CASH BANK STATEMENT" FontSize="22" FontWeight="Bold" Foreground="#0F172A" VerticalAlignment="Center" />
                                 <TextBox Grid.Column="1" x:Name="CBSSearchBox" Width="180" Height="28" Margin="0,0,8,0" Padding="6,2" VerticalContentAlignment="Center" Text="Search CBS..." Foreground="#9CA3AF" TextChanged="CBSSearchBox_TextChanged" GotFocus="CBSSearchBox_GotFocus" LostFocus="CBSSearchBox_LostFocus" />
                                 <Button Grid.Column="2" Content="+ Account" Height="28" Margin="0,0,8,0" Padding="10,0" Background="#1565C0" Foreground="White" BorderThickness="0" Cursor="Hand" Click="CBSAddAccount_Click" />
-                                <Button Grid.Column="3" Content="+ Row" Height="28" Margin="0,0,8,0" Padding="10,0" Background="#00B08B" Foreground="White" BorderThickness="0" Cursor="Hand" Click="CBSAddRow_Click" />
+                                <Button Grid.Column="3" Content="+ Entry" Height="28" Margin="0,0,8,0" Padding="10,0" Background="#00B08B" Foreground="White" BorderThickness="0" Cursor="Hand" Click="CBSAddEntry_Click" />
                                 <Button Grid.Column="4" Content="🗑 Delete" Height="28" Padding="10,0" Background="#DC2626" Foreground="White" BorderThickness="0" Cursor="Hand" Click="CBSDeleteSelected_Click" />
+                                <Button Grid.Column="5" Content="Summary" Height="28" Margin="8,0,0,0" Padding="10,0" Background="#4B5563" Foreground="White" BorderThickness="0" Cursor="Hand" Click="CBSAccountSummary_Click" />
                             </Grid>
 
-                            <DataGrid x:Name="CBSGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
+                            <DataGrid x:Name="CBSGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True"
                                       Background="White" BorderThickness="1" BorderBrush="#374151" RowHeight="30"
                                       ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                      GridLinesVisibility="All" HeadersVisibility="Column" RowHeaderWidth="0"
+                                      GridLinesVisibility="All" HeadersVisibility="All" RowHeaderWidth="28"
                                       SelectionMode="Extended" SelectionUnit="CellOrRowHeader"
                                       ColumnHeaderStyle="{StaticResource DataGridHeaderStyle}"
                                       Loaded="CBSGrid_Loaded"
@@ -1959,6 +1958,15 @@
                                         </DataGridTextColumn>
 
                                         <DataGridTextColumn Header="Others" Binding="{Binding Others}" Width="80">
+                                            <DataGridTextColumn.EditingElementStyle>
+                                                <Style TargetType="TextBox">
+                                                    <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                    <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                                </Style>
+                                            </DataGridTextColumn.EditingElementStyle>
+                                        </DataGridTextColumn>
+
+                                        <DataGridTextColumn Header="St. Charge" Binding="{Binding StCharge}" Width="90">
                                             <DataGridTextColumn.EditingElementStyle>
                                                 <Style TargetType="TextBox">
                                                     <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
