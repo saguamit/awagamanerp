@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
 using Awagaman_ERP.ViewModels;
@@ -47,6 +48,27 @@ namespace Awagaman_ERP
         private DateTime _lastChallanBillingSyncUtc = DateTime.MinValue;
         private bool _challanBillingSyncInProgress;
         private bool _initialLrBackfillDone;
+        private Window _billRdlcPreviewWindow;
+        private System.Windows.Forms.Integration.WindowsFormsHost _billRdlcHost;
+        private Microsoft.Reporting.WinForms.ReportViewer _billRdlcViewer;
+        private string _billRdlcLastKey;
+        private long _billRdlcLastTemplateStamp;
+        private readonly Dictionary<string, System.Data.DataTable> _billLinesCache = new Dictionary<string, System.Data.DataTable>(StringComparer.Ordinal);
+        private readonly CBSAccountRepository _cbsAccountRepo = new CBSAccountRepository();
+        private readonly CashBankStatementRepository _cbsRepo = new CashBankStatementRepository();
+        private List<CBSAccountEntry> _allCbsAccounts = new List<CBSAccountEntry>();
+        private List<CashBankStatementEntry> _allCbsEntries = new List<CashBankStatementEntry>();
+        public ObservableCollection<string> CBSAccountNames { get; } = new ObservableCollection<string>();
+        private readonly Dictionary<string, HashSet<string>> _cbsHeaderFilters = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        private Style _cbsFilteredHeaderStyle;
+        private string _cbsSortColumn = string.Empty;
+        private bool _cbsSortAscending = true;
+        private bool _cbsHeaderDragSelecting;
+        private int _cbsDragStartDisplayIndex = -1;
+        private bool _cbsDragAppendMode;
+        private const string CbsSearchPlaceholder = "Search CBS...";
+        private bool _cbsGridResizeHooksAttached;
+        private readonly HashSet<DataGridColumn> _cbsWidthHookedColumns = new HashSet<DataGridColumn>();
         public MainWindow()
         {
             InitializeComponent();
@@ -92,6 +114,8 @@ namespace Awagaman_ERP
                 UpdateColumnVisibility();
                 RestoreSortIndicator();
                 RefreshFilteredSummary();
+                RefreshCBSAccounts();
+                RefreshCBSGrid();
 
                 var view = System.Windows.Data.CollectionViewSource.GetDefaultView(LedgerGrid.ItemsSource) as System.Collections.Specialized.INotifyCollectionChanged;
                 if (view != null) view.CollectionChanged += (s2, e2) => { RefreshFilteredSummary(); RefreshDashboard(); };
@@ -315,7 +339,7 @@ namespace Awagaman_ERP
             var grid = sender as DataGrid;
             if (grid == null) return;
 
-            if ((grid == LedgerGrid || grid == LRLedgerGrid || grid == BillLedgerGrid) &&
+            if ((grid == LedgerGrid || grid == LRLedgerGrid || grid == BillLedgerGrid || grid == CBSGrid) &&
                 Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.C)
             {
                 CopySelectedRangeFromGrid(grid);
@@ -623,6 +647,7 @@ namespace Awagaman_ERP
                 TrackingLedgerView.Visibility = Visibility.Collapsed;
                 PartyLedgerView.Visibility = Visibility.Collapsed;
                 VehicleLedgerView.Visibility = Visibility.Collapsed;
+                CBSLedgerView.Visibility = Visibility.Collapsed;
 
                 TabBillLedger.Style = (Style)FindResource("ActiveTabButtonStyle");
                 TabDashboard.Style = (Style)FindResource("TabButtonStyle");
@@ -631,6 +656,7 @@ namespace Awagaman_ERP
                 TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle");
                 TabPartyLedger.Style = (Style)FindResource("TabButtonStyle");
                 TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle");
+                TabCBSLedger.Style = (Style)FindResource("TabButtonStyle");
                 if (PageTitle != null) PageTitle.Text = "Bill Ledger";
 
                 BillVM.EnsurePageLoaded();
@@ -945,7 +971,9 @@ namespace Awagaman_ERP
             LRLedgerView.Visibility = Visibility.Collapsed;
             TrackingLedgerView.Visibility = Visibility.Collapsed;
             PartyLedgerView.Visibility = Visibility.Visible;
+            BillLedgerView.Visibility = Visibility.Collapsed;
             VehicleLedgerView.Visibility = Visibility.Collapsed;
+            CBSLedgerView.Visibility = Visibility.Collapsed;
             TabPartyLedger.Style = (Style)FindResource("ActiveTabButtonStyle");
             TabDashboard.Style = (Style)FindResource("TabButtonStyle");
             TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle");
@@ -953,6 +981,7 @@ namespace Awagaman_ERP
             TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle");
             TabBillLedger.Style = (Style)FindResource("TabButtonStyle");
             TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle");
+            TabCBSLedger.Style = (Style)FindResource("TabButtonStyle");
             if (PageTitle != null) PageTitle.Text = "Party Ledger";
             RefreshPartyGrid();
         }
@@ -1218,6 +1247,7 @@ namespace Awagaman_ERP
             PartyLedgerView.Visibility = Visibility.Collapsed;
             BillLedgerView.Visibility = Visibility.Collapsed;
             VehicleLedgerView.Visibility = Visibility.Collapsed;
+            CBSLedgerView.Visibility = Visibility.Collapsed;
             VehicleLedgerView.Visibility = Visibility.Visible;
             TabVehicleLedger.Style = (Style)FindResource("ActiveTabButtonStyle");
             TabPartyLedger.Style = (Style)FindResource("TabButtonStyle");
@@ -1226,6 +1256,7 @@ namespace Awagaman_ERP
             TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle");
             TabLRLedger.Style = (Style)FindResource("TabButtonStyle");
             TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle");
+            TabCBSLedger.Style = (Style)FindResource("TabButtonStyle");
             if (PageTitle != null) PageTitle.Text = "Vehicle Ledger";
             RefreshVehicleGrid();
         }
@@ -1266,6 +1297,875 @@ namespace Awagaman_ERP
                 new VehicleRepository().Upsert(entry);
             }
             catch { }
+        }
+
+        private void OpenCBSLedger_Click(object sender, RoutedEventArgs e)
+        {
+            DashboardView.Visibility = Visibility.Collapsed;
+            DeliveryChallanView.Visibility = Visibility.Collapsed;
+            LRLedgerView.Visibility = Visibility.Collapsed;
+            TrackingLedgerView.Visibility = Visibility.Collapsed;
+            PartyLedgerView.Visibility = Visibility.Collapsed;
+            BillLedgerView.Visibility = Visibility.Collapsed;
+            VehicleLedgerView.Visibility = Visibility.Collapsed;
+            CBSLedgerView.Visibility = Visibility.Visible;
+
+            TabCBSLedger.Style = (Style)FindResource("ActiveTabButtonStyle");
+            TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle");
+            TabPartyLedger.Style = (Style)FindResource("TabButtonStyle");
+            TabBillLedger.Style = (Style)FindResource("TabButtonStyle");
+            TabDashboard.Style = (Style)FindResource("TabButtonStyle");
+            TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle");
+            TabLRLedger.Style = (Style)FindResource("TabButtonStyle");
+            TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle");
+
+            if (PageTitle != null) PageTitle.Text = "Cash Bank Statement";
+            RefreshCBSAccounts();
+            RefreshCBSGrid();
+        }
+
+        private void RefreshCBSAccounts()
+        {
+            try
+            {
+                _allCbsAccounts = _cbsAccountRepo.GetAll();
+                var names = _allCbsAccounts
+                    .Where(a => a.IsActive)
+                    .Select(a => (a.AccountName ?? string.Empty).Trim())
+                    .Where(a => a.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(a => a)
+                    .ToList();
+
+                for (int i = CBSAccountNames.Count - 1; i >= 0; i--)
+                {
+                    var existing = CBSAccountNames[i];
+                    if (!names.Any(n => string.Equals(n, existing, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        CBSAccountNames.RemoveAt(i);
+                    }
+                }
+
+                foreach (var name in names)
+                {
+                    if (!CBSAccountNames.Any(x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        CBSAccountNames.Add(name);
+                    }
+                }
+
+                CBSGrid?.Items.Refresh();
+            }
+            catch { }
+        }
+
+        private void RefreshCBSGrid()
+        {
+            try
+            {
+                _allCbsEntries = _cbsRepo.GetAll();
+                if (CBSGrid != null) CBSGrid.ItemsSource = _allCbsEntries;
+                ReapplyCBSViewState();
+            }
+            catch { }
+        }
+
+        private void UpdateCBSFooter()
+        {
+            if (CBSRecordsTextBlock == null) return;
+            var cv = CollectionViewSource.GetDefaultView(CBSGrid?.ItemsSource);
+            var count = cv == null
+                ? ((CBSGrid?.ItemsSource as IEnumerable<CashBankStatementEntry>)?.Count() ?? 0)
+                : cv.Cast<object>().OfType<CashBankStatementEntry>().Count();
+            CBSRecordsTextBlock.Text = $"Records: {count}";
+        }
+
+        private void CBSSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            try
+            {
+                var filter = (CBSSearchBox?.Text ?? string.Empty).Trim();
+                if (string.Equals(filter, CbsSearchPlaceholder, StringComparison.OrdinalIgnoreCase)) filter = string.Empty;
+                if (CBSGrid == null) return;
+                CBSGrid.ItemsSource = filter.Length == 0 ? _allCbsEntries : _cbsRepo.Search(filter);
+                ReapplyCBSViewState();
+            }
+            catch { }
+        }
+
+        private void CBSSearchBox_GotFocus(object sender, RoutedEventArgs e)
+        {
+            if (CBSSearchBox == null) return;
+            if (string.Equals(CBSSearchBox.Text, CbsSearchPlaceholder, StringComparison.Ordinal))
+            {
+                CBSSearchBox.Text = string.Empty;
+                CBSSearchBox.Foreground = Brushes.Black;
+            }
+        }
+
+        private void CBSSearchBox_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (CBSSearchBox == null) return;
+            if (string.IsNullOrWhiteSpace(CBSSearchBox.Text))
+            {
+                CBSSearchBox.Text = CbsSearchPlaceholder;
+                CBSSearchBox.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#9CA3AF"));
+            }
+        }
+
+        private void CBSAddAccount_Click(object sender, RoutedEventArgs e)
+        {
+            var name = PromptCBSAccountName();
+            if (string.IsNullOrWhiteSpace(name)) return;
+            AddCBSAccount(name.Trim());
+        }
+
+        private string PromptCBSAccountName()
+        {
+            var dialog = new Window
+            {
+                Title = "Add Account",
+                Owner = this,
+                Width = 420,
+                Height = 180,
+                ResizeMode = ResizeMode.NoResize,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = Brushes.White
+            };
+
+            var root = new Grid { Margin = new Thickness(14) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var label = new TextBlock
+            {
+                Text = "Account Name",
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            var box = new TextBox
+            {
+                Height = 30,
+                Padding = new Thickness(6, 2, 6, 2)
+            };
+            var hint = new TextBlock
+            {
+                Text = "Type account name and press Enter or click Save.",
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#6B7280")),
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            var saveBtn = new Button { Content = "Save", Width = 90, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
+            var cancelBtn = new Button { Content = "Cancel", Width = 90, Height = 30 };
+            footer.Children.Add(saveBtn);
+            footer.Children.Add(cancelBtn);
+
+            Grid.SetRow(label, 0);
+            Grid.SetRow(box, 1);
+            Grid.SetRow(hint, 2);
+            Grid.SetRow(footer, 3);
+            root.Children.Add(label);
+            root.Children.Add(box);
+            root.Children.Add(hint);
+            root.Children.Add(footer);
+            dialog.Content = root;
+
+            string result = null;
+            Action trySave = () =>
+            {
+                var value = (box.Text ?? string.Empty).Trim();
+                if (value.Length == 0)
+                {
+                    MessageBox.Show(dialog, "Enter account name first.", "Validation", MessageBoxButton.OK, MessageBoxImage.Information);
+                    box.Focus();
+                    return;
+                }
+                result = value;
+                dialog.DialogResult = true;
+                dialog.Close();
+            };
+
+            saveBtn.Click += (_, __) => trySave();
+            cancelBtn.Click += (_, __) => dialog.Close();
+            box.KeyDown += (_, ke) =>
+            {
+                if (ke.Key == Key.Enter)
+                {
+                    ke.Handled = true;
+                    trySave();
+                }
+                else if (ke.Key == Key.Escape)
+                {
+                    ke.Handled = true;
+                    dialog.Close();
+                }
+            };
+
+            dialog.Loaded += (_, __) => box.Focus();
+            dialog.ShowDialog();
+            return result;
+        }
+
+        private void AddCBSAccount(string name)
+        {
+            try
+            {
+                var existing = _cbsAccountRepo.FindByName(name);
+                if (existing != null)
+                {
+                    if (!existing.IsActive)
+                    {
+                        existing.IsActive = true;
+                        _cbsAccountRepo.Upsert(existing);
+                    }
+                }
+                else
+                {
+                    _cbsAccountRepo.Upsert(new CBSAccountEntry
+                    {
+                        Sr = _cbsAccountRepo.GetMaxSr() + 1,
+                        AccountName = name,
+                        IsActive = true
+                    });
+                }
+
+                RefreshCBSAccounts();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to add account: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void CBSGrid_Loaded(object sender, RoutedEventArgs e)
+        {
+            AttachCBSResizePersistenceHooks();
+        }
+
+        private void AttachCBSResizePersistenceHooks()
+        {
+            if (CBSGrid == null) return;
+
+            if (!_cbsGridResizeHooksAttached)
+            {
+                var rowHeightDpd = DependencyPropertyDescriptor.FromProperty(DataGrid.RowHeightProperty, typeof(DataGrid));
+                rowHeightDpd?.AddValueChanged(CBSGrid, (_, __) => SaveGridSettings());
+                _cbsGridResizeHooksAttached = true;
+            }
+
+            var widthDpd = DependencyPropertyDescriptor.FromProperty(DataGridColumn.WidthProperty, typeof(DataGridColumn));
+            if (widthDpd == null) return;
+
+            foreach (var col in CBSGrid.Columns)
+            {
+                if (col == null || _cbsWidthHookedColumns.Contains(col)) continue;
+                widthDpd.AddValueChanged(col, (_, __) => SaveGridSettings());
+                _cbsWidthHookedColumns.Add(col);
+            }
+        }
+
+        private void CBSAddRow_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var entry = new CashBankStatementEntry
+                {
+                    Sr = _cbsRepo.GetMaxSr() + 1,
+                    Date = DateTime.Today,
+                    CBS = DateTime.Today.ToString("MMM-yy"),
+                    AccountName = CBSAccountNames.FirstOrDefault(),
+                    Particulars = string.Empty,
+                    Remarks = string.Empty,
+                    BankDr = 0,
+                    BankCr = 0,
+                    CashDr = 0,
+                    CashCr = 0
+                };
+
+                _cbsRepo.Upsert(entry);
+                RefreshCBSGrid();
+
+                if (CBSGrid != null)
+                {
+                    var list = CBSGrid.ItemsSource as IList<CashBankStatementEntry>;
+                    var added = list?.FirstOrDefault(x => x.Id == entry.Id);
+                    if (added != null)
+                    {
+                        CBSGrid.SelectedItem = added;
+                        CBSGrid.ScrollIntoView(added);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to add CBS row: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void CBSDeleteSelected_Click(object sender, RoutedEventArgs e)
+        {
+            if (CBSGrid == null) return;
+            var selected = CBSGrid.SelectedItems.Cast<CashBankStatementEntry>().ToList();
+            if (selected.Count == 0)
+            {
+                MessageBox.Show("Select CBS rows to delete.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (MessageBox.Show($"Delete {selected.Count} selected row(s)?", "Confirm Delete", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (var row in selected)
+                {
+                    _cbsRepo.Delete(row);
+                }
+                RefreshCBSGrid();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to delete rows: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void CBSGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
+        {
+            if (e.EditAction != DataGridEditAction.Commit) return;
+            var row = e.Row?.Item as CashBankStatementEntry;
+            if (row == null) return;
+
+            try
+            {
+                if (e.EditingElement is TextBox tb)
+                {
+                    tb.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+                }
+                else if (e.EditingElement is ComboBox cb)
+                {
+                    cb.GetBindingExpression(ComboBox.TextProperty)?.UpdateSource();
+                    cb.GetBindingExpression(Selector.SelectedItemProperty)?.UpdateSource();
+                    cb.GetBindingExpression(Selector.SelectedValueProperty)?.UpdateSource();
+                    if ((row.AccountName == null || row.AccountName.Trim().Length == 0) && cb.SelectedValue is string selectedValue && selectedValue.Trim().Length > 0)
+                    {
+                        row.AccountName = selectedValue.Trim();
+                    }
+                }
+                else
+                {
+                    var combo = FindVisualChild<ComboBox>(e.EditingElement);
+                    if (combo != null)
+                    {
+                        combo.GetBindingExpression(ComboBox.TextProperty)?.UpdateSource();
+                        combo.GetBindingExpression(Selector.SelectedItemProperty)?.UpdateSource();
+                        var text = (combo.Text ?? string.Empty).Trim();
+                        if (text.Length > 0) row.AccountName = text;
+                    }
+                }
+
+                row.CBS = row.Date.ToString("MMM-yy");
+                _cbsRepo.Upsert(row);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to save CBS entry: " + ex.Message, "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void CBSGrid_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (sender != CBSGrid) return;
+
+            if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.N)
+            {
+                e.Handled = true;
+                CBSAddRow_Click(sender, new RoutedEventArgs());
+                return;
+            }
+
+            if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.S)
+            {
+                e.Handled = true;
+                TryCommitGridEdits(CBSGrid);
+                return;
+            }
+
+            DataGrid_PreviewKeyDown(sender, e);
+        }
+
+        private void CBSGrid_SelectedCellsChanged(object sender, SelectedCellsChangedEventArgs e)
+        {
+            if (CBSGrid == null || CBSSelectedSumTextBlock == null)
+            {
+                return;
+            }
+
+            if (CBSGrid.SelectedCells.Count < 2)
+            {
+                CBSSelectedSumTextBlock.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            decimal total = 0;
+            bool hasNumbers = false;
+            foreach (var cell in CBSGrid.SelectedCells)
+            {
+                var col = cell.Column as DataGridBoundColumn;
+                if (!(col?.Binding is Binding binding)) continue;
+                var path = binding.Path?.Path;
+                if (string.IsNullOrWhiteSpace(path)) continue;
+
+                var prop = cell.Item?.GetType().GetProperty(path);
+                if (prop == null) continue;
+                var value = prop.GetValue(cell.Item);
+                if (value == null) continue;
+
+                if (value is decimal || value is int || value is long || value is double || value is float)
+                {
+                    total += Convert.ToDecimal(value);
+                    hasNumbers = true;
+                }
+            }
+
+            if (hasNumbers)
+            {
+                CBSSelectedSumTextBlock.Text = $"Selected: ₹ {total:N2}";
+                CBSSelectedSumTextBlock.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                CBSSelectedSumTextBlock.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private static readonly HashSet<string> CBSFilterableHeaders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "CBS", "Date", "A/C", "Particulars", "Remarks", "Bank Dr", "Bank Cr", "Cash Dr", "Cash Cr"
+        };
+
+        private void CBSGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (IsInColumnHeaderResizeGripper(e.OriginalSource as DependencyObject)) return;
+            var source = e.OriginalSource as DependencyObject;
+            while (source != null && !(source is DataGridColumnHeader))
+            {
+                source = System.Windows.Media.VisualTreeHelper.GetParent(source);
+            }
+            var header = source as DataGridColumnHeader;
+            if (header?.Column == null || CBSGrid == null) return;
+
+            e.Handled = true;
+            bool appendMode = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+            _cbsHeaderDragSelecting = true;
+            _cbsDragStartDisplayIndex = header.Column.DisplayIndex;
+            _cbsDragAppendMode = appendMode;
+            SelectCBSColumnsByDisplayRange(_cbsDragStartDisplayIndex, _cbsDragStartDisplayIndex, appendMode);
+        }
+
+        private void CBSGrid_PreviewMouseMove(object sender, MouseEventArgs e)
+        {
+            if (!_cbsHeaderDragSelecting || CBSGrid == null || e.LeftButton != MouseButtonState.Pressed) return;
+
+            var source = e.OriginalSource as DependencyObject;
+            while (source != null && !(source is DataGridColumnHeader))
+            {
+                source = System.Windows.Media.VisualTreeHelper.GetParent(source);
+            }
+            var header = source as DataGridColumnHeader;
+            if (header?.Column == null || _cbsDragStartDisplayIndex < 0) return;
+
+            SelectCBSColumnsByDisplayRange(_cbsDragStartDisplayIndex, header.Column.DisplayIndex, _cbsDragAppendMode);
+            e.Handled = true;
+        }
+
+        private void CBSGrid_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            _cbsHeaderDragSelecting = false;
+            _cbsDragStartDisplayIndex = -1;
+            _cbsDragAppendMode = false;
+        }
+
+        private void SelectCBSColumnsByDisplayRange(int startDisplayIndex, int endDisplayIndex, bool appendMode)
+        {
+            if (CBSGrid == null) return;
+            int lo = Math.Min(startDisplayIndex, endDisplayIndex);
+            int hi = Math.Max(startDisplayIndex, endDisplayIndex);
+
+            if (!appendMode) CBSGrid.UnselectAllCells();
+
+            var cols = CBSGrid.Columns
+                .Where(c => c.DisplayIndex >= lo && c.DisplayIndex <= hi)
+                .OrderBy(c => c.DisplayIndex)
+                .ToList();
+
+            foreach (var item in CBSGrid.Items)
+            {
+                if (item == CollectionView.NewItemPlaceholder) continue;
+                foreach (var col in cols)
+                {
+                    var info = new DataGridCellInfo(item, col);
+                    if (!CBSGrid.SelectedCells.Contains(info)) CBSGrid.SelectedCells.Add(info);
+                }
+            }
+        }
+
+        private void CBSGrid_SortingMenuOnly(object sender, DataGridSortingEventArgs e)
+        {
+            e.Handled = true;
+        }
+
+        private void CBSGrid_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            var source = e.OriginalSource as DependencyObject;
+            DependencyObject walker = source;
+            while (walker != null &&
+                   !(walker is DataGridColumnHeader) &&
+                   !(walker is DataGridCell) &&
+                   !(walker is DataGridRowHeader) &&
+                   !(walker is DataGridRow))
+            {
+                walker = System.Windows.Media.VisualTreeHelper.GetParent(walker);
+            }
+
+            var header = walker as DataGridColumnHeader;
+            var cell = walker as DataGridCell;
+            var rowHeader = walker as DataGridRowHeader;
+            var row = walker as DataGridRow;
+            if (header?.Column == null && cell == null && rowHeader == null && row == null) return;
+
+            var headerName = header?.Column != null
+                ? NormalizeHeaderForSort((header.Column.Header ?? string.Empty).ToString()).Trim()
+                : string.Empty;
+
+            e.Handled = true;
+            var menu = new ContextMenu();
+
+            if (header?.Column != null)
+            {
+                var copyCol = new MenuItem { Header = "Copy Column" };
+                var colRef = header.Column;
+                copyCol.Click += (_, __) => CopyColumnFromGrid(CBSGrid, colRef);
+                menu.Items.Add(copyCol);
+                menu.Items.Add(new Separator());
+            }
+
+            if (rowHeader != null || row != null)
+            {
+                if (row != null && row.Item != null && row.Item != CollectionView.NewItemPlaceholder)
+                {
+                    CBSGrid.SelectedItems.Clear();
+                    CBSGrid.SelectedItems.Add(row.Item);
+                }
+                var copyRows = new MenuItem { Header = "Copy Row(s)" };
+                copyRows.Click += (_, __) => CopySelectedRowsFromGrid(CBSGrid);
+                menu.Items.Add(copyRows);
+                menu.IsOpen = true;
+                return;
+            }
+
+            if (cell != null)
+            {
+                if (cell.DataContext != null) CBSGrid.CurrentCell = new DataGridCellInfo(cell.DataContext, cell.Column);
+                var copyCell = new MenuItem { Header = "Copy Cell" };
+                copyCell.Click += (_, __) => CopyCurrentCellFromGrid(CBSGrid);
+                menu.Items.Add(copyCell);
+                menu.IsOpen = true;
+                return;
+            }
+
+            if (header?.Column == null) return;
+
+            var sortPath = GetCBSColumnSortPath(header.Column, headerName);
+            if (!string.IsNullOrWhiteSpace(sortPath))
+            {
+                GetCBSSortLabels(sortPath, out var ascLabel, out var descLabel);
+
+                var sortAsc = new MenuItem { Header = ascLabel };
+                sortAsc.Click += (_, __) => ApplyCBSSort(sortPath, true);
+                menu.Items.Add(sortAsc);
+
+                var sortDesc = new MenuItem { Header = descLabel };
+                sortDesc.Click += (_, __) => ApplyCBSSort(sortPath, false);
+                menu.Items.Add(sortDesc);
+
+                var clearSort = new MenuItem { Header = "Clear Sort" };
+                clearSort.Click += (_, __) => ClearCBSSort();
+                menu.Items.Add(clearSort);
+            }
+
+            if (!CBSFilterableHeaders.Contains(headerName))
+            {
+                header.ContextMenu = menu;
+                menu.IsOpen = true;
+                return;
+            }
+
+            menu.Items.Add(new Separator());
+            var values = GetCBSHeaderFilterValues(headerName).ToList();
+            var current = _cbsHeaderFilters.TryGetValue(headerName, out var curSet)
+                ? new HashSet<string>(curSet, StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var selectAll = new MenuItem { Header = "Select All" };
+            selectAll.Click += (_, __) =>
+            {
+                _cbsHeaderFilters.Remove(headerName);
+                ApplyCBSHeaderFilter();
+            };
+            menu.Items.Add(selectAll);
+
+            var clear = new MenuItem { Header = "Clear Filter" };
+            clear.Click += (_, __) =>
+            {
+                _cbsHeaderFilters.Remove(headerName);
+                ApplyCBSHeaderFilter();
+            };
+            menu.Items.Add(clear);
+            menu.Items.Add(new Separator());
+
+            var searchBox = new TextBox { Width = 180, Height = 24, Margin = new Thickness(4, 2, 4, 4), ToolTip = "Search values..." };
+            menu.Items.Add(new MenuItem { StaysOpenOnClick = true, Focusable = false, Header = searchBox });
+            menu.Items.Add(new Separator());
+
+            var valueItems = new List<(string Value, MenuItem Item)>();
+            foreach (var val in values)
+            {
+                var item = new MenuItem { Header = val, IsCheckable = true, StaysOpenOnClick = true, IsChecked = current.Contains(val) };
+                item.Click += (_, __) =>
+                {
+                    if (item.IsChecked) current.Add(val); else current.Remove(val);
+                    if (current.Count == 0 || current.Count == values.Count) _cbsHeaderFilters.Remove(headerName);
+                    else _cbsHeaderFilters[headerName] = new HashSet<string>(current, StringComparer.OrdinalIgnoreCase);
+                    ApplyCBSHeaderFilter();
+                };
+                menu.Items.Add(item);
+                valueItems.Add((val, item));
+            }
+
+            searchBox.TextChanged += (_, __) =>
+            {
+                var text = (searchBox.Text ?? string.Empty).Trim();
+                foreach (var pair in valueItems)
+                {
+                    pair.Item.Visibility = string.IsNullOrWhiteSpace(text) || pair.Value.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0
+                        ? Visibility.Visible
+                        : Visibility.Collapsed;
+                }
+            };
+            menu.Opened += (_, __) => searchBox.Focus();
+
+            header.ContextMenu = menu;
+            menu.IsOpen = true;
+        }
+
+        private static string GetCBSColumnSortPath(DataGridColumn column, string headerName)
+        {
+            if (column is DataGridTextColumn textCol && textCol.Binding is Binding tb && !string.IsNullOrWhiteSpace(tb.Path?.Path))
+            {
+                return tb.Path.Path;
+            }
+            if (!string.IsNullOrWhiteSpace(column.SortMemberPath))
+            {
+                return column.SortMemberPath;
+            }
+            switch ((headerName ?? string.Empty).Trim())
+            {
+                case "CBS": return "CBS";
+                case "Date": return "Date";
+                case "A/C": return "AccountName";
+                case "Particulars": return "Particulars";
+                case "Remarks": return "Remarks";
+                case "Bank Dr": return "BankDr";
+                case "Bank Cr": return "BankCr";
+                case "Cash Dr": return "CashDr";
+                case "Cash Cr": return "CashCr";
+                default: return string.Empty;
+            }
+        }
+
+        private static void GetCBSSortLabels(string propName, out string ascLabel, out string descLabel)
+        {
+            var key = (propName ?? string.Empty).Trim().ToLowerInvariant();
+            if (key == "date")
+            {
+                ascLabel = "Sort Oldest to Newest";
+                descLabel = "Sort Newest to Oldest";
+                return;
+            }
+            if (key == "bankdr" || key == "bankcr" || key == "cashdr" || key == "cashcr" || key == "sr")
+            {
+                ascLabel = "Sort Smallest to Largest";
+                descLabel = "Sort Largest to Smallest";
+                return;
+            }
+            ascLabel = "Sort A to Z";
+            descLabel = "Sort Z to A";
+        }
+
+        private void ApplyCBSSort(string propName, bool ascending)
+        {
+            if (CBSGrid == null || string.IsNullOrWhiteSpace(propName)) return;
+            _cbsSortColumn = propName;
+            _cbsSortAscending = ascending;
+
+            foreach (var col in CBSGrid.Columns)
+            {
+                col.Header = NormalizeHeaderForSort((col.Header ?? string.Empty).ToString());
+                col.SortDirection = null;
+            }
+
+            var target = CBSGrid.Columns.FirstOrDefault(c => string.Equals(GetCBSColumnSortPath(c, NormalizeHeaderForSort((c.Header ?? string.Empty).ToString())), propName, StringComparison.OrdinalIgnoreCase));
+            if (target != null)
+            {
+                target.SortDirection = ascending ? ListSortDirection.Ascending : ListSortDirection.Descending;
+                target.Header = NormalizeHeaderForSort((target.Header ?? string.Empty).ToString()) + (ascending ? " \u25B2" : " \u25BC");
+            }
+
+            var cv = CollectionViewSource.GetDefaultView(CBSGrid.ItemsSource);
+            if (cv != null)
+            {
+                cv.SortDescriptions.Clear();
+                cv.SortDescriptions.Add(new SortDescription(propName, ascending ? ListSortDirection.Ascending : ListSortDirection.Descending));
+                cv.Refresh();
+            }
+        }
+
+        private void ClearCBSSort()
+        {
+            if (CBSGrid == null) return;
+            _cbsSortColumn = string.Empty;
+            _cbsSortAscending = true;
+            foreach (var col in CBSGrid.Columns)
+            {
+                col.Header = NormalizeHeaderForSort((col.Header ?? string.Empty).ToString());
+                col.SortDirection = null;
+            }
+            var cv = CollectionViewSource.GetDefaultView(CBSGrid.ItemsSource);
+            if (cv != null)
+            {
+                cv.SortDescriptions.Clear();
+                cv.Refresh();
+            }
+        }
+
+        private IEnumerable<string> GetCBSHeaderFilterValues(string headerName)
+        {
+            var rows = (CBSGrid?.ItemsSource as IEnumerable<CashBankStatementEntry>) ?? Enumerable.Empty<CashBankStatementEntry>();
+            return rows.Select(r => GetCBSHeaderCellValue(r, headerName))
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(v => v);
+        }
+
+        private static string GetCBSHeaderCellValue(CashBankStatementEntry row, string headerName)
+        {
+            if (row == null) return string.Empty;
+            switch ((headerName ?? string.Empty).Trim())
+            {
+                case "CBS": return (row.CBS ?? string.Empty).Trim();
+                case "Date": return row.Date.ToString("dd.MM.yy");
+                case "A/C": return (row.AccountName ?? string.Empty).Trim();
+                case "Particulars": return (row.Particulars ?? string.Empty).Trim();
+                case "Remarks": return (row.Remarks ?? string.Empty).Trim();
+                case "Bank Dr": return row.BankDr.ToString("N2");
+                case "Bank Cr": return row.BankCr.ToString("N2");
+                case "Cash Dr": return row.CashDr.ToString("N2");
+                case "Cash Cr": return row.CashCr.ToString("N2");
+                default: return string.Empty;
+            }
+        }
+
+        private void ApplyCBSHeaderFilter()
+        {
+            if (CBSGrid == null) return;
+            var cv = CollectionViewSource.GetDefaultView(CBSGrid.ItemsSource);
+            if (cv == null) return;
+
+            if (_cbsHeaderFilters.Count > 0)
+            {
+                cv.Filter = obj =>
+                {
+                    var row = obj as CashBankStatementEntry;
+                    if (row == null) return false;
+                    foreach (var kv in _cbsHeaderFilters)
+                    {
+                        if (kv.Value == null || kv.Value.Count == 0) continue;
+                        var value = GetCBSHeaderCellValue(row, kv.Key);
+                        if (!kv.Value.Contains(value)) return false;
+                    }
+                    return true;
+                };
+            }
+            else
+            {
+                cv.Filter = null;
+            }
+
+            cv.Refresh();
+            ApplyCBSHeaderFilterIndicators();
+            UpdateCBSFooter();
+        }
+
+        private void ApplyCBSHeaderFilterIndicators()
+        {
+            if (CBSGrid == null) return;
+            if (_cbsFilteredHeaderStyle == null)
+            {
+                var baseStyle = FindResource("DataGridHeaderStyle") as Style;
+                _cbsFilteredHeaderStyle = new Style(typeof(DataGridColumnHeader), baseStyle);
+                _cbsFilteredHeaderStyle.Setters.Add(new Setter(Control.BackgroundProperty, new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E65100"))));
+                _cbsFilteredHeaderStyle.Setters.Add(new Setter(Control.ForegroundProperty, Brushes.White));
+            }
+
+            foreach (var col in CBSGrid.Columns)
+            {
+                var headerName = NormalizeHeaderForSort((col.Header ?? string.Empty).ToString()).Trim();
+                var hasFilter = _cbsHeaderFilters.TryGetValue(headerName, out var selectedSet) && selectedSet != null && selectedSet.Count > 0;
+                col.HeaderStyle = hasFilter ? _cbsFilteredHeaderStyle : null;
+            }
+        }
+
+        private void ReapplyCBSViewState()
+        {
+            if (CBSGrid == null) return;
+            var cv = CollectionViewSource.GetDefaultView(CBSGrid.ItemsSource);
+            if (cv == null)
+            {
+                UpdateCBSFooter();
+                return;
+            }
+
+            cv.SortDescriptions.Clear();
+            if (!string.IsNullOrWhiteSpace(_cbsSortColumn))
+            {
+                cv.SortDescriptions.Add(new SortDescription(_cbsSortColumn, _cbsSortAscending ? ListSortDirection.Ascending : ListSortDirection.Descending));
+            }
+            ApplyCBSHeaderFilter();
+            if (_cbsHeaderFilters.Count == 0)
+            {
+                cv.Refresh();
+                ApplyCBSHeaderFilterIndicators();
+                UpdateCBSFooter();
+            }
+
+            foreach (var col in CBSGrid.Columns)
+            {
+                col.Header = NormalizeHeaderForSort((col.Header ?? string.Empty).ToString());
+                col.SortDirection = null;
+            }
+            if (!string.IsNullOrWhiteSpace(_cbsSortColumn))
+            {
+                var target = CBSGrid.Columns.FirstOrDefault(c => string.Equals(GetCBSColumnSortPath(c, NormalizeHeaderForSort((c.Header ?? string.Empty).ToString())), _cbsSortColumn, StringComparison.OrdinalIgnoreCase));
+                if (target != null)
+                {
+                    target.SortDirection = _cbsSortAscending ? ListSortDirection.Ascending : ListSortDirection.Descending;
+                    target.Header = NormalizeHeaderForSort((target.Header ?? string.Empty).ToString()) + (_cbsSortAscending ? " \u25B2" : " \u25BC");
+                }
+            }
         }
 
         private class DueChallanOption
@@ -4464,7 +5364,7 @@ WHERE LRNo IN ({string.Join(",", pNames)});";
             e.Handled = true;
         }
 
-        private void OpenDashboard_Click(object sender, RoutedEventArgs e) { DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Collapsed; DashboardView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; TabDashboard.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); if (PageTitle != null) PageTitle.Text = "Dashboard"; RefreshDashboard(); }
+        private void OpenDashboard_Click(object sender, RoutedEventArgs e) { DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Collapsed; DashboardView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; TabDashboard.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); if (PageTitle != null) PageTitle.Text = "Dashboard"; RefreshDashboard(); }
         private void Refresh_Click(object sender, RoutedEventArgs e) { if (SearchBox != null) SearchBox.Text = string.Empty; if (ChallanFilterBox != null) ChallanFilterBox.Text = string.Empty; if (LRFilterBox != null) LRFilterBox.Text = string.Empty; if (FromFilterBox != null) FromFilterBox.Text = string.Empty; if (ToFilterBox != null) ToFilterBox.Text = string.Empty; _challanHeaderFilters.Clear(); _onlyDueFilterEnabled = false; if (OnlyDueButton != null) OnlyDueButton.Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#455A64")); ApplyChallanDueFilter(); if (LedgerGrid != null) LedgerGrid.UnselectAllCells(); }
         private void OnlyDueButton_Click(object sender, RoutedEventArgs e)
         {
@@ -4485,7 +5385,7 @@ WHERE LRNo IN ({string.Join(",", pNames)});";
         private void ResetAllData_Click(object sender, RoutedEventArgs e)
         {
             var first = MessageBox.Show(
-                "This will permanently delete all data from Challan, LR, Tracking, Bill, Party and comments.\n\nDo you want to continue?",
+                "This will permanently delete all data from Challan, LR, Tracking, Bill, CBS, Vehicle, Party and comments.\n\nDo you want to continue?",
                 "Reset All Data",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning);
@@ -4513,12 +5413,14 @@ DELETE FROM TrackingEntries;
 DELETE FROM Challans;
 DELETE FROM LREntries;
 DELETE FROM Bills;
+DELETE FROM CashBankStatements;
+DELETE FROM CBSAccounts;
 DELETE FROM VehicleLedger;
 DELETE FROM Parties;
 DELETE FROM ChallanComments;
 DELETE FROM LRComments;
 DELETE FROM BillComments;
-DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','Challans','LREntries','Bills','VehicleLedger','Parties','ChallanComments','LRComments','BillComments');";
+DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','Challans','LREntries','Bills','CashBankStatements','CBSAccounts','VehicleLedger','Parties','ChallanComments','LRComments','BillComments');";
                         cmd.ExecuteNonQuery();
                         tx.Commit();
                     }
@@ -4535,6 +5437,8 @@ DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','
                 LRRefreshFilteredSummary();
                 BillUpdatePageUI();
                 RefreshDashboard();
+                RefreshCBSAccounts();
+                RefreshCBSGrid();
 
                 MessageBox.Show("All ledger data has been deleted.", "Reset Completed", MessageBoxButton.OK, MessageBoxImage.Information);
             }
@@ -4551,6 +5455,8 @@ DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','
             TrackingLedgerView.Visibility = Visibility.Collapsed;
             PartyLedgerView.Visibility = Visibility.Collapsed;
             BillLedgerView.Visibility = Visibility.Collapsed;
+            VehicleLedgerView.Visibility = Visibility.Collapsed;
+            CBSLedgerView.Visibility = Visibility.Collapsed;
             LRVM.EnsurePageLoaded();
             if (LRLedgerView.DataContext == null) LRLedgerView.DataContext = LRVM;
             if (LRLedgerGrid != null)
@@ -4570,6 +5476,7 @@ DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','
             TabPartyLedger.Style = (Style)FindResource("TabButtonStyle");
             TabBillLedger.Style = (Style)FindResource("TabButtonStyle");
             TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle");
+            TabCBSLedger.Style = (Style)FindResource("TabButtonStyle");
             if (PageTitle != null) PageTitle.Text = "LR Ledger";
             LoadLRColumnSettings();
 
@@ -4627,8 +5534,8 @@ DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','
                 break;
             }
         }
-        private void OpenDeliveryChallans_Click(object sender, RoutedEventArgs e) { DashboardView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; DeliveryChallanView.Visibility = Visibility.Visible; TrackingLedgerView.Visibility = Visibility.Collapsed; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; TabDeliveryChallans.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDashboard.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); if (PageTitle != null) PageTitle.Text = "Delivery Challan List"; VM.EnsurePageLoaded(); SyncAllChallanBillingFromLR(); UpdatePageUI(); }
-        private void OpenTrackingLedger_Click(object sender, RoutedEventArgs e) { DashboardView.Visibility = Visibility.Collapsed; DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; if (TrackingLedgerView.DataContext == null) TrackingLedgerView.DataContext = TrackingVM; if (TrackingLedgerGrid != null) TrackingLedgerGrid.ItemsSource = TrackingVM.Entries; TabTrackingLedger.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDashboard.Style = (Style)FindResource("TabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count; if (PageTitle != null) PageTitle.Text = "Tracking Ledger"; }
+        private void OpenDeliveryChallans_Click(object sender, RoutedEventArgs e) { DashboardView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; DeliveryChallanView.Visibility = Visibility.Visible; TrackingLedgerView.Visibility = Visibility.Collapsed; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; TabDeliveryChallans.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDashboard.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); if (PageTitle != null) PageTitle.Text = "Delivery Challan List"; VM.EnsurePageLoaded(); SyncAllChallanBillingFromLR(); UpdatePageUI(); }
+        private void OpenTrackingLedger_Click(object sender, RoutedEventArgs e) { DashboardView.Visibility = Visibility.Collapsed; DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; if (TrackingLedgerView.DataContext == null) TrackingLedgerView.DataContext = TrackingVM; if (TrackingLedgerGrid != null) TrackingLedgerGrid.ItemsSource = TrackingVM.Entries; TabTrackingLedger.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDashboard.Style = (Style)FindResource("TabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count; if (PageTitle != null) PageTitle.Text = "Tracking Ledger"; }
         private void OpenTrackingEntryForm_Click(object sender, RoutedEventArgs e) { var entry = TrackingLedgerGrid?.SelectedItem as TrackingEntry; if (entry == null) { MessageBox.Show("Select a tracking entry to edit.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information); return; } var form = new TrackingEntryFormWindow(entry); form.Owner = this; if (form.ShowDialog() == true) { TrackingVM.UpdateEntry(entry); var repo = new TrackingRepository(); var reports = repo.GetReportingTracks(entry.Id); if (reports.Count > 0) entry.LatestReport = $"{reports[reports.Count - 1].ReportDateTime:dd-MMM HH:mm} - {reports[reports.Count - 1].Remarks}"; RefreshDashboard(); } }
         private async void AppVersionText_MouseLeftButtonUp(object sender, MouseButtonEventArgs e) { await App.CheckForUpdatesOnDemandAsync(); }
         private void TrackingGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e) { OpenTrackingEntryForm_Click(sender, e); }
@@ -4919,8 +5826,8 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             }
             catch { }
         }
-        private void LoadGridSettings() { try { var path = GridSettingsPath; if (!System.IO.File.Exists(path)) return; var json = System.IO.File.ReadAllText(path); var data = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json); if (data == null) return; if (data.TryGetValue("ChallanRowHeight", out var v) && LedgerGrid != null) LedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("LRRowHeight", out v) && LRLedgerGrid != null) LRLedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("TrackingRowHeight", out v) && TrackingLedgerGrid != null) TrackingLedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("BillRowHeight", out v) && BillLedgerGrid != null) BillLedgerGrid.RowHeight = Convert.ToDouble(v); RestoreColumnWidthsFromDict(LedgerGrid, "Challan", data); RestoreColumnWidthsFromDict(LRLedgerGrid, "LR", data); RestoreColumnWidthsFromDict(TrackingLedgerGrid, "Tracking", data); RestoreColumnWidthsFromDict(BillLedgerGrid, "Bill", data); RestoreColumnWidthsFromDict(NewBookingGrid, "DashboardNewBooking", data); RestoreColumnWidthsFromDict(DashboardPendingBillGrid, "DashboardPendingBill", data); } catch { } }
-        private void SaveGridSettings() { try { var data = new Dictionary<string, object>(); if (LedgerGrid != null) { data["ChallanRowHeight"] = LedgerGrid.RowHeight; SaveColumnWidthsToDict(LedgerGrid, "Challan", data); } if (LRLedgerGrid != null) { data["LRRowHeight"] = LRLedgerGrid.RowHeight; SaveColumnWidthsToDict(LRLedgerGrid, "LR", data); } if (TrackingLedgerGrid != null) { data["TrackingRowHeight"] = TrackingLedgerGrid.RowHeight; SaveColumnWidthsToDict(TrackingLedgerGrid, "Tracking", data); } if (BillLedgerGrid != null) { data["BillRowHeight"] = BillLedgerGrid.RowHeight; SaveColumnWidthsToDict(BillLedgerGrid, "Bill", data); } SaveColumnWidthsToDict(NewBookingGrid, "DashboardNewBooking", data); SaveColumnWidthsToDict(DashboardPendingBillGrid, "DashboardPendingBill", data); var dir = System.IO.Path.GetDirectoryName(GridSettingsPath); if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir); System.IO.File.WriteAllText(GridSettingsPath, new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(data)); } catch { } }
+        private void LoadGridSettings() { try { var path = GridSettingsPath; if (!System.IO.File.Exists(path)) return; var json = System.IO.File.ReadAllText(path); var data = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json); if (data == null) return; if (data.TryGetValue("ChallanRowHeight", out var v) && LedgerGrid != null) LedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("LRRowHeight", out v) && LRLedgerGrid != null) LRLedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("TrackingRowHeight", out v) && TrackingLedgerGrid != null) TrackingLedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("BillRowHeight", out v) && BillLedgerGrid != null) BillLedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("CBSRowHeight", out v) && CBSGrid != null) CBSGrid.RowHeight = Convert.ToDouble(v); RestoreColumnWidthsFromDict(LedgerGrid, "Challan", data); RestoreColumnWidthsFromDict(LRLedgerGrid, "LR", data); RestoreColumnWidthsFromDict(TrackingLedgerGrid, "Tracking", data); RestoreColumnWidthsFromDict(BillLedgerGrid, "Bill", data); RestoreColumnWidthsFromDict(CBSGrid, "CBS", data); RestoreColumnWidthsFromDict(NewBookingGrid, "DashboardNewBooking", data); RestoreColumnWidthsFromDict(DashboardPendingBillGrid, "DashboardPendingBill", data); } catch { } }
+        private void SaveGridSettings() { try { var data = new Dictionary<string, object>(); if (LedgerGrid != null) { data["ChallanRowHeight"] = LedgerGrid.RowHeight; SaveColumnWidthsToDict(LedgerGrid, "Challan", data); } if (LRLedgerGrid != null) { data["LRRowHeight"] = LRLedgerGrid.RowHeight; SaveColumnWidthsToDict(LRLedgerGrid, "LR", data); } if (TrackingLedgerGrid != null) { data["TrackingRowHeight"] = TrackingLedgerGrid.RowHeight; SaveColumnWidthsToDict(TrackingLedgerGrid, "Tracking", data); } if (BillLedgerGrid != null) { data["BillRowHeight"] = BillLedgerGrid.RowHeight; SaveColumnWidthsToDict(BillLedgerGrid, "Bill", data); } if (CBSGrid != null) { data["CBSRowHeight"] = CBSGrid.RowHeight; SaveColumnWidthsToDict(CBSGrid, "CBS", data); } SaveColumnWidthsToDict(NewBookingGrid, "DashboardNewBooking", data); SaveColumnWidthsToDict(DashboardPendingBillGrid, "DashboardPendingBill", data); var dir = System.IO.Path.GetDirectoryName(GridSettingsPath); if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir); System.IO.File.WriteAllText(GridSettingsPath, new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(data)); } catch { } }
         private void SaveColumnWidthsToDict(DataGrid grid, string prefix, Dictionary<string, object> data) { foreach (var col in grid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" ▲", "").Replace(" ▼", "").Trim(); if (!string.IsNullOrEmpty(h)) data[$"{prefix}_W_{h}"] = col.Width.DisplayValue; } }
         private void RestoreColumnWidthsFromDict(DataGrid grid, string prefix, Dictionary<string, object> data) { if (grid == null || data == null) return; foreach (var col in grid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" ▲", "").Replace(" ▼", "").Trim(); if (string.IsNullOrEmpty(h)) continue; var key = $"{prefix}_W_{h}"; if (data.TryGetValue(key, out var val) && val != null) { double w = Convert.ToDouble(val); if (w > 10) col.Width = new DataGridLength(w); } } }
         private static string GridSettingsPath => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Awagaman ERP", "grid_settings.json");
@@ -5564,6 +6471,189 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             public string Amount { get; set; }
         }
 
+        private sealed class BillPreviewDraft
+        {
+            public List<BillPreviewLine> Lines { get; set; } = new List<BillPreviewLine>();
+            public List<double> RowHeights { get; set; } = new List<double>();
+        }
+
+        private sealed class BillFormatTextBox
+        {
+            public string Text { get; set; }
+            public double X { get; set; }
+            public double Y { get; set; }
+            public double Width { get; set; }
+            public double Height { get; set; }
+            public double FontSize { get; set; }
+            public bool Wrap { get; set; }
+        }
+
+        private sealed class BillFormatLayout
+        {
+            public double FontSize { get; set; }
+            public bool WrapText { get; set; }
+            public double RowHeight { get; set; }
+            public double RowSpacing { get; set; }
+            public bool BoldText { get; set; }
+            public bool ItalicText { get; set; }
+            public string Alignment { get; set; }
+            public int ExtraRows { get; set; }
+            public List<BillFormatTextBox> TextBoxes { get; set; }
+        }
+
+        private static string BillFormatLayoutPath =>
+            System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Awagaman ERP", "bill_format_layout.txt");
+
+        private static BillFormatLayout LoadBillFormatLayout()
+        {
+            var layout = new BillFormatLayout
+            {
+                FontSize = 13,
+                WrapText = true,
+                RowHeight = 42,
+                RowSpacing = 0,
+                BoldText = false,
+                ItalicText = false,
+                Alignment = "Center",
+                ExtraRows = 0,
+                TextBoxes = new List<BillFormatTextBox>()
+            };
+            try
+            {
+                if (!System.IO.File.Exists(BillFormatLayoutPath)) return layout;
+                foreach (var line in System.IO.File.ReadAllLines(BillFormatLayoutPath))
+                {
+                    var raw = (line ?? string.Empty).Trim();
+                    if (raw.StartsWith("FONT|", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var p = raw.Split('|');
+                        if (p.Length >= 2 && double.TryParse(p[1], out var fs) && fs > 6 && fs < 60) layout.FontSize = fs;
+                    }
+                    else if (raw.StartsWith("WRAP|", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var p = raw.Split('|');
+                        if (p.Length >= 2 && bool.TryParse(p[1], out var w)) layout.WrapText = w;
+                    }
+                    else if (raw.StartsWith("ROWS|", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var p = raw.Split('|');
+                        if (p.Length >= 2 && int.TryParse(p[1], out var r) && r >= 0 && r <= 20) layout.ExtraRows = r;
+                    }
+                    else if (raw.StartsWith("ROWH|", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var p = raw.Split('|');
+                        if (p.Length >= 2 && double.TryParse(p[1], out var rh) && rh >= 24 && rh <= 80) layout.RowHeight = rh;
+                    }
+                    else if (raw.StartsWith("ROWSP|", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var p = raw.Split('|');
+                        if (p.Length >= 2 && double.TryParse(p[1], out var rs) && rs >= 0 && rs <= 120) layout.RowSpacing = rs;
+                    }
+                    else if (raw.StartsWith("BOLD|", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var p = raw.Split('|');
+                        if (p.Length >= 2 && bool.TryParse(p[1], out var b)) layout.BoldText = b;
+                    }
+                    else if (raw.StartsWith("ITALIC|", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var p = raw.Split('|');
+                        if (p.Length >= 2 && bool.TryParse(p[1], out var it)) layout.ItalicText = it;
+                    }
+                    else if (raw.StartsWith("ALIGN|", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var p = raw.Split('|');
+                        if (p.Length >= 2) layout.Alignment = string.IsNullOrWhiteSpace(p[1]) ? "Center" : p[1].Trim();
+                    }
+                    else if (raw.StartsWith("TB|", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var p = raw.Split('|');
+                        if (p.Length < 8) continue;
+                        double x, y, w, h, fs;
+                        bool wrap;
+                        if (!double.TryParse(p[1], out x) || !double.TryParse(p[2], out y) || !double.TryParse(p[3], out w) || !double.TryParse(p[4], out h) || !double.TryParse(p[5], out fs) || !bool.TryParse(p[6], out wrap)) continue;
+                        var text = p[7].Replace("\\n", "\n");
+                        layout.TextBoxes.Add(new BillFormatTextBox
+                        {
+                            X = x,
+                            Y = y,
+                            Width = w,
+                            Height = h,
+                            FontSize = fs,
+                            Wrap = wrap,
+                            Text = text
+                        });
+                    }
+                }
+            }
+            catch { }
+            return layout;
+        }
+
+        private static void SaveBillFormatLayout(BillFormatLayout layout)
+        {
+            try
+            {
+                if (layout == null) return;
+                var dir = System.IO.Path.GetDirectoryName(BillFormatLayoutPath);
+                if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
+                var lines = new List<string>
+                {
+                    $"FONT|{layout.FontSize}",
+                    $"WRAP|{layout.WrapText}",
+                    $"ROWH|{layout.RowHeight}",
+                    $"ROWSP|{layout.RowSpacing}",
+                    $"BOLD|{layout.BoldText}",
+                    $"ITALIC|{layout.ItalicText}",
+                    $"ALIGN|{(string.IsNullOrWhiteSpace(layout.Alignment) ? "Center" : layout.Alignment)}",
+                    $"ROWS|{layout.ExtraRows}"
+                };
+                if (layout.TextBoxes != null)
+                {
+                    foreach (var tb in layout.TextBoxes)
+                    {
+                        var t = (tb.Text ?? string.Empty).Replace("\r", string.Empty).Replace("\n", "\\n");
+                        lines.Add($"TB|{tb.X}|{tb.Y}|{tb.Width}|{tb.Height}|{tb.FontSize}|{tb.Wrap}|{t}");
+                    }
+                }
+                System.IO.File.WriteAllLines(BillFormatLayoutPath, lines);
+            }
+            catch { }
+        }
+
+        private static string GetBillPreviewDraftPath(string billNo)
+        {
+            var safe = string.IsNullOrWhiteSpace(billNo) ? "bill" : string.Join("_", (billNo ?? "bill").Split(System.IO.Path.GetInvalidFileNameChars()));
+            var dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Awagaman ERP", "bill_preview_drafts");
+            return System.IO.Path.Combine(dir, safe + ".json");
+        }
+
+        private static BillPreviewDraft LoadBillPreviewDraft(string billNo)
+        {
+            try
+            {
+                var path = GetBillPreviewDraftPath(billNo);
+                if (!System.IO.File.Exists(path)) return null;
+                var json = System.IO.File.ReadAllText(path);
+                var draft = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<BillPreviewDraft>(json);
+                return draft;
+            }
+            catch { return null; }
+        }
+
+        private static void SaveBillPreviewDraft(string billNo, BillPreviewDraft draft)
+        {
+            try
+            {
+                if (draft == null) return;
+                var path = GetBillPreviewDraftPath(billNo);
+                var dir = System.IO.Path.GetDirectoryName(path);
+                if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
+                var json = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(draft);
+                System.IO.File.WriteAllText(path, json);
+            }
+            catch { }
+        }
+
         private void OpenBillFormatPreview(BillEntry entry)
         {
             if (entry == null) return;
@@ -5588,24 +6678,23 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                     BillDate = entry.BillDate.ToString("dd-MMM-yyyy"),
                     Total = totalAmount.ToString("N2"),
                     TotalWords = NumberToWords((long)Math.Round(totalAmount, 0)) + " Only",
-                    Lines = billRows
-                    .Where(x => x.Total != 0m)
-                    .Select(x => new BillPreviewLine
-                    {
-                        LRNo = (x.LRNo ?? string.Empty).Trim(),
-                        LRDate = x.LRDate.HasValue ? x.LRDate.Value.ToString("dd.MM.yy") : string.Empty,
-                        Invoice = GetLRInvoice(x.LRNo),
-                        Vehicle = GetLRVehicleNo(x.LRNo),
-                        From = (x.From ?? string.Empty).Trim(),
-                        To = (x.To ?? string.Empty).Trim(),
-                        FreightRoute = $"From: {(x.From ?? string.Empty).Trim()}    To: {(x.To ?? string.Empty).Trim()}",
-                        ChargesBreakdown = BuildChargesLabelLines(x.HML, x.Detention, x.OTHR),
-                        WeightOrType = (x.VehicleType ?? string.Empty).Trim(),
-                        Rate = string.Empty,
-                        Amount = BuildAmountLines(x.Freight, x.HML, x.Detention, x.OTHR)
-                    })
-                    .ToList()
+                    Lines = BuildBillPreviewLinesForGrid(billRows)
                 };
+                var loadedDraft = LoadBillPreviewDraft(preview.BillNo);
+                if (loadedDraft != null && loadedDraft.Lines != null && loadedDraft.Lines.Count > 0)
+                    preview.Lines = loadedDraft.Lines.Select(x => new BillPreviewLine
+                    {
+                        LRNo = x?.LRNo ?? string.Empty,
+                        LRDate = x?.LRDate ?? string.Empty,
+                        Invoice = x?.Invoice ?? string.Empty,
+                        Vehicle = x?.Vehicle ?? string.Empty,
+                        From = x?.From ?? string.Empty,
+                        To = x?.To ?? string.Empty,
+                        ChargesBreakdown = x?.ChargesBreakdown ?? string.Empty,
+                        WeightOrType = x?.WeightOrType ?? string.Empty,
+                        Rate = x?.Rate ?? string.Empty,
+                        Amount = x?.Amount ?? string.Empty
+                    }).ToList();
 
                 var dialog = new Window
                 {
@@ -5620,6 +6709,109 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                 var root = new Grid { Margin = new Thickness(10) };
                 root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
                 root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+                var billLayout = LoadBillFormatLayout();
+                var undoStack = new Stack<List<BillPreviewLine>>();
+                var redoStack = new Stack<List<BillPreviewLine>>();
+                bool suppressHistory = false;
+                bool hasUnsavedChanges = false;
+                bool allowCloseWithoutPrompt = false;
+                var historyTimer = new System.Windows.Threading.DispatcherTimer
+                {
+                    Interval = TimeSpan.FromMilliseconds(300)
+                };
+
+                Func<IEnumerable<BillPreviewLine>, List<BillPreviewLine>> cloneLines = lines =>
+                {
+                    return (lines ?? Enumerable.Empty<BillPreviewLine>())
+                        .Select(x => new BillPreviewLine
+                        {
+                            LRNo = x?.LRNo ?? string.Empty,
+                            LRDate = x?.LRDate ?? string.Empty,
+                            Invoice = x?.Invoice ?? string.Empty,
+                            Vehicle = x?.Vehicle ?? string.Empty,
+                            From = x?.From ?? string.Empty,
+                            To = x?.To ?? string.Empty,
+                            ChargesBreakdown = x?.ChargesBreakdown ?? string.Empty,
+                            WeightOrType = x?.WeightOrType ?? string.Empty,
+                            Rate = x?.Rate ?? string.Empty,
+                            Amount = x?.Amount ?? string.Empty
+                        }).ToList();
+                };
+                Func<List<BillPreviewLine>, List<BillPreviewLine>, bool> sameLines = (a, b) =>
+                {
+                    if (ReferenceEquals(a, b)) return true;
+                    if (a == null || b == null) return false;
+                    if (a.Count != b.Count) return false;
+                    for (int i = 0; i < a.Count; i++)
+                    {
+                        var x = a[i];
+                        var y = b[i];
+                        if ((x?.LRNo ?? string.Empty) != (y?.LRNo ?? string.Empty)) return false;
+                        if ((x?.LRDate ?? string.Empty) != (y?.LRDate ?? string.Empty)) return false;
+                        if ((x?.Invoice ?? string.Empty) != (y?.Invoice ?? string.Empty)) return false;
+                        if ((x?.Vehicle ?? string.Empty) != (y?.Vehicle ?? string.Empty)) return false;
+                        if ((x?.From ?? string.Empty) != (y?.From ?? string.Empty)) return false;
+                        if ((x?.To ?? string.Empty) != (y?.To ?? string.Empty)) return false;
+                        if ((x?.ChargesBreakdown ?? string.Empty) != (y?.ChargesBreakdown ?? string.Empty)) return false;
+                        if ((x?.WeightOrType ?? string.Empty) != (y?.WeightOrType ?? string.Empty)) return false;
+                        if ((x?.Rate ?? string.Empty) != (y?.Rate ?? string.Empty)) return false;
+                        if ((x?.Amount ?? string.Empty) != (y?.Amount ?? string.Empty)) return false;
+                    }
+                    return true;
+                };
+                List<BillPreviewLine> currentHistoryState = cloneLines(preview.Lines);
+                Func<BillFormatLayout, BillFormatLayout> cloneLayout = src =>
+                {
+                    if (src == null) return new BillFormatLayout();
+                    return new BillFormatLayout
+                    {
+                        FontSize = src.FontSize,
+                        WrapText = src.WrapText,
+                        RowHeight = src.RowHeight,
+                        RowSpacing = src.RowSpacing,
+                        BoldText = src.BoldText,
+                        ItalicText = src.ItalicText,
+                        Alignment = src.Alignment,
+                        ExtraRows = src.ExtraRows,
+                        TextBoxes = (src.TextBoxes ?? new List<BillFormatTextBox>()).Select(t => new BillFormatTextBox
+                        {
+                            Text = t?.Text ?? string.Empty,
+                            X = t?.X ?? 0,
+                            Y = t?.Y ?? 0,
+                            Width = t?.Width ?? 0,
+                            Height = t?.Height ?? 0,
+                            FontSize = t?.FontSize ?? 0,
+                            Wrap = t?.Wrap == true
+                        }).ToList()
+                    };
+                };
+                Action<BillFormatLayout, BillFormatLayout> copyLayout = (from, to) =>
+                {
+                    if (from == null || to == null) return;
+                    to.FontSize = from.FontSize;
+                    to.WrapText = from.WrapText;
+                    to.RowHeight = from.RowHeight;
+                    to.RowSpacing = from.RowSpacing;
+                    to.BoldText = from.BoldText;
+                    to.ItalicText = from.ItalicText;
+                    to.Alignment = from.Alignment;
+                    to.ExtraRows = from.ExtraRows;
+                    to.TextBoxes = (from.TextBoxes ?? new List<BillFormatTextBox>()).Select(t => new BillFormatTextBox
+                    {
+                        Text = t?.Text ?? string.Empty,
+                        X = t?.X ?? 0,
+                        Y = t?.Y ?? 0,
+                        Width = t?.Width ?? 0,
+                        Height = t?.Height ?? 0,
+                        FontSize = t?.FontSize ?? 0,
+                        Wrap = t?.Wrap == true
+                    }).ToList();
+                };
+                var loadedLayoutSnapshot = cloneLayout(billLayout);
+                var loadedLinesSnapshot = cloneLines(preview.Lines);
+                var loadedRowHeightsSnapshot = (loadedDraft?.RowHeights ?? new List<double>()).ToList();
 
                 var viewer = new ScrollViewer
                 {
@@ -5628,30 +6820,268 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                     Background = Brushes.White
                 };
 
-                var page = BuildBillPrintVisual(preview);
-                viewer.Content = page;
+                Expander inlineEditor = null;
+                Action recordHistoryFromGrid = () => { };
+                Action rebuildPreview = () =>
+                {
+                    var dragEnabled = true;
+                    viewer.Content = BuildBillPrintVisual(preview, billLayout, dragEnabled, null, loadedRowHeightsSnapshot);
+
+                    var liveGrid = FindVisualChild<DataGrid>(viewer);
+                    if (liveGrid != null)
+                    {
+                        List<BillPreviewLine> preEditState = null;
+
+                        liveGrid.BeginningEdit += (s, e) =>
+                        {
+                            if (suppressHistory) return;
+                            preEditState = cloneLines(currentHistoryState);
+                        };
+
+                        liveGrid.CellEditEnding += (s, e) =>
+                        {
+                            if (suppressHistory || e.EditAction != DataGridEditAction.Commit) return;
+                            liveGrid.Dispatcher.BeginInvoke(new Action(() =>
+                            {
+                                try
+                                {
+                                    liveGrid.CommitEdit(DataGridEditingUnit.Cell, true);
+                                    liveGrid.CommitEdit(DataGridEditingUnit.Row, true);
+                                    var state = cloneLines((liveGrid.ItemsSource as IEnumerable<BillPreviewLine>) ?? preview.Lines);
+                                    var oldState = preEditState ?? cloneLines(currentHistoryState);
+                                    if (!sameLines(oldState, state))
+                                    {
+                                        undoStack.Push(cloneLines(oldState));
+                                        currentHistoryState = cloneLines(state);
+                                        preview.Lines = cloneLines(state);
+                                        redoStack.Clear();
+                                        hasUnsavedChanges = true;
+                                    }
+                                }
+                                catch { }
+                            }), System.Windows.Threading.DispatcherPriority.Background);
+                        };
+                        liveGrid.RowEditEnding += (s, e) =>
+                        {
+                            if (suppressHistory || e.EditAction != DataGridEditAction.Commit) return;
+                            liveGrid.Dispatcher.BeginInvoke(new Action(() => recordHistoryFromGrid()), System.Windows.Threading.DispatcherPriority.Background);
+                        };
+                        liveGrid.CurrentCellChanged += (s, e) =>
+                        {
+                            if (suppressHistory) return;
+                            liveGrid.Dispatcher.BeginInvoke(new Action(() => recordHistoryFromGrid()), System.Windows.Threading.DispatcherPriority.Background);
+                        };
+                        var oc = liveGrid.ItemsSource as ObservableCollection<BillPreviewLine>;
+                        if (oc != null)
+                        {
+                            oc.CollectionChanged += (s, e) =>
+                            {
+                                if (suppressHistory) return;
+                                try
+                                {
+                                    var state = cloneLines(oc);
+                                    if (sameLines(currentHistoryState, state)) return;
+                                    undoStack.Push(cloneLines(currentHistoryState));
+                                    currentHistoryState = cloneLines(state);
+                                    preview.Lines = cloneLines(state);
+                                    redoStack.Clear();
+                                    hasUnsavedChanges = true;
+                                }
+                                catch { }
+                            };
+                        }
+                    }
+                };
+                recordHistoryFromGrid = () =>
+                {
+                    if (suppressHistory) return;
+                    try
+                    {
+                        var grid = FindVisualChild<DataGrid>(viewer);
+                        if (grid == null) return;
+                        grid.CommitEdit(DataGridEditingUnit.Cell, true);
+                        grid.CommitEdit(DataGridEditingUnit.Row, true);
+                        var state = cloneLines((grid.ItemsSource as IEnumerable<BillPreviewLine>) ?? preview.Lines);
+                        if (sameLines(currentHistoryState, state)) return;
+                        undoStack.Push(cloneLines(currentHistoryState));
+                        currentHistoryState = cloneLines(state);
+                        preview.Lines = cloneLines(state);
+                        redoStack.Clear();
+                        hasUnsavedChanges = true;
+                    }
+                    catch { }
+                };
+                Action trackHistoryTick = () =>
+                {
+                    if (suppressHistory) return;
+                    if (!viewer.IsKeyboardFocusWithin) return;
+                    // Do not interrupt active typing inside editable cell text boxes.
+                    if (Keyboard.FocusedElement is TextBox) return;
+                    recordHistoryFromGrid();
+                };
+                historyTimer.Tick += (s, e) => trackHistoryTick();
+                Action syncPreviewFromGrid = () =>
+                {
+                    try
+                    {
+                        var grid = FindVisualChild<DataGrid>(viewer);
+                        if (grid == null) return;
+                        grid.CommitEdit(DataGridEditingUnit.Cell, true);
+                        grid.CommitEdit(DataGridEditingUnit.Row, true);
+                        var items = (grid.ItemsSource as IEnumerable<BillPreviewLine>)?.ToList();
+                        if (items == null) return;
+                        preview.Lines = items.Select(x => new BillPreviewLine
+                        {
+                            LRNo = x?.LRNo ?? string.Empty,
+                            LRDate = x?.LRDate ?? string.Empty,
+                            Invoice = x?.Invoice ?? string.Empty,
+                            Vehicle = x?.Vehicle ?? string.Empty,
+                            From = x?.From ?? string.Empty,
+                            To = x?.To ?? string.Empty,
+                            ChargesBreakdown = x?.ChargesBreakdown ?? string.Empty,
+                            WeightOrType = x?.WeightOrType ?? string.Empty,
+                            Rate = x?.Rate ?? string.Empty,
+                            Amount = x?.Amount ?? string.Empty
+                        }).ToList();
+
+                        decimal total = 0m;
+                        foreach (var line in preview.Lines)
+                        {
+                            if (decimal.TryParse((line?.Amount ?? string.Empty).Trim(), out var amt))
+                                total += amt;
+                        }
+                        preview.Total = total.ToString("N2");
+                        preview.TotalWords = NumberToWords((long)Math.Round(total, 0)) + " Only";
+                        currentHistoryState = cloneLines(preview.Lines);
+                    }
+                    catch { }
+                };
+                Func<List<double>> captureCurrentRowHeights = () =>
+                {
+                    var result = new List<double>();
+                    try
+                    {
+                        var grid = FindVisualChild<DataGrid>(viewer);
+                        if (grid == null) return result;
+                        grid.UpdateLayout();
+                        for (int i = 0; i < grid.Items.Count; i++)
+                        {
+                            var row = grid.ItemContainerGenerator.ContainerFromIndex(i) as DataGridRow;
+                            if (row != null && row.ActualHeight > 0)
+                                result.Add(row.ActualHeight);
+                            else
+                                result.Add(grid.RowHeight > 0 ? grid.RowHeight : 42);
+                        }
+                    }
+                    catch { }
+                    return result;
+                };
+                rebuildPreview();
                 Grid.SetRow(viewer, 0);
                 root.Children.Add(viewer);
+                historyTimer.Start();
+
+                Action<bool> flushActiveEdit = (trackHistory) =>
+                {
+                    if (suppressHistory) return;
+                    try
+                    {
+                        var liveGrid = FindVisualChild<DataGrid>(viewer);
+                        if (liveGrid == null) return;
+                        liveGrid.CommitEdit(DataGridEditingUnit.Cell, true);
+                        liveGrid.CommitEdit(DataGridEditingUnit.Row, true);
+                    }
+                    catch { }
+                    if (trackHistory) recordHistoryFromGrid();
+                };
+                var billUndoCmd = new RoutedCommand("BillUndo", typeof(Window));
+                var billRedoCmd = new RoutedCommand("BillRedo", typeof(Window));
+                dialog.InputBindings.Add(new KeyBinding(billUndoCmd, new KeyGesture(Key.Z, ModifierKeys.Control)));
+                dialog.InputBindings.Add(new KeyBinding(billRedoCmd, new KeyGesture(Key.Z, ModifierKeys.Control | ModifierKeys.Shift)));
+                Action doBillUndo = () =>
+                {
+                    if (!dialog.IsActive) return;
+                    flushActiveEdit(true);
+                    if (undoStack.Count == 0) return;
+                    suppressHistory = true;
+                    try
+                    {
+                        var prev = undoStack.Count > 0 ? undoStack.Pop() : null;
+                        if (prev == null) return;
+                        redoStack.Push(cloneLines(currentHistoryState));
+                        currentHistoryState = cloneLines(prev);
+                        preview.Lines = cloneLines(prev);
+                        rebuildPreview();
+                    }
+                    finally
+                    {
+                        suppressHistory = false;
+                    }
+                };
+                Action doBillRedo = () =>
+                {
+                    if (!dialog.IsActive) return;
+                    flushActiveEdit(true);
+                    if (redoStack.Count == 0) return;
+                    suppressHistory = true;
+                    try
+                    {
+                        var next = redoStack.Count > 0 ? redoStack.Pop() : null;
+                        if (next == null) return;
+                        undoStack.Push(cloneLines(currentHistoryState));
+                        currentHistoryState = cloneLines(next);
+                        preview.Lines = cloneLines(next);
+                        rebuildPreview();
+                    }
+                    finally
+                    {
+                        suppressHistory = false;
+                    }
+                };
+                dialog.CommandBindings.Add(new CommandBinding(billUndoCmd, (s, e) =>
+                {
+                    doBillUndo();
+                    e.Handled = true;
+                }));
+                dialog.CommandBindings.Add(new CommandBinding(billRedoCmd, (s, e) =>
+                {
+                    doBillRedo();
+                    e.Handled = true;
+                }));
+                dialog.AddHandler(Keyboard.PreviewKeyDownEvent, new KeyEventHandler((s, e) =>
+                {
+                    if (!dialog.IsActive) return;
+                    if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift)) == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.Z)
+                    {
+                        doBillRedo();
+                        e.Handled = true;
+                        return;
+                    }
+                    if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control && e.Key == Key.Z)
+                    {
+                        doBillUndo();
+                        e.Handled = true;
+                    }
+                }), true);
 
                 var closeRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
+                var resetBtn = new Button { Content = "Reset", Width = 90, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
+                var saveBtn = new Button { Content = "Save", Width = 90, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
                 var actionsBtn = new Button { Content = "Actions ▾", Width = 110, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
                 var closeBtn = new Button { Content = "Close", Width = 90, Height = 30 };
                 Action doPrint = () =>
                 {
                     try
                     {
-                        var printServer = new System.Printing.LocalPrintServer();
-                        var queue = printServer.DefaultPrintQueue;
-                        if (queue == null)
-                        {
-                            MessageBox.Show("No default printer found.", "Print", MessageBoxButton.OK, MessageBoxImage.Warning);
-                            return;
-                        }
+                        syncPreviewFromGrid();
+                        var rowHeights = captureCurrentRowHeights();
+                        const double letterheadTopSpace = 90;
+                        const double letterheadBottomSpace = 70;
+                        var currentVisual = BuildBillPrintVisual(preview, billLayout, false, null, rowHeights, letterheadTopSpace, letterheadBottomSpace);
 
-                        var fixedDoc = BuildBillFixedDocument(preview, 1122, 793); // A4 Landscape @96 DPI
-                        var writer = System.Printing.PrintQueue.CreateXpsDocumentWriter(queue);
-                        writer.Write(fixedDoc.DocumentPaginator);
-                        MessageBox.Show($"Print job sent to: {queue.FullName}", "Print", MessageBoxButton.OK, MessageBoxImage.Information);
+                        var pd = new PrintDialog();
+                        if (pd.ShowDialog() != true) return;
+                        pd.PrintVisual(currentVisual, $"Bill {preview?.BillNo}");
                     }
                     catch (Exception ex)
                     {
@@ -5660,11 +7090,43 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                 };
                 var actionsMenu = new ContextMenu();
                 var miPreview = new MenuItem { Header = "Print Preview" };
-                miPreview.Click += (_, __) => ShowBillPrintPreview(preview);
+                miPreview.Click += (_, __) =>
+                {
+                    try
+                    {
+                        syncPreviewFromGrid();
+                        var rowHeights = captureCurrentRowHeights();
+                        const double letterheadTopSpace = 90;
+                        const double letterheadBottomSpace = 70;
+                        var tempPdf = System.IO.Path.Combine(
+                            System.IO.Path.GetTempPath(),
+                            $"BillPreview_{((preview?.BillNo ?? "Bill").Replace("/", "-"))}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf");
+                        // Preview should visually match Bill View Format.
+                        var pageForPreview = BuildBillPrintVisual(preview, billLayout, true, null, rowHeights, letterheadTopSpace, letterheadBottomSpace, true);
+                        const double exportDpi = 600;
+                        var bmpPreview = RenderElementToBitmap(pageForPreview, 1122, 793, exportDpi);
+                        SaveBitmapAsPdf(bmpPreview, tempPdf, exportDpi);
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(tempPdf) { UseShellExecute = true });
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Unable to open bill preview: " + ex.Message, "Print Preview", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                };
                 actionsMenu.Items.Add(miPreview);
 
                 var miPrint = new MenuItem { Header = "Print" };
-                miPrint.Click += (_, __) => doPrint();
+                miPrint.Click += (_, __) =>
+                {
+                    try
+                    {
+                        doPrint();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Unable to open print window: " + ex.Message, "Print", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                };
                 actionsMenu.Items.Add(miPrint);
                 actionsMenu.Items.Add(new Separator());
 
@@ -5673,18 +7135,21 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                 {
                     try
                     {
+                        syncPreviewFromGrid();
+                        var rowHeights = captureCurrentRowHeights();
+                        const double letterheadTopSpace = 90;
+                        const double letterheadBottomSpace = 70;
                         var sfd = new Microsoft.Win32.SaveFileDialog
                         {
                             Title = "Download Bill Format",
-                            Filter = "PNG Image|*.png|PDF Document|*.pdf",
-                            FileName = $"{((preview?.BillNo ?? "Bill").Replace("/", "-"))}"
+                            Filter = "PDF Document|*.pdf",
+                            FileName = $"{((preview?.BillNo ?? "Bill").Replace("/", "-"))}.pdf"
                         };
                         if (sfd.ShowDialog(dialog) != true) return;
-                        var ext = (System.IO.Path.GetExtension(sfd.FileName) ?? string.Empty).ToLowerInvariant();
-                        var pageForExport = BuildBillPrintVisual(preview);
-                        var bmpOut = RenderElementToBitmap(pageForExport, 1122, 793);
-                        if (ext == ".pdf") SaveBitmapAsPdf(bmpOut, sfd.FileName);
-                        else SaveBitmapAsPng(bmpOut, sfd.FileName);
+                        var pageForExport = BuildBillPrintVisual(preview, billLayout, false, null, rowHeights, letterheadTopSpace, letterheadBottomSpace);
+                        const double exportDpi = 600;
+                        var bmpOut = RenderElementToBitmap(pageForExport, 1122, 793, exportDpi);
+                        SaveBitmapAsPdf(bmpOut, sfd.FileName, exportDpi);
                         MessageBox.Show("Bill format downloaded.", "Download", MessageBoxButton.OK, MessageBoxImage.Information);
                     }
                     catch (Exception ex)
@@ -5699,9 +7164,14 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                 {
                     try
                     {
+                        syncPreviewFromGrid();
+                        var rowHeights = captureCurrentRowHeights();
+                        const double letterheadTopSpace = 90;
+                        const double letterheadBottomSpace = 70;
                         var tempPng = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"Bill_{(preview?.BillNo ?? "Bill").Replace("/", "-")}.png");
-                        var pageForExport = BuildBillPrintVisual(preview);
-                        var bmpOut = RenderElementToBitmap(pageForExport, 1122, 793);
+                        var pageForExport = BuildBillPrintVisual(preview, billLayout, false, null, rowHeights, letterheadTopSpace, letterheadBottomSpace);
+                        const double exportDpi = 600;
+                        var bmpOut = RenderElementToBitmap(pageForExport, 1122, 793, exportDpi);
                         SaveBitmapAsPng(bmpOut, tempPng);
                         var text = Uri.EscapeDataString($"Bill {preview?.BillNo}\nFile: {tempPng}");
                         var uri = $"https://wa.me/?text={text}";
@@ -5719,9 +7189,14 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                 {
                     try
                     {
+                        syncPreviewFromGrid();
+                        var rowHeights = captureCurrentRowHeights();
+                        const double letterheadTopSpace = 90;
+                        const double letterheadBottomSpace = 70;
                         var tempPng = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"Bill_{(preview?.BillNo ?? "Bill").Replace("/", "-")}.png");
-                        var pageForExport = BuildBillPrintVisual(preview);
-                        var bmpOut = RenderElementToBitmap(pageForExport, 1122, 793);
+                        var pageForExport = BuildBillPrintVisual(preview, billLayout, false, null, rowHeights, letterheadTopSpace, letterheadBottomSpace);
+                        const double exportDpi = 600;
+                        var bmpOut = RenderElementToBitmap(pageForExport, 1122, 793, exportDpi);
                         SaveBitmapAsPng(bmpOut, tempPng);
                         var subject = Uri.EscapeDataString($"Bill {preview?.BillNo}");
                         var body = Uri.EscapeDataString($"Please find the bill file.\n\nSaved at:\n{tempPng}");
@@ -5741,10 +7216,194 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                     actionsMenu.PlacementTarget = actionsBtn;
                     actionsMenu.IsOpen = true;
                 };
+
+                inlineEditor = new Expander
+                {
+                    Header = "Edit Bill Format",
+                    IsExpanded = true,
+                    Margin = new Thickness(0, 8, 0, 0),
+                    Visibility = Visibility.Collapsed
+                };
+                var editorRoot = new Grid { Margin = new Thickness(6) };
+                editorRoot.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+                var editTop = new StackPanel { Orientation = Orientation.Horizontal };
+                editTop.Children.Add(new TextBlock { Text = "Font", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+                var fontBox = new TextBox { Width = 60, Text = billLayout.FontSize.ToString("0.##"), Margin = new Thickness(0, 0, 12, 0) };
+                editTop.Children.Add(fontBox);
+                var wrapCheck = new CheckBox { Content = "Wrap text", IsChecked = billLayout.WrapText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
+                editTop.Children.Add(wrapCheck);
+                editTop.Children.Add(new TextBlock { Text = "Rows", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+                var rowsBox = new TextBox { Width = 55, Text = billLayout.ExtraRows.ToString(), Margin = new Thickness(0, 0, 8, 0) };
+                editTop.Children.Add(rowsBox);
+                editTop.Children.Add(new TextBlock { Text = "Row H", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+                var rowHeightBox = new TextBox { Width = 60, Text = billLayout.RowHeight.ToString("0.##"), Margin = new Thickness(0, 0, 8, 0) };
+                editTop.Children.Add(rowHeightBox);
+                editTop.Children.Add(new TextBlock { Text = "Row Space", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+                var rowSpacingBox = new TextBox { Width = 60, Text = billLayout.RowSpacing.ToString("0.##"), Margin = new Thickness(0, 0, 8, 0) };
+                editTop.Children.Add(rowSpacingBox);
+                var boldCheck = new CheckBox { Content = "Bold", IsChecked = billLayout.BoldText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+                var italicCheck = new CheckBox { Content = "Italic", IsChecked = billLayout.ItalicText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+                editTop.Children.Add(boldCheck);
+                editTop.Children.Add(italicCheck);
+                editTop.Children.Add(new TextBlock { Text = "Align", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+                var alignPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0) };
+                var alignLeftBtn = new Button { Content = "≡", Width = 30, Height = 26, Margin = new Thickness(0, 0, 4, 0), ToolTip = "Left Align" };
+                var alignCenterBtn = new Button { Content = "≣", Width = 30, Height = 26, Margin = new Thickness(0, 0, 4, 0), ToolTip = "Center Align" };
+                var alignRightBtn = new Button { Content = "☰", Width = 30, Height = 26, ToolTip = "Right Align" };
+                alignPanel.Children.Add(alignLeftBtn);
+                alignPanel.Children.Add(alignCenterBtn);
+                alignPanel.Children.Add(alignRightBtn);
+                editTop.Children.Add(alignPanel);
+
+                string selectedAlign = string.IsNullOrWhiteSpace(billLayout.Alignment) ? "Center" : billLayout.Alignment;
+                Action refreshAlignButtons = () =>
+                {
+                    var active = new SolidColorBrush(Color.FromRgb(214, 228, 246));
+                    var inactive = Brushes.White;
+                    alignLeftBtn.Background = string.Equals(selectedAlign, "Left", StringComparison.OrdinalIgnoreCase) ? active : inactive;
+                    alignCenterBtn.Background = string.Equals(selectedAlign, "Center", StringComparison.OrdinalIgnoreCase) ? active : inactive;
+                    alignRightBtn.Background = string.Equals(selectedAlign, "Right", StringComparison.OrdinalIgnoreCase) ? active : inactive;
+                };
+                Action<string> applyAlign = align =>
+                {
+                    selectedAlign = align;
+                    refreshAlignButtons();
+                    var previewGrid = FindVisualChild<DataGrid>(viewer);
+                    if (previewGrid != null && previewGrid.SelectedCells != null && previewGrid.SelectedCells.Count > 0)
+                    {
+                        ApplyAlignmentToSelectedCells(previewGrid, selectedAlign);
+                        hasUnsavedChanges = true;
+                        return;
+                    }
+                    billLayout.Alignment = selectedAlign;
+                    hasUnsavedChanges = true;
+                    rebuildPreview();
+                };
+                alignLeftBtn.Click += (_, __) => applyAlign("Left");
+                alignCenterBtn.Click += (_, __) => applyAlign("Center");
+                alignRightBtn.Click += (_, __) => applyAlign("Right");
+                refreshAlignButtons();
+                var applyBtn = new Button { Content = "Apply", Width = 70 };
+                editTop.Children.Add(applyBtn);
+                Grid.SetRow(editTop, 0);
+                editorRoot.Children.Add(editTop);
+                Action applyEditorInputsToLayout = () =>
+                {
+                    if (double.TryParse((fontBox.Text ?? string.Empty).Trim(), out var fs))
+                        billLayout.FontSize = Math.Max(8, Math.Min(40, fs));
+                    if (double.TryParse((rowHeightBox.Text ?? string.Empty).Trim(), out var rh))
+                        billLayout.RowHeight = Math.Max(18, Math.Min(80, rh));
+                    if (double.TryParse((rowSpacingBox.Text ?? string.Empty).Trim(), out var rs))
+                        billLayout.RowSpacing = Math.Max(0, Math.Min(120, rs));
+                    billLayout.WrapText = wrapCheck.IsChecked == true;
+                    billLayout.BoldText = boldCheck.IsChecked == true;
+                    billLayout.ItalicText = italicCheck.IsChecked == true;
+                    billLayout.Alignment = selectedAlign;
+                    if (int.TryParse((rowsBox.Text ?? string.Empty).Trim(), out var rows))
+                        billLayout.ExtraRows = Math.Max(0, Math.Min(20, rows));
+                };
+                applyBtn.Click += (_, __) =>
+                {
+                    applyEditorInputsToLayout();
+                    hasUnsavedChanges = true;
+                    rebuildPreview();
+                };
+                var inlinePanel = new Border
+                {
+                    BorderBrush = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Background = Brushes.Transparent,
+                    Margin = new Thickness(0, 8, 0, 0),
+                    Padding = new Thickness(0),
+                    Child = editorRoot
+                };
+                Grid.SetRow(inlinePanel, 1);
+                root.Children.Add(inlinePanel);
+
+                saveBtn.Click += (_, __) =>
+                {
+                    try
+                    {
+                        applyEditorInputsToLayout();
+                        syncPreviewFromGrid();
+                        var rowHeights = captureCurrentRowHeights();
+                        SaveBillFormatLayout(billLayout);
+                        SaveBillPreviewDraft(preview.BillNo, new BillPreviewDraft
+                        {
+                            Lines = cloneLines(preview.Lines),
+                            RowHeights = rowHeights
+                        });
+                        loadedLayoutSnapshot = cloneLayout(billLayout);
+                        loadedLinesSnapshot = cloneLines(preview.Lines);
+                        loadedRowHeightsSnapshot = (rowHeights ?? new List<double>()).ToList();
+                        hasUnsavedChanges = false;
+                        MessageBox.Show("Bill format saved.", "Save", MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Unable to save bill format: " + ex.Message, "Save", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                };
+                resetBtn.Click += (_, __) =>
+                {
+                    var confirm = MessageBox.Show(
+                        "Reset bill view to freshly loaded state?\nUnsaved changes will be lost.",
+                        "Reset Bill Format",
+                        MessageBoxButton.OKCancel,
+                        MessageBoxImage.Warning);
+                    if (confirm != MessageBoxResult.OK) return;
+                    suppressHistory = true;
+                    try
+                    {
+                        copyLayout(loadedLayoutSnapshot, billLayout);
+                        preview.Lines = cloneLines(loadedLinesSnapshot);
+                        currentHistoryState = cloneLines(preview.Lines);
+                        undoStack.Clear();
+                        redoStack.Clear();
+                        fontBox.Text = billLayout.FontSize.ToString("0.##");
+                        wrapCheck.IsChecked = billLayout.WrapText;
+                        rowsBox.Text = billLayout.ExtraRows.ToString();
+                        rowHeightBox.Text = billLayout.RowHeight.ToString("0.##");
+                        rowSpacingBox.Text = billLayout.RowSpacing.ToString("0.##");
+                        boldCheck.IsChecked = billLayout.BoldText;
+                        italicCheck.IsChecked = billLayout.ItalicText;
+                        selectedAlign = string.IsNullOrWhiteSpace(billLayout.Alignment) ? "Center" : billLayout.Alignment;
+                        refreshAlignButtons();
+                        rebuildPreview();
+                        hasUnsavedChanges = false;
+                    }
+                    finally
+                    {
+                        suppressHistory = false;
+                    }
+                };
                 closeBtn.Click += (_, __) => dialog.Close();
+                dialog.Closing += (_, e) =>
+                {
+                    if (allowCloseWithoutPrompt) return;
+                    if (!hasUnsavedChanges) return;
+                    var confirm = MessageBox.Show(
+                        "You have unsaved changes. Close without saving?",
+                        "Unsaved Changes",
+                        MessageBoxButton.OKCancel,
+                        MessageBoxImage.Warning);
+                    if (confirm != MessageBoxResult.OK)
+                    {
+                        e.Cancel = true;
+                        return;
+                    }
+                    allowCloseWithoutPrompt = true;
+                };
+                dialog.Closed += (_, __) =>
+                {
+                    try { historyTimer.Stop(); } catch { }
+                };
+                closeRow.Children.Add(resetBtn);
+                closeRow.Children.Add(saveBtn);
                 closeRow.Children.Add(actionsBtn);
                 closeRow.Children.Add(closeBtn);
-                Grid.SetRow(closeRow, 1);
+                Grid.SetRow(closeRow, 2);
                 root.Children.Add(closeRow);
 
                 dialog.Content = root;
@@ -5756,7 +7415,99 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             }
         }
 
-        private void ShowBillPrintPreview(BillPreviewData preview)
+        private void OpenBillFormatEditor(Window owner, BillFormatLayout layout, Action onChanged)
+        {
+            if (layout == null) return;
+            var dialog = new Window
+            {
+                Title = "Edit Bill Format",
+                Owner = owner ?? this,
+                Width = 860,
+                Height = 620,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = Brushes.White
+            };
+
+            var root = new Grid { Margin = new Thickness(12) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var top = new StackPanel { Orientation = Orientation.Horizontal };
+            top.Children.Add(new TextBlock { Text = "Font Size", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
+            var fontBox = new TextBox { Width = 70, Text = layout.FontSize.ToString("0.##"), Margin = new Thickness(0, 0, 14, 0) };
+            top.Children.Add(fontBox);
+            var wrapCheck = new CheckBox { Content = "Wrap Text", IsChecked = layout.WrapText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 14, 0) };
+            top.Children.Add(wrapCheck);
+            top.Children.Add(new TextBlock { Text = "Extra Rows", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
+            var rowsBox = new TextBox { Width = 60, Text = layout.ExtraRows.ToString(), Margin = new Thickness(0, 0, 10, 0) };
+            top.Children.Add(rowsBox);
+            var addRowBtn = new Button { Content = "+ Row", Width = 80, Margin = new Thickness(0, 0, 8, 0) };
+            var addTextBtn = new Button { Content = "+ Text Box", Width = 100 };
+            top.Children.Add(addRowBtn);
+            top.Children.Add(addTextBtn);
+            Grid.SetRow(top, 0);
+            root.Children.Add(top);
+
+            var grid = new DataGrid
+            {
+                AutoGenerateColumns = false,
+                CanUserAddRows = false,
+                CanUserDeleteRows = true,
+                ItemsSource = layout.TextBoxes,
+                SelectionMode = DataGridSelectionMode.Single,
+                Margin = new Thickness(0, 10, 0, 10)
+            };
+            grid.Columns.Add(new DataGridTextColumn { Header = "Text", Binding = new Binding("Text"), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+            grid.Columns.Add(new DataGridTextColumn { Header = "X", Binding = new Binding("X"), Width = 80 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Y", Binding = new Binding("Y"), Width = 80 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "W", Binding = new Binding("Width"), Width = 80 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "H", Binding = new Binding("Height"), Width = 80 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Font", Binding = new Binding("FontSize"), Width = 80 });
+            var wrapCol = new DataGridCheckBoxColumn { Header = "Wrap", Binding = new Binding("Wrap"), Width = 70 };
+            grid.Columns.Add(wrapCol);
+            Grid.SetRow(grid, 1);
+            root.Children.Add(grid);
+
+            var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            var applyBtn = new Button { Content = "Apply", Width = 90, Margin = new Thickness(0, 0, 8, 0) };
+            var closeBtn = new Button { Content = "Close", Width = 90 };
+            footer.Children.Add(applyBtn);
+            footer.Children.Add(closeBtn);
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            addRowBtn.Click += (_, __) =>
+            {
+                layout.ExtraRows = Math.Max(0, layout.ExtraRows + 1);
+                rowsBox.Text = layout.ExtraRows.ToString();
+            };
+            addTextBtn.Click += (_, __) =>
+            {
+                layout.TextBoxes.Add(new BillFormatTextBox { Text = "New Text", X = 80, Y = 80, Width = 220, Height = 28, FontSize = layout.FontSize, Wrap = layout.WrapText });
+                grid.Items.Refresh();
+            };
+
+            applyBtn.Click += (_, __) =>
+            {
+                try
+                {
+                    if (double.TryParse((fontBox.Text ?? string.Empty).Trim(), out var fs))
+                        layout.FontSize = Math.Max(8, Math.Min(40, fs));
+                    layout.WrapText = wrapCheck.IsChecked == true;
+                    if (int.TryParse((rowsBox.Text ?? string.Empty).Trim(), out var rows))
+                        layout.ExtraRows = Math.Max(0, Math.Min(20, rows));
+                    SaveBillFormatLayout(layout);
+                    onChanged?.Invoke();
+                }
+                catch { }
+            };
+            closeBtn.Click += (_, __) => dialog.Close();
+            dialog.Content = root;
+            dialog.ShowDialog();
+        }
+
+        private void ShowBillPrintPreview(BillPreviewData preview, BillFormatLayout layout = null)
         {
             try
             {
@@ -5769,7 +7520,7 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                     WindowStartupLocation = WindowStartupLocation.CenterOwner,
                     Background = Brushes.White
                 };
-                var pageVisual = BuildBillPrintVisual(preview);
+                var pageVisual = BuildBillPrintVisual(preview, layout);
                 pageVisual.Width = 793; // A4 @96 DPI
                 pageVisual.Measure(new Size(793, 1122));
                 pageVisual.Arrange(new Rect(new Point(0, 0), new Size(793, 1122)));
@@ -5792,9 +7543,9 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             }
         }
 
-        private System.Windows.Documents.FixedDocument BuildBillFixedDocument(BillPreviewData preview, double pageWidth, double pageHeight)
+        private System.Windows.Documents.FixedDocument BuildBillFixedDocument(BillPreviewData preview, double pageWidth, double pageHeight, BillFormatLayout layout = null)
         {
-            var printRoot = BuildBillPrintVisual(preview);
+            var printRoot = BuildBillPrintVisual(preview, layout);
             printRoot.Width = pageWidth;
             printRoot.Measure(new Size(pageWidth, pageHeight));
             printRoot.Arrange(new Rect(new Point(0, 0), new Size(pageWidth, pageHeight)));
@@ -5828,6 +7579,22 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             return rtb;
         }
 
+        private static System.Windows.Media.Imaging.RenderTargetBitmap RenderElementToBitmap(FrameworkElement element, double logicalWidth, double logicalHeight, double dpi)
+        {
+            if (dpi <= 0) dpi = 96;
+            var pixelWidth = Math.Max(1, (int)Math.Round(logicalWidth * dpi / 96.0));
+            var pixelHeight = Math.Max(1, (int)Math.Round(logicalHeight * dpi / 96.0));
+            element.Width = logicalWidth;
+            element.Height = logicalHeight;
+            element.Measure(new Size(logicalWidth, logicalHeight));
+            element.Arrange(new Rect(new Point(0, 0), new Size(logicalWidth, logicalHeight)));
+            element.UpdateLayout();
+            var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                pixelWidth, pixelHeight, dpi, dpi, System.Windows.Media.PixelFormats.Pbgra32);
+            rtb.Render(element);
+            return rtb;
+        }
+
         private static void SaveBitmapAsPng(System.Windows.Media.Imaging.BitmapSource imageBmp, string path)
         {
             var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
@@ -5838,21 +7605,38 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             }
         }
 
-        private static void SaveBitmapAsPdf(System.Windows.Media.Imaging.BitmapSource imageBmp, string path)
+        private static void SaveBitmapAsPdf(System.Windows.Media.Imaging.BitmapSource imageBmp, string path, double sourceDpi = 96)
         {
-            byte[] jpegBytes;
-            using (var ms = new System.IO.MemoryStream())
+            var source = imageBmp;
+            if (source.Format != System.Windows.Media.PixelFormats.Bgra32)
             {
-                var jpeg = new System.Windows.Media.Imaging.JpegBitmapEncoder { QualityLevel = 90 };
-                jpeg.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(imageBmp));
-                jpeg.Save(ms);
-                jpegBytes = ms.ToArray();
+                source = new System.Windows.Media.Imaging.FormatConvertedBitmap(source, System.Windows.Media.PixelFormats.Bgra32, null, 0);
             }
 
-            int pxW = imageBmp.PixelWidth;
-            int pxH = imageBmp.PixelHeight;
-            var pageW = pxW * 72.0 / 96.0;
-            var pageH = pxH * 72.0 / 96.0;
+            int pxW = source.PixelWidth;
+            int pxH = source.PixelHeight;
+            int srcStride = pxW * 4;
+            var srcBytes = new byte[srcStride * pxH];
+            source.CopyPixels(srcBytes, srcStride, 0);
+            int rgbStride = pxW * 3;
+            var rgbBytes = new byte[rgbStride * pxH];
+            for (int y = 0; y < pxH; y++)
+            {
+                int srcRow = y * srcStride;
+                int dstRow = y * rgbStride;
+                for (int x = 0; x < pxW; x++)
+                {
+                    int s = srcRow + (x * 4);
+                    int d = dstRow + (x * 3);
+                    rgbBytes[d + 0] = srcBytes[s + 2];
+                    rgbBytes[d + 1] = srcBytes[s + 1];
+                    rgbBytes[d + 2] = srcBytes[s + 0];
+                }
+            }
+            var imageBytes = rgbBytes;
+            if (sourceDpi <= 0) sourceDpi = 96;
+            var pageW = pxW * 72.0 / sourceDpi;
+            var pageH = pxH * 72.0 / sourceDpi;
             var content = $"q {pageW:F2} 0 0 {pageH:F2} 0 0 cm /Im0 Do Q";
 
             var offsets = new List<long>();
@@ -5877,8 +7661,8 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                 WriteAscii("\nendstream\nendobj\n");
 
                 offsets.Add(fs.Position);
-                WriteAscii($"5 0 obj\n<< /Type /XObject /Subtype /Image /Width {pxW} /Height {pxH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {jpegBytes.Length} >>\nstream\n");
-                bw.Write(jpegBytes);
+                WriteAscii($"5 0 obj\n<< /Type /XObject /Subtype /Image /Width {pxW} /Height {pxH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length {imageBytes.Length} >>\nstream\n");
+                bw.Write(imageBytes);
                 WriteAscii("\nendstream\nendobj\n");
 
                 var xrefStart = fs.Position;
@@ -5889,16 +7673,954 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             }
         }
 
-        private FrameworkElement BuildBillPrintVisual(BillPreviewData preview)
+        private static void SaveBillAsVectorPdf(BillPreviewData preview, string path, BillFormatLayout layout = null)
         {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            layout = layout ?? new BillFormatLayout();
+            var baseFont = layout.FontSize <= 0 ? 13 : layout.FontSize;
+            string Esc(string s)
+            {
+                if (string.IsNullOrEmpty(s)) return string.Empty;
+                return s.Replace("\\", "\\\\").Replace("(", "\\(").Replace(")", "\\)");
+            }
+            string Txt(double x, double y, double size, string text, bool bold = false)
+            {
+                var font = bold ? "/F2" : "/F1";
+                return $"BT {font} {size} Tf 1 0 0 1 {x.ToString("0.##", inv)} {y.ToString("0.##", inv)} Tm ({Esc(text ?? string.Empty)}) Tj ET\n";
+            }
+            string Line(double x1, double y1, double x2, double y2)
+            {
+                return $"{x1.ToString("0.##", inv)} {y1.ToString("0.##", inv)} m {x2.ToString("0.##", inv)} {y2.ToString("0.##", inv)} l S\n";
+            }
+            string MapY(double topY, double pageHeight) { return (pageHeight - topY).ToString("0.##", inv); }
+
+            var lines = (preview?.Lines ?? new List<BillPreviewLine>()).ToList();
+            var extraRows = Math.Max(0, layout.ExtraRows);
+            for (int i = 0; i < extraRows; i++) lines.Add(new BillPreviewLine());
+
+            // Match BuildBillPrintVisual coordinates:
+            // width=1100, padding=24, topCanvas=150, table geometry and footer spacing.
+            const double uiPageW = 1100;
+            const double uiPad = 24;
+            const double uiTopCanvasH = 150;
+            var rowHeight = layout.RowHeight >= 24 ? layout.RowHeight : 76;
+
+            // A4 landscape points.
+            const double pw = 842;
+            const double ph = 595;
+            var scale = (pw - 8) / uiPageW;
+            double SX(double x) { return x * scale + 4; }
+            double SY(double yFromTop) { return ph - (yFromTop * scale) - 6; }
+
+            var sb = new StringBuilder();
+            sb.Append("0 0 0 RG 0 0 0 rg 0.8 w\n");
+
+            // Header (same as BuildBillPrintVisual)
+            var hbLeft = uiPad + 24;
+            var hbTop = uiPad + 24;
+            var hbW = 300.0;
+            var hbH = 72.0;
+            var hbBottom = hbTop + hbH;
+            sb.Append($"{SX(hbLeft).ToString("0.##", inv)} {SY(hbBottom).ToString("0.##", inv)} {(hbW * scale).ToString("0.##", inv)} {(hbH * scale).ToString("0.##", inv)} re S\n");
+            sb.Append(Line(SX(hbLeft), SY(hbTop + hbH / 2), SX(hbLeft + hbW), SY(hbTop + hbH / 2)));
+            sb.Append(Txt(SX(hbLeft + 8), SY(hbTop + 20), (baseFont + 1) * scale, $"Bill No. : {preview?.BillNo}", true));
+            sb.Append(Txt(SX(hbLeft + 8), SY(hbTop + 56), (baseFont + 1) * scale, $"Date : {preview?.BillDate}"));
+
+            var toX = uiPad + 360;
+            sb.Append(Txt(SX(toX), SY(uiPad + 18), (baseFont + 3) * scale, "To", true));
+            sb.Append(Txt(SX(uiPad + 430), SY(uiPad + 40), (baseFont + 2) * scale, preview?.Party, true));
+            sb.Append(Txt(SX(uiPad + 430), SY(uiPad + 58), baseFont * scale, preview?.PartyAddress));
+            sb.Append(Txt(SX(uiPad + 430), SY(uiPad + 76), baseFont * scale, $"Party GST No. : {preview?.PartyGST}"));
+            sb.Append(Txt(SX(uiPad + 430), SY(uiPad + 92), baseFont * scale, $"State Code : {preview?.PartyStateCode}"));
+
+            // Table (mapped from DataGrid columns)
+            var tX = uiPad;
+            var tTop = uiPad + uiTopCanvasH + 6;
+            double[] cw = { 90, 90, 150, 110, 290, 110, 90, 110 };
+            double tW = cw.Sum();
+            double h1 = 24;
+            double h2 = 18;
+            double rowY = tTop;
+
+            sb.Append($"{SX(tX).ToString("0.##", inv)} {SY(rowY + h1 + h2).ToString("0.##", inv)} {(tW * scale).ToString("0.##", inv)} {((h1 + h2) * scale).ToString("0.##", inv)} re S\n");
+            double colX = tX;
+            for (int i = 0; i < cw.Length; i++)
+            {
+                sb.Append(Line(SX(colX), SY(rowY), SX(colX), SY(rowY + h1 + h2)));
+                colX += cw[i];
+            }
+            sb.Append(Line(SX(tX + tW), SY(rowY), SX(tX + tW), SY(rowY + h1 + h2)));
+            sb.Append(Line(SX(tX), SY(rowY + h1), SX(tX + tW), SY(rowY + h1)));
+            sb.Append(Txt(SX(tX + 22), SY(rowY + 16), (baseFont - 1) * scale, "C/N No", true));
+            sb.Append(Txt(SX(tX + cw[0] + 26), SY(rowY + 16), (baseFont - 1) * scale, "Date", true));
+            sb.Append(Txt(SX(tX + cw[0] + cw[1] + 34), SY(rowY + 16), (baseFont - 1) * scale, "Invoice No", true));
+            sb.Append(Txt(SX(tX + cw[0] + cw[1] + cw[2] + 18), SY(rowY + 16), (baseFont - 1) * scale, "Vehicle No.", true));
+            var freightX = tX + cw[0] + cw[1] + cw[2] + cw[3];
+            sb.Append(Txt(SX(freightX + 18), SY(rowY + 14), Math.Max(6, (baseFont - 2) * scale), "FREIGHT CHARGES FOR TRANSPORTATION", true));
+            sb.Append(Txt(SX(freightX + 6), SY(rowY + 34), Math.Max(6, (baseFont - 3) * scale), "From", true));
+            sb.Append(Txt(SX(freightX + cw[4] - 24), SY(rowY + 34), Math.Max(6, (baseFont - 3) * scale), "To", true));
+            sb.Append(Txt(SX(freightX + cw[4] + 20), SY(rowY + 16), (baseFont - 1) * scale, "Weight", true));
+            sb.Append(Txt(SX(freightX + cw[4] + cw[5] + 26), SY(rowY + 16), (baseFont - 1) * scale, "Rate", true));
+            sb.Append(Txt(SX(freightX + cw[4] + cw[5] + cw[6] + 20), SY(rowY + 16), (baseFont - 1) * scale, "Amount", true));
+
+            rowY += (h1 + h2);
+            foreach (var r in lines)
+            {
+                if (SY(rowY + rowHeight) < 92) break;
+                sb.Append($"{SX(tX).ToString("0.##", inv)} {SY(rowY + rowHeight).ToString("0.##", inv)} {(tW * scale).ToString("0.##", inv)} {(rowHeight * scale).ToString("0.##", inv)} re S\n");
+                colX = tX;
+                for (int i = 0; i < cw.Length; i++)
+                {
+                    sb.Append(Line(SX(colX), SY(rowY), SX(colX), SY(rowY + rowHeight)));
+                    colX += cw[i];
+                }
+                sb.Append(Line(SX(tX + tW), SY(rowY), SX(tX + tW), SY(rowY + rowHeight)));
+
+                var rowCenter = rowY + (rowHeight / 2);
+                sb.Append(Txt(SX(tX + 4), SY(rowCenter + 4), Math.Max(6, (baseFont - 2) * scale), r?.LRNo));
+                sb.Append(Txt(SX(tX + cw[0] + 4), SY(rowCenter + 4), Math.Max(6, (baseFont - 2) * scale), r?.LRDate));
+                sb.Append(Txt(SX(tX + cw[0] + cw[1] + 4), SY(rowCenter + 4), Math.Max(6, (baseFont - 2) * scale), r?.Invoice));
+                sb.Append(Txt(SX(tX + cw[0] + cw[1] + cw[2] + 4), SY(rowCenter + 4), Math.Max(6, (baseFont - 2) * scale), r?.Vehicle));
+                sb.Append(Txt(SX(freightX + 8), SY(rowY + 18), Math.Max(6, (baseFont - 2) * scale), r?.From, true));
+                sb.Append(Txt(SX(freightX + cw[4] - 84), SY(rowY + 18), Math.Max(6, (baseFont - 2) * scale), r?.To, true));
+                sb.Append(Txt(SX(freightX + 8), SY(rowY + 36), Math.Max(6, (baseFont - 2) * scale), r?.ChargesBreakdown));
+                sb.Append(Txt(SX(freightX + cw[4] + 4), SY(rowCenter + 4), Math.Max(6, (baseFont - 2) * scale), r?.WeightOrType));
+                sb.Append(Txt(SX(freightX + cw[4] + cw[5] + 4), SY(rowCenter + 4), Math.Max(6, (baseFont - 2) * scale), r?.Rate));
+                sb.Append(Txt(SX(freightX + cw[4] + cw[5] + cw[6] + 4), SY(rowCenter + 4), Math.Max(6, (baseFont - 2) * scale), r?.Amount));
+                rowY += rowHeight;
+            }
+
+            // Footer
+            var totalTop = rowY + 10;
+            sb.Append(Txt(SX(uiPad), SY(totalTop + 14), baseFont * scale, $"Rupees in Words : {preview?.TotalWords}", true));
+            var totalBoxW = 120.0;
+            var totalBoxH = 22.0;
+            var totalBoxX = uiPageW - uiPad - totalBoxW;
+            sb.Append($"{SX(totalBoxX).ToString("0.##", inv)} {SY(totalTop + totalBoxH).ToString("0.##", inv)} {(totalBoxW * scale).ToString("0.##", inv)} {(totalBoxH * scale).ToString("0.##", inv)} re S\n");
+            sb.Append(Txt(SX(totalBoxX - 64), SY(totalTop + 14), baseFont * scale, "Total", true));
+            sb.Append(Txt(SX(totalBoxX + 8), SY(totalTop + 14), (baseFont + 1) * scale, preview?.Total, true));
+            sb.Append(Txt(SX(uiPad), SY(totalTop + 44), 12 * scale, "Encl.......Ack / ment"));
+            sb.Append(Txt(SX(uiPageW - 340), SY(totalTop + 44), 13 * scale, "For Awagaman Trans Logistics", true));
+
+            if (layout.TextBoxes != null)
+            {
+                for (int i = 0; i < layout.TextBoxes.Count; i++)
+                {
+                    var t = layout.TextBoxes[i];
+                    if (t == null || string.IsNullOrWhiteSpace(t.Text)) continue;
+                    sb.Append(Txt(SX(t.X), SY(t.Y + (t.FontSize > 0 ? t.FontSize : baseFont)), (t.FontSize > 0 ? t.FontSize : baseFont) * scale, t.Text));
+                }
+            }
+
+            var contentBytes = Encoding.ASCII.GetBytes(sb.ToString());
+            var offsets = new List<long>();
+            using (var fs = new System.IO.FileStream(path, System.IO.FileMode.Create, System.IO.FileAccess.Write))
+            using (var bw = new System.IO.BinaryWriter(fs, Encoding.ASCII))
+            {
+                void WriteAscii(string s) => bw.Write(Encoding.ASCII.GetBytes(s));
+                offsets.Add(0);
+                WriteAscii("%PDF-1.4\n");
+
+                offsets.Add(fs.Position);
+                WriteAscii("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+                offsets.Add(fs.Position);
+                WriteAscii("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+                offsets.Add(fs.Position);
+                WriteAscii($"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {pw.ToString("0.##", inv)} {ph.ToString("0.##", inv)}] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>\nendobj\n");
+                offsets.Add(fs.Position);
+                WriteAscii($"4 0 obj\n<< /Length {contentBytes.Length} >>\nstream\n");
+                bw.Write(contentBytes);
+                WriteAscii("\nendstream\nendobj\n");
+                offsets.Add(fs.Position);
+                WriteAscii("5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
+                offsets.Add(fs.Position);
+                WriteAscii("6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n");
+
+                var xrefStart = fs.Position;
+                WriteAscii($"xref\n0 {offsets.Count}\n");
+                WriteAscii("0000000000 65535 f \n");
+                for (int i = 1; i < offsets.Count; i++) WriteAscii($"{offsets[i]:D10} 00000 n \n");
+                WriteAscii($"trailer\n<< /Size {offsets.Count} /Root 1 0 R >>\nstartxref\n{xrefStart}\n%%EOF");
+            }
+        }
+
+        private bool ExportBillPdfFromExcelTemplate(BillPreviewData preview, string pdfPath)
+        {
+            var templatePath = FindBillExcelTemplatePath();
+            if (string.IsNullOrWhiteSpace(templatePath) || !System.IO.File.Exists(templatePath)) return false;
+            var tempXlsx = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"bill_export_{Guid.NewGuid():N}.xlsx");
+            object excelApp = null;
+            object workbooks = null;
+            object workbook = null;
+            object worksheet = null;
+            try
+            {
+                System.IO.File.Copy(templatePath, tempXlsx, true);
+                var excelType = Type.GetTypeFromProgID("Excel.Application");
+                if (excelType == null) return false;
+                excelApp = Activator.CreateInstance(excelType);
+                excelType.InvokeMember("Visible", System.Reflection.BindingFlags.SetProperty, null, excelApp, new object[] { false });
+                excelType.InvokeMember("DisplayAlerts", System.Reflection.BindingFlags.SetProperty, null, excelApp, new object[] { false });
+
+                workbooks = excelType.InvokeMember("Workbooks", System.Reflection.BindingFlags.GetProperty, null, excelApp, null);
+                var wbType = workbooks.GetType();
+                workbook = wbType.InvokeMember("Open", System.Reflection.BindingFlags.InvokeMethod, null, workbooks, new object[] { tempXlsx });
+                var bookType = workbook.GetType();
+                var sheets = bookType.InvokeMember("Worksheets", System.Reflection.BindingFlags.GetProperty, null, workbook, null);
+                worksheet = sheets.GetType().InvokeMember("Item", System.Reflection.BindingFlags.GetProperty, null, sheets, new object[] { 1 });
+
+                object GetCell(int row, int col)
+                {
+                    var cells = worksheet.GetType().InvokeMember("Cells", System.Reflection.BindingFlags.GetProperty, null, worksheet, null);
+                    var cell = cells.GetType().InvokeMember("Item", System.Reflection.BindingFlags.GetProperty, null, cells, new object[] { row, col });
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(cells);
+                    return cell;
+                }
+
+                void SetCellByRc(int row, int col, object value)
+                {
+                    var cell = GetCell(row, col);
+                    cell.GetType().InvokeMember("Value2", System.Reflection.BindingFlags.SetProperty, null, cell, new object[] { value });
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(cell);
+                }
+
+                string CellText(int row, int col)
+                {
+                    var cell = GetCell(row, col);
+                    var value = cell.GetType().InvokeMember("Value2", System.Reflection.BindingFlags.GetProperty, null, cell, null);
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(cell);
+                    return (value == null ? string.Empty : Convert.ToString(value)).Trim();
+                }
+
+                bool ContainsInsensitive(string s, string token)
+                {
+                    return !string.IsNullOrWhiteSpace(s) && s.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
+                }
+
+                var usedRange = worksheet.GetType().InvokeMember("UsedRange", System.Reflection.BindingFlags.GetProperty, null, worksheet, null);
+                int maxRow = Convert.ToInt32(usedRange.GetType().InvokeMember("Rows", System.Reflection.BindingFlags.GetProperty, null, usedRange, null).GetType().InvokeMember("Count", System.Reflection.BindingFlags.GetProperty, null, usedRange.GetType().InvokeMember("Rows", System.Reflection.BindingFlags.GetProperty, null, usedRange, null), null));
+                int maxCol = Convert.ToInt32(usedRange.GetType().InvokeMember("Columns", System.Reflection.BindingFlags.GetProperty, null, usedRange, null).GetType().InvokeMember("Count", System.Reflection.BindingFlags.GetProperty, null, usedRange.GetType().InvokeMember("Columns", System.Reflection.BindingFlags.GetProperty, null, usedRange, null), null));
+                System.Runtime.InteropServices.Marshal.ReleaseComObject(usedRange);
+
+                // Find anchors by label text from updated template.
+                int billNoLabelRow = 0, billNoLabelCol = 0;
+                int billDateLabelRow = 0, billDateLabelCol = 0;
+                int toLabelRow = 0, toLabelCol = 0;
+                int headerRow = 0;
+                for (int r = 1; r <= Math.Min(maxRow, 120); r++)
+                {
+                    for (int c = 1; c <= Math.Min(maxCol, 40); c++)
+                    {
+                        var t = CellText(r, c);
+                        if (billNoLabelRow == 0 && (ContainsInsensitive(t, "bill no") || ContainsInsensitive(t, "billno")))
+                        {
+                            billNoLabelRow = r; billNoLabelCol = c;
+                        }
+                        if (billDateLabelRow == 0 && ContainsInsensitive(t, "date"))
+                        {
+                            if (ContainsInsensitive(t, "bill") || (billNoLabelRow != 0 && Math.Abs(r - billNoLabelRow) <= 3))
+                            {
+                                billDateLabelRow = r; billDateLabelCol = c;
+                            }
+                        }
+                        if (toLabelRow == 0 && t.Equals("To", StringComparison.OrdinalIgnoreCase))
+                        {
+                            toLabelRow = r; toLabelCol = c;
+                        }
+                        if (headerRow == 0 && (ContainsInsensitive(t, "c/n no") || ContainsInsensitive(t, "cn no") || ContainsInsensitive(t, "lr no")))
+                        {
+                            headerRow = r;
+                        }
+                    }
+                }
+
+                if (billNoLabelRow == 0) { billNoLabelRow = 4; billNoLabelCol = 2; }
+                if (billDateLabelRow == 0) { billDateLabelRow = billNoLabelRow + 1; billDateLabelCol = billNoLabelCol; }
+                if (toLabelRow == 0) { toLabelRow = billNoLabelRow; toLabelCol = 6; }
+                if (headerRow == 0) headerRow = 11;
+
+                // Write header data near detected labels.
+                SetCellByRc(billNoLabelRow, Math.Min(maxCol, billNoLabelCol + 1), preview?.BillNo ?? string.Empty);
+                SetCellByRc(billDateLabelRow, Math.Min(maxCol, billDateLabelCol + 1), preview?.BillDate ?? string.Empty);
+                SetCellByRc(toLabelRow + 1, Math.Min(maxCol, toLabelCol + 1), preview?.Party ?? string.Empty);
+                SetCellByRc(toLabelRow + 2, Math.Min(maxCol, toLabelCol + 1), preview?.PartyAddress ?? string.Empty);
+                SetCellByRc(toLabelRow + 3, Math.Min(maxCol, toLabelCol + 1), $"Party GST No. : {preview?.PartyGST ?? string.Empty}");
+                SetCellByRc(toLabelRow + 4, Math.Min(maxCol, toLabelCol + 1), $"State Code : {preview?.PartyStateCode ?? string.Empty}");
+
+                // Detect actual column positions from header row text.
+                int colLr = 1, colDate = 2, colInvoice = 3, colVehicle = 4, colFromTo = 5, colWeight = 8, colRate = 9, colAmount = 10;
+                for (int c = 1; c <= Math.Min(maxCol, 40); c++)
+                {
+                    var h = CellText(headerRow, c);
+                    if (ContainsInsensitive(h, "c/n") || ContainsInsensitive(h, "lr no")) colLr = c;
+                    else if (ContainsInsensitive(h, "date")) colDate = c;
+                    else if (ContainsInsensitive(h, "invoice")) colInvoice = c;
+                    else if (ContainsInsensitive(h, "vehicle")) colVehicle = c;
+                    else if (ContainsInsensitive(h, "freight") || (ContainsInsensitive(h, "from") && ContainsInsensitive(h, "to"))) colFromTo = c;
+                    else if (ContainsInsensitive(h, "weight")) colWeight = c;
+                    else if (ContainsInsensitive(h, "rate")) colRate = c;
+                    else if (ContainsInsensitive(h, "amount")) colAmount = c;
+                }
+
+                var startRow = headerRow + 1;
+                var lines = (preview?.Lines ?? new List<BillPreviewLine>()).ToList();
+                for (int i = 0; i < lines.Count; i++)
+                {
+                    var row = startRow + i;
+                    var r = lines[i];
+                    SetCellByRc(row, colLr, r?.LRNo ?? string.Empty);
+                    SetCellByRc(row, colDate, r?.LRDate ?? string.Empty);
+                    SetCellByRc(row, colInvoice, r?.Invoice ?? string.Empty);
+                    SetCellByRc(row, colVehicle, r?.Vehicle ?? string.Empty);
+                    SetCellByRc(row, colFromTo, (r?.From ?? string.Empty) + "  TO  " + (r?.To ?? string.Empty));
+                    if (!string.IsNullOrWhiteSpace(r?.ChargesBreakdown)) SetCellByRc(row + 1, colFromTo, r.ChargesBreakdown);
+                    SetCellByRc(row, colWeight, r?.WeightOrType ?? string.Empty);
+                    SetCellByRc(row, colRate, r?.Rate ?? string.Empty);
+                    SetCellByRc(row, colAmount, r?.Amount ?? string.Empty);
+                }
+
+                var footerRow = Math.Max(startRow + (lines.Count * 2) + 1, 24);
+                SetCellByRc(footerRow, Math.Max(1, colLr), $"Rupees in Words : {preview?.TotalWords ?? string.Empty}");
+                SetCellByRc(footerRow, Math.Max(1, colAmount), preview?.Total ?? string.Empty);
+
+                // Landscape + fit-to-page for print quality and stable output
+                var pageSetup = worksheet.GetType().InvokeMember("PageSetup", System.Reflection.BindingFlags.GetProperty, null, worksheet, null);
+                pageSetup.GetType().InvokeMember("Orientation", System.Reflection.BindingFlags.SetProperty, null, pageSetup, new object[] { 2 }); // xlLandscape
+                pageSetup.GetType().InvokeMember("Zoom", System.Reflection.BindingFlags.SetProperty, null, pageSetup, new object[] { false });
+                pageSetup.GetType().InvokeMember("FitToPagesWide", System.Reflection.BindingFlags.SetProperty, null, pageSetup, new object[] { 1 });
+                pageSetup.GetType().InvokeMember("FitToPagesTall", System.Reflection.BindingFlags.SetProperty, null, pageSetup, new object[] { 1 });
+                System.Runtime.InteropServices.Marshal.ReleaseComObject(pageSetup);
+
+                // ExportAsFixedFormat(Type:=0 => PDF)
+                bookType.InvokeMember("ExportAsFixedFormat", System.Reflection.BindingFlags.InvokeMethod, null, workbook,
+                    new object[] { 0, pdfPath, 0, true, false, Type.Missing, Type.Missing, false, Type.Missing });
+                return System.IO.File.Exists(pdfPath);
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                try
+                {
+                    if (workbook != null)
+                    {
+                        workbook.GetType().InvokeMember("Close", System.Reflection.BindingFlags.InvokeMethod, null, workbook, new object[] { false });
+                    }
+                }
+                catch { }
+                try
+                {
+                    if (excelApp != null)
+                    {
+                        excelApp.GetType().InvokeMember("Quit", System.Reflection.BindingFlags.InvokeMethod, null, excelApp, null);
+                    }
+                }
+                catch { }
+                if (worksheet != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(worksheet);
+                if (workbook != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(workbook);
+                if (workbooks != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(workbooks);
+                if (excelApp != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(excelApp);
+                try { if (System.IO.File.Exists(tempXlsx)) System.IO.File.Delete(tempXlsx); } catch { }
+            }
+        }
+
+        private bool ExportBillPdfFromRdlc(BillPreviewData preview, string pdfPath)
+        {
+            try
+            {
+                var reportPath = FindBillRdlcPath();
+                if (string.IsNullOrWhiteSpace(reportPath) || !System.IO.File.Exists(reportPath)) return false;
+
+                var report = new Microsoft.Reporting.WinForms.LocalReport
+                {
+                    ReportPath = reportPath
+                };
+                ApplyBillReportData(report, preview);
+
+                string mimeType, encoding, extension;
+                string[] streams;
+                Microsoft.Reporting.WinForms.Warning[] warnings;
+                var deviceInfo =
+                    "<DeviceInfo>" +
+                    "<OutputFormat>PDF</OutputFormat>" +
+                    "<PageWidth>11.69in</PageWidth>" +
+                    "<PageHeight>8.27in</PageHeight>" +
+                    "<MarginTop>0.2in</MarginTop>" +
+                    "<MarginLeft>0.2in</MarginLeft>" +
+                    "<MarginRight>0.2in</MarginRight>" +
+                    "<MarginBottom>0.2in</MarginBottom>" +
+                    "</DeviceInfo>";
+
+                var bytes = report.Render("PDF", deviceInfo, out mimeType, out encoding, out extension, out streams, out warnings);
+                System.IO.File.WriteAllBytes(pdfPath, bytes);
+                return System.IO.File.Exists(pdfPath);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private string BuildBillPreviewKey(BillPreviewData preview)
+        {
+            var sb = new StringBuilder();
+            sb.Append((preview?.BillNo ?? string.Empty).Trim()).Append("|");
+            sb.Append((preview?.BillDate ?? string.Empty).Trim()).Append("|");
+            sb.Append((preview?.Party ?? string.Empty).Trim()).Append("|");
+            sb.Append((preview?.Total ?? string.Empty).Trim()).Append("|");
+            var lines = (preview?.Lines ?? new List<BillPreviewLine>());
+            foreach (var x in lines)
+            {
+                sb.Append((x?.LRNo ?? string.Empty).Trim()).Append("^");
+                sb.Append((x?.LRDate ?? string.Empty).Trim()).Append("^");
+                sb.Append((x?.Invoice ?? string.Empty).Trim()).Append("^");
+                sb.Append((x?.Vehicle ?? string.Empty).Trim()).Append("^");
+                sb.Append((x?.From ?? string.Empty).Trim()).Append("^");
+                sb.Append((x?.To ?? string.Empty).Trim()).Append("^");
+                sb.Append((x?.ChargesBreakdown ?? string.Empty).Trim()).Append("^");
+                sb.Append((x?.WeightOrType ?? string.Empty).Trim()).Append("^");
+                sb.Append((x?.Rate ?? string.Empty).Trim()).Append("^");
+                sb.Append((x?.Amount ?? string.Empty).Trim()).Append("|");
+            }
+            return sb.ToString();
+        }
+
+        private System.Data.DataTable BuildBillLinesTable(BillPreviewData preview)
+        {
+            var linesTable = new System.Data.DataTable("BillLines");
+            linesTable.Columns.Add("LRNo", typeof(string));
+            linesTable.Columns.Add("LRDate", typeof(string));
+            linesTable.Columns.Add("Invoice", typeof(string));
+            linesTable.Columns.Add("Vehicle", typeof(string));
+            linesTable.Columns.Add("From", typeof(string));
+            linesTable.Columns.Add("To", typeof(string));
+            linesTable.Columns.Add("RouteAndCharges", typeof(string));
+            linesTable.Columns.Add("WeightOrType", typeof(string));
+            linesTable.Columns.Add("Rate", typeof(string));
+            linesTable.Columns.Add("Amount", typeof(string));
+            linesTable.Columns.Add("FreightAmt", typeof(decimal));
+            linesTable.Columns.Add("HamaliAmt", typeof(decimal));
+            linesTable.Columns.Add("DetentionAmt", typeof(decimal));
+            linesTable.Columns.Add("OtherAmt", typeof(decimal));
+
+            var lines = (preview?.Lines ?? new List<BillPreviewLine>()).ToList();
+            for (int i = 0; i < lines.Count; i++)
+            {
+                var x = lines[i];
+                var routeAndCharges = string.Empty;
+                if (!string.IsNullOrWhiteSpace(x?.ChargesBreakdown))
+                {
+                    // Keep only charge-particular names under From/To with visual spacing.
+                    routeAndCharges = Environment.NewLine + x.ChargesBreakdown;
+                }
+                linesTable.Rows.Add(
+                    x?.LRNo ?? string.Empty,
+                    x?.LRDate ?? string.Empty,
+                    x?.Invoice ?? string.Empty,
+                    x?.Vehicle ?? string.Empty,
+                    x?.From ?? string.Empty,
+                    x?.To ?? string.Empty,
+                    routeAndCharges,
+                    x?.WeightOrType ?? string.Empty,
+                    x?.Rate ?? string.Empty,
+                    x?.Amount ?? string.Empty,
+                    ParseAmountPart(x?.Amount, 0),
+                    ParseAmountPart(x?.Amount, 2),
+                    ParseAmountPart(x?.Amount, 3),
+                    ParseAmountPart(x?.Amount, 4)
+                );
+            }
+            return linesTable;
+        }
+
+        private static decimal ParseAmountPart(string amountLines, int partIndex)
+        {
+            if (string.IsNullOrWhiteSpace(amountLines)) return 0m;
+            var parts = (amountLines ?? string.Empty).Split(new[] { '\n' }, StringSplitOptions.None)
+                .Select(x => (x ?? string.Empty).Trim())
+                .ToArray();
+            if (partIndex < 0 || partIndex >= parts.Length) return 0m;
+            if (decimal.TryParse(parts[partIndex], out var v)) return v;
+            return 0m;
+        }
+
+        private void ApplyBillReportData(Microsoft.Reporting.WinForms.LocalReport report, BillPreviewData preview)
+        {
+            var key = BuildBillPreviewKey(preview);
+            if (!_billLinesCache.TryGetValue(key, out var table))
+            {
+                table = BuildBillLinesTable(preview);
+                _billLinesCache[key] = table;
+            }
+            report.DataSources.Clear();
+            report.DataSources.Add(new Microsoft.Reporting.WinForms.ReportDataSource("BillLines", table));
+            report.SetParameters(new[]
+            {
+                new Microsoft.Reporting.WinForms.ReportParameter("BillNo", preview?.BillNo ?? string.Empty),
+                new Microsoft.Reporting.WinForms.ReportParameter("BillDate", preview?.BillDate ?? string.Empty),
+                new Microsoft.Reporting.WinForms.ReportParameter("Party", preview?.Party ?? string.Empty),
+                new Microsoft.Reporting.WinForms.ReportParameter("PartyAddress", preview?.PartyAddress ?? string.Empty),
+                new Microsoft.Reporting.WinForms.ReportParameter("PartyGST", preview?.PartyGST ?? string.Empty),
+                new Microsoft.Reporting.WinForms.ReportParameter("PartyStateCode", preview?.PartyStateCode ?? string.Empty),
+                new Microsoft.Reporting.WinForms.ReportParameter("TotalWords", preview?.TotalWords ?? string.Empty),
+                new Microsoft.Reporting.WinForms.ReportParameter("Total", preview?.Total ?? string.Empty)
+            });
+        }
+
+        private bool TryShowBillRdlcPreview(BillPreviewData preview, out string error)
+        {
+            error = null;
+            var reportPath = FindBillRdlcPath();
+            if (string.IsNullOrWhiteSpace(reportPath) || !System.IO.File.Exists(reportPath))
+            {
+                error = "RDLC report file not found.";
+                return false;
+            }
+
+            try
+            {
+                var currentKey = BuildBillPreviewKey(preview);
+                var templateStamp = System.IO.File.GetLastWriteTimeUtc(reportPath).Ticks;
+                if (_billRdlcViewer == null || _billRdlcHost == null || _billRdlcPreviewWindow == null)
+                {
+                    _billRdlcViewer = new Microsoft.Reporting.WinForms.ReportViewer
+                    {
+                        Dock = System.Windows.Forms.DockStyle.Fill,
+                        ProcessingMode = Microsoft.Reporting.WinForms.ProcessingMode.Local
+                    };
+                    _billRdlcViewer.SetDisplayMode(Microsoft.Reporting.WinForms.DisplayMode.PrintLayout);
+                    _billRdlcViewer.ZoomMode = Microsoft.Reporting.WinForms.ZoomMode.PageWidth;
+                    _billRdlcViewer.ShowPrintButton = true;
+                    _billRdlcViewer.ShowExportButton = true;
+                    _billRdlcViewer.ShowRefreshButton = false;
+
+                    _billRdlcHost = new System.Windows.Forms.Integration.WindowsFormsHost { Child = _billRdlcViewer };
+                    _billRdlcPreviewWindow = new Window
+                    {
+                        Title = "Bill Print Preview",
+                        Owner = this,
+                        Width = 1200,
+                        Height = 850,
+                        WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                        Content = _billRdlcHost
+                    };
+                    _billRdlcPreviewWindow.Closed += (_, __) =>
+                    {
+                        _billRdlcLastKey = null;
+                        _billRdlcLastTemplateStamp = 0;
+                        _billRdlcPreviewWindow = null;
+                        _billRdlcHost = null;
+                        _billRdlcViewer = null;
+                    };
+                }
+
+                _billRdlcPreviewWindow.Title = $"Bill Print Preview - {preview?.BillNo}";
+                if (!string.Equals(_billRdlcLastKey, currentKey, StringComparison.Ordinal) || _billRdlcLastTemplateStamp != templateStamp)
+                {
+                    _billRdlcViewer.LocalReport.ReportPath = reportPath;
+                    ApplyBillReportData(_billRdlcViewer.LocalReport, preview);
+                    _billRdlcViewer.RefreshReport();
+                    _billRdlcLastKey = currentKey;
+                    _billRdlcLastTemplateStamp = templateStamp;
+                }
+
+                _billRdlcPreviewWindow.Show();
+                _billRdlcPreviewWindow.Activate();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = FlattenExceptionMessage(ex);
+                return false;
+            }
+        }
+
+        private static string FlattenExceptionMessage(Exception ex)
+        {
+            if (ex == null) return string.Empty;
+            var parts = new List<string>();
+            var cur = ex;
+            while (cur != null)
+            {
+                if (!string.IsNullOrWhiteSpace(cur.Message)) parts.Add(cur.Message.Trim());
+                cur = cur.InnerException;
+            }
+            return string.Join(" -> ", parts);
+        }
+
+        private static void ApplyAlignmentToSelectedCells(DataGrid grid, string alignment)
+        {
+            if (grid == null || grid.SelectedCells == null || grid.SelectedCells.Count == 0) return;
+            var textAlignment = TextAlignment.Center;
+            var horizontalAlignment = HorizontalAlignment.Center;
+            if (string.Equals(alignment, "Left", StringComparison.OrdinalIgnoreCase))
+            {
+                textAlignment = TextAlignment.Left;
+                horizontalAlignment = HorizontalAlignment.Left;
+            }
+            else if (string.Equals(alignment, "Right", StringComparison.OrdinalIgnoreCase))
+            {
+                textAlignment = TextAlignment.Right;
+                horizontalAlignment = HorizontalAlignment.Right;
+            }
+
+            foreach (var sc in grid.SelectedCells)
+            {
+                if (sc.Item == null || sc.Column == null) continue;
+                var root = sc.Column.GetCellContent(sc.Item) as FrameworkElement;
+                if (root == null) continue;
+
+                if (root is TextBlock tbRoot)
+                {
+                    tbRoot.TextAlignment = textAlignment;
+                    tbRoot.HorizontalAlignment = HorizontalAlignment.Stretch;
+                }
+                else if (root is TextBox tbxRoot)
+                {
+                    tbxRoot.TextAlignment = textAlignment;
+                    tbxRoot.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    tbxRoot.HorizontalContentAlignment = horizontalAlignment;
+                }
+
+                foreach (var tb in FindVisualChildren<TextBlock>(root))
+                {
+                    tb.TextAlignment = textAlignment;
+                    tb.HorizontalAlignment = HorizontalAlignment.Stretch;
+                }
+                foreach (var tbx in FindVisualChildren<TextBox>(root))
+                {
+                    tbx.TextAlignment = textAlignment;
+                    tbx.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    tbx.HorizontalContentAlignment = horizontalAlignment;
+                }
+            }
+        }
+
+        private static T FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+        {
+            if (parent == null) return null;
+            var count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is T hit) return hit;
+                var nested = FindVisualChild<T>(child);
+                if (nested != null) return nested;
+            }
+            return null;
+        }
+
+        private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent) where T : DependencyObject
+        {
+            if (parent == null) yield break;
+            var count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is T hit) yield return hit;
+                foreach (var nested in FindVisualChildren<T>(child))
+                    yield return nested;
+            }
+        }
+
+        private static T FindParent<T>(DependencyObject child) where T : DependencyObject
+        {
+            while (child != null)
+            {
+                if (child is T hit) return hit;
+                child = VisualTreeHelper.GetParent(child);
+            }
+            return null;
+        }
+
+        private static void CopySelectedCellsToClipboard(DataGrid grid)
+        {
+            try
+            {
+                if (grid == null || grid.SelectedCells == null || grid.SelectedCells.Count == 0) return;
+                var selected = grid.SelectedCells
+                    .Where(c => c.Item != null && c.Column != null)
+                    .Select(c => new
+                    {
+                        Row = grid.Items.IndexOf(c.Item),
+                        Col = c.Column.DisplayIndex,
+                        Value = GetCellValueAsText(c.Item, c.Column)
+                    })
+                    .Where(x => x.Row >= 0 && x.Col >= 0)
+                    .OrderBy(x => x.Row)
+                    .ThenBy(x => x.Col)
+                    .ToList();
+                if (selected.Count == 0) return;
+
+                var minRow = selected.Min(x => x.Row);
+                var maxRow = selected.Max(x => x.Row);
+                var minCol = selected.Min(x => x.Col);
+                var maxCol = selected.Max(x => x.Col);
+                var map = selected.ToDictionary(x => $"{x.Row}:{x.Col}", x => x.Value ?? string.Empty);
+                var sb = new StringBuilder();
+                for (int r = minRow; r <= maxRow; r++)
+                {
+                    for (int c = minCol; c <= maxCol; c++)
+                    {
+                        if (c > minCol) sb.Append('\t');
+                        map.TryGetValue($"{r}:{c}", out var v);
+                        sb.Append(v ?? string.Empty);
+                    }
+                    if (r < maxRow) sb.AppendLine();
+                }
+                Clipboard.SetText(sb.ToString());
+            }
+            catch { }
+        }
+
+        private static void PasteClipboardIntoGrid(DataGrid grid)
+        {
+            try
+            {
+                if (grid == null) return;
+                var text = Clipboard.ContainsText() ? Clipboard.GetText() : string.Empty;
+                if (string.IsNullOrWhiteSpace(text)) return;
+                var start = grid.CurrentCell;
+                if (start.Item == null || start.Column == null) return;
+                var startRow = grid.Items.IndexOf(start.Item);
+                var startCol = start.Column.DisplayIndex;
+                if (startRow < 0 || startCol < 0) return;
+
+                var rows = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+                for (int r = 0; r < rows.Length; r++)
+                {
+                    if (string.IsNullOrEmpty(rows[r]) && r == rows.Length - 1) break;
+                    var cols = rows[r].Split('\t');
+                    var rowIndex = startRow + r;
+                    if (rowIndex < 0 || rowIndex >= grid.Items.Count) break;
+                    var item = grid.Items[rowIndex];
+                    for (int c = 0; c < cols.Length; c++)
+                    {
+                        var colIndex = startCol + c;
+                        var col = grid.Columns.FirstOrDefault(x => x.DisplayIndex == colIndex);
+                        if (col == null || col.IsReadOnly) continue;
+                        SetCellValueFromText(item, col, cols[c]);
+                    }
+                }
+                grid.Items.Refresh();
+            }
+            catch { }
+        }
+
+        private static string GetCellValueAsText(object item, DataGridColumn column)
+        {
+            var prop = GetBoundPropertyName(column);
+            if (string.IsNullOrWhiteSpace(prop) || item == null) return string.Empty;
+            var pi = item.GetType().GetProperty(prop);
+            if (pi == null) return string.Empty;
+            var v = pi.GetValue(item, null);
+            return v == null ? string.Empty : Convert.ToString(v);
+        }
+
+        private static void SetCellValueFromText(object item, DataGridColumn column, string text)
+        {
+            var prop = GetBoundPropertyName(column);
+            if (string.IsNullOrWhiteSpace(prop) || item == null) return;
+            var pi = item.GetType().GetProperty(prop);
+            if (pi == null || !pi.CanWrite) return;
+            var t = Nullable.GetUnderlyingType(pi.PropertyType) ?? pi.PropertyType;
+            object value = text;
+            try
+            {
+                if (t == typeof(string)) value = text ?? string.Empty;
+                else if (t == typeof(int)) value = int.TryParse(text, out var iv) ? iv : 0;
+                else if (t == typeof(decimal)) value = decimal.TryParse(text, out var dv) ? dv : 0m;
+                else if (t == typeof(double)) value = double.TryParse(text, out var x) ? x : 0d;
+                else if (t == typeof(DateTime)) value = DateTime.TryParse(text, out var dt) ? dt : DateTime.MinValue;
+                else value = Convert.ChangeType(text, t);
+            }
+            catch { return; }
+            pi.SetValue(item, value, null);
+        }
+
+        private static string GetBoundPropertyName(DataGridColumn column)
+        {
+            if (column is DataGridTextColumn tc && tc.Binding is Binding b && b.Path != null)
+            {
+                return b.Path.Path;
+            }
+            if (column is DataGridTemplateColumn t && !string.IsNullOrWhiteSpace(t.SortMemberPath))
+            {
+                return t.SortMemberPath;
+            }
+            return null;
+        }
+
+        private static string FindBillRdlcPath()
+        {
+            var candidates = new[]
+            {
+                System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Reports", "BillReport.rdlc"),
+                System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\Reports\BillReport.rdlc")),
+                System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\..\Reports\BillReport.rdlc")),
+                System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\..\..\Reports\BillReport.rdlc"))
+            };
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                if (System.IO.File.Exists(candidates[i])) return candidates[i];
+            }
+            return null;
+        }
+
+        private static string FindBillExcelTemplatePath()
+        {
+            var candidates = new[]
+            {
+                System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bill format.xlsx"),
+                System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\bill format.xlsx")),
+                System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\..\bill format.xlsx")),
+                System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\..\..\bill format.xlsx"))
+            };
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                if (System.IO.File.Exists(candidates[i])) return candidates[i];
+            }
+            return null;
+        }
+
+        private bool ValidateBillExcelTemplate(out string error)
+        {
+            error = null;
+            var templatePath = FindBillExcelTemplatePath();
+            if (string.IsNullOrWhiteSpace(templatePath) || !System.IO.File.Exists(templatePath))
+            {
+                error = "Template file 'bill format.xlsx' not found.";
+                return false;
+            }
+
+            object excelApp = null;
+            object workbooks = null;
+            object workbook = null;
+            object worksheet = null;
+            try
+            {
+                var excelType = Type.GetTypeFromProgID("Excel.Application");
+                if (excelType == null)
+                {
+                    error = "Microsoft Excel is not installed.";
+                    return false;
+                }
+                excelApp = Activator.CreateInstance(excelType);
+                excelType.InvokeMember("Visible", System.Reflection.BindingFlags.SetProperty, null, excelApp, new object[] { false });
+                excelType.InvokeMember("DisplayAlerts", System.Reflection.BindingFlags.SetProperty, null, excelApp, new object[] { false });
+
+                workbooks = excelType.InvokeMember("Workbooks", System.Reflection.BindingFlags.GetProperty, null, excelApp, null);
+                workbook = workbooks.GetType().InvokeMember("Open", System.Reflection.BindingFlags.InvokeMethod, null, workbooks, new object[] { templatePath, Type.Missing, true });
+                var sheets = workbook.GetType().InvokeMember("Worksheets", System.Reflection.BindingFlags.GetProperty, null, workbook, null);
+                worksheet = sheets.GetType().InvokeMember("Item", System.Reflection.BindingFlags.GetProperty, null, sheets, new object[] { 1 });
+
+                bool foundBillNo = false, foundDate = false, foundTo = false, foundHeader = false;
+                for (int r = 1; r <= 120; r++)
+                {
+                    for (int c = 1; c <= 40; c++)
+                    {
+                        var cells = worksheet.GetType().InvokeMember("Cells", System.Reflection.BindingFlags.GetProperty, null, worksheet, null);
+                        var cell = cells.GetType().InvokeMember("Item", System.Reflection.BindingFlags.GetProperty, null, cells, new object[] { r, c });
+                        var v = cell.GetType().InvokeMember("Value2", System.Reflection.BindingFlags.GetProperty, null, cell, null);
+                        var t = ((v == null) ? string.Empty : Convert.ToString(v)).Trim();
+                        if (t.IndexOf("bill no", StringComparison.OrdinalIgnoreCase) >= 0) foundBillNo = true;
+                        if (t.Equals("date", StringComparison.OrdinalIgnoreCase) || t.IndexOf("bill date", StringComparison.OrdinalIgnoreCase) >= 0) foundDate = true;
+                        if (t.Equals("to", StringComparison.OrdinalIgnoreCase)) foundTo = true;
+                        if (t.IndexOf("freight charges", StringComparison.OrdinalIgnoreCase) >= 0 || t.IndexOf("c/n no", StringComparison.OrdinalIgnoreCase) >= 0) foundHeader = true;
+                        System.Runtime.InteropServices.Marshal.ReleaseComObject(cell);
+                        System.Runtime.InteropServices.Marshal.ReleaseComObject(cells);
+                    }
+                }
+
+                if (!foundBillNo || !foundDate || !foundTo || !foundHeader)
+                {
+                    error = "Template is missing required labels (Bill No, Date, To, or table header).";
+                    return false;
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+            finally
+            {
+                try { if (workbook != null) workbook.GetType().InvokeMember("Close", System.Reflection.BindingFlags.InvokeMethod, null, workbook, new object[] { false }); } catch { }
+                try { if (excelApp != null) excelApp.GetType().InvokeMember("Quit", System.Reflection.BindingFlags.InvokeMethod, null, excelApp, null); } catch { }
+                if (worksheet != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(worksheet);
+                if (workbook != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(workbook);
+                if (workbooks != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(workbooks);
+                if (excelApp != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(excelApp);
+            }
+        }
+
+        private FrameworkElement BuildBillPrintVisual(BillPreviewData preview, BillFormatLayout layout = null, bool enableDrag = false, Action onLayoutChanged = null, List<double> rowHeightsOverride = null, double letterheadTopSpace = 0, double letterheadBottomSpace = 0, bool verticalOnlyBorders = false)
+        {
+            layout = layout ?? LoadBillFormatLayout();
+            var baseFont = layout.FontSize <= 0 ? 13 : layout.FontSize;
+            var wrapMode = layout.WrapText;
+            var baseRowHeight = layout.RowHeight >= 24 ? layout.RowHeight : 42;
+            var rowSpacing = layout.RowSpacing >= 0 ? layout.RowSpacing : 0;
+            var rowHeight = baseRowHeight + rowSpacing;
+            const double billTableWidth = 1040; // 90+90+150+110+290+110+90+110
+            var bodyWeight = layout.BoldText ? FontWeights.SemiBold : FontWeights.Normal;
+            var bodyStyle = layout.ItalicText ? FontStyles.Italic : FontStyles.Normal;
+            var alignText = (layout.Alignment ?? "Center").Trim();
+            var hAlign = HorizontalAlignment.Center;
+            var tAlign = TextAlignment.Center;
+            if (string.Equals(alignText, "Left", StringComparison.OrdinalIgnoreCase))
+            {
+                hAlign = HorizontalAlignment.Left;
+                tAlign = TextAlignment.Left;
+            }
+            else if (string.Equals(alignText, "Right", StringComparison.OrdinalIgnoreCase))
+            {
+                hAlign = HorizontalAlignment.Right;
+                tAlign = TextAlignment.Right;
+            }
+            Func<string, string> normalizeForRender = text =>
+            {
+                if (string.IsNullOrEmpty(text)) return string.Empty;
+                var t = text.Replace("\r", string.Empty);
+                return t.Trim('\n', '\t', ' ');
+            };
+            var allLines = (preview?.Lines ?? new List<BillPreviewLine>())
+                .Select(x => new BillPreviewLine
+                {
+                    LRNo = normalizeForRender(x?.LRNo),
+                    LRDate = normalizeForRender(x?.LRDate),
+                    Invoice = normalizeForRender(x?.Invoice),
+                    Vehicle = normalizeForRender(x?.Vehicle),
+                    From = normalizeForRender(x?.From),
+                    To = normalizeForRender(x?.To),
+                    ChargesBreakdown = normalizeForRender(x?.ChargesBreakdown),
+                    WeightOrType = normalizeForRender(x?.WeightOrType),
+                    Rate = normalizeForRender(x?.Rate),
+                    Amount = normalizeForRender(x?.Amount)
+                })
+                .ToList();
+            for (int i = 0; i < Math.Max(0, layout.ExtraRows); i++) allLines.Add(new BillPreviewLine());
+            var editableLines = new ObservableCollection<BillPreviewLine>(allLines);
+
             var page = new Border
             {
                 Width = 1100,
                 Padding = new Thickness(24),
                 Background = Brushes.White,
                 BorderBrush = new SolidColorBrush(Color.FromRgb(180, 180, 180)),
-                BorderThickness = new Thickness(1)
+                BorderThickness = new Thickness(1),
+                SnapsToDevicePixels = true,
+                UseLayoutRounding = true
             };
+            TextOptions.SetTextFormattingMode(page, TextFormattingMode.Ideal);
+            TextOptions.SetTextRenderingMode(page, TextRenderingMode.ClearType);
+            TextOptions.SetTextHintingMode(page, TextHintingMode.Fixed);
+            RenderOptions.SetBitmapScalingMode(page, BitmapScalingMode.HighQuality);
+            RenderOptions.SetEdgeMode(page, EdgeMode.Unspecified);
+            RenderOptions.SetClearTypeHint(page, ClearTypeHint.Enabled);
 
             var root = new Grid();
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -5906,10 +8628,11 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(Math.Max(0, letterheadBottomSpace)) });
             page.Child = root;
 
             // Fixed-position header using positions derived from provided bill format.xlsx.
-            var topCanvas = new Canvas { Height = 150, Margin = new Thickness(0, 0, 0, 6) };
+            var topCanvas = new Canvas { Height = 150, Margin = new Thickness(0, Math.Max(0, letterheadTopSpace), 0, 6) };
             var billMetaBox = new Border
             {
                 BorderBrush = Brushes.Black,
@@ -5925,7 +8648,7 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             var billNoText = new TextBlock
             {
                 Text = $"Bill No. : {preview.BillNo}",
-                FontSize = 14,
+                FontSize = baseFont + 1,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = Brushes.Black,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -5936,7 +8659,7 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             var billDateText = new TextBlock
             {
                 Text = $"Date : {preview.BillDate}",
-                FontSize = 14,
+                FontSize = baseFont + 1,
                 Foreground = Brushes.Black,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(8, 0, 8, 0)
@@ -5951,7 +8674,7 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             var toText = new TextBlock
             {
                 Text = "To",
-                FontSize = 16,
+                FontSize = baseFont + 3,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = Brushes.Black
             };
@@ -5966,11 +8689,11 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                 Margin = new Thickness(0)
             };
             var partyStack = new StackPanel();
-            partyStack.Children.Add(new TextBlock { Text = preview.Party, FontSize = 15, FontWeight = FontWeights.Bold, TextWrapping = TextWrapping.Wrap });
+            partyStack.Children.Add(new TextBlock { Text = preview.Party, FontSize = baseFont + 2, FontWeight = FontWeights.Bold, TextWrapping = wrapMode ? TextWrapping.Wrap : TextWrapping.NoWrap });
             if (!string.IsNullOrWhiteSpace(preview.PartyAddress))
-                partyStack.Children.Add(new TextBlock { Text = preview.PartyAddress, FontSize = 13, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
-            partyStack.Children.Add(new TextBlock { Text = $"Party GST No. : {preview.PartyGST}", FontSize = 13, Margin = new Thickness(0, 4, 0, 0) });
-            partyStack.Children.Add(new TextBlock { Text = $"State Code : {preview.PartyStateCode}", FontSize = 13, Margin = new Thickness(0, 2, 0, 0) });
+                partyStack.Children.Add(new TextBlock { Text = preview.PartyAddress, FontSize = baseFont, TextWrapping = wrapMode ? TextWrapping.Wrap : TextWrapping.NoWrap, Margin = new Thickness(0, 4, 0, 0) });
+            partyStack.Children.Add(new TextBlock { Text = $"Party GST No. : {preview.PartyGST}", FontSize = baseFont, Margin = new Thickness(0, 4, 0, 0), TextWrapping = wrapMode ? TextWrapping.Wrap : TextWrapping.NoWrap });
+            partyStack.Children.Add(new TextBlock { Text = $"State Code : {preview.PartyStateCode}", FontSize = baseFont, Margin = new Thickness(0, 2, 0, 0), TextWrapping = wrapMode ? TextWrapping.Wrap : TextWrapping.NoWrap });
             partyBox.Child = partyStack;
 
             Canvas.SetLeft(partyBox, 430);      // Excel: row5-row8 around col F-L area
@@ -5985,15 +8708,405 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                 AutoGenerateColumns = false,
                 CanUserAddRows = false,
                 CanUserDeleteRows = false,
-                IsReadOnly = true,
-                HeadersVisibility = DataGridHeadersVisibility.Column,
-                GridLinesVisibility = DataGridGridLinesVisibility.All,
+                CanUserResizeColumns = enableDrag,
+                IsReadOnly = !enableDrag,
+                // Use a single custom row-resize path in edit mode for consistent behavior.
+                CanUserResizeRows = false,
+                EnableRowVirtualization = false,
+                EnableColumnVirtualization = false,
+                SelectionMode = DataGridSelectionMode.Extended,
+                SelectionUnit = DataGridSelectionUnit.CellOrRowHeader,
+                RowHeaderWidth = (enableDrag && !verticalOnlyBorders) ? 28 : 0,
+                HeadersVisibility = (enableDrag && !verticalOnlyBorders) ? DataGridHeadersVisibility.All : DataGridHeadersVisibility.Column,
+                GridLinesVisibility = (enableDrag && !verticalOnlyBorders) ? DataGridGridLinesVisibility.All : DataGridGridLinesVisibility.Vertical,
+                HorizontalGridLinesBrush = (enableDrag && !verticalOnlyBorders) ? new SolidColorBrush(Color.FromRgb(210, 210, 210)) : Brushes.Transparent,
+                VerticalGridLinesBrush = new SolidColorBrush(Color.FromRgb(210, 210, 210)),
                 BorderBrush = Brushes.Black,
                 BorderThickness = new Thickness(1),
-                RowHeight = 76,
-                FontSize = 13,
-                ItemsSource = preview.Lines
+                RowHeight = enableDrag ? double.NaN : rowHeight,
+                MinRowHeight = 24,
+                FontSize = baseFont,
+                FontWeight = bodyWeight,
+                FontStyle = bodyStyle,
+                ItemsSource = editableLines,
+                ClipboardCopyMode = DataGridClipboardCopyMode.ExcludeHeader,
+                Background = Brushes.White,
+                RowBackground = Brushes.White,
+                AlternatingRowBackground = Brushes.White,
+                SnapsToDevicePixels = true,
+                UseLayoutRounding = true
             };
+            if (!enableDrag || verticalOnlyBorders)
+            {
+                ScrollViewer.SetHorizontalScrollBarVisibility(grid, ScrollBarVisibility.Disabled);
+                ScrollViewer.SetVerticalScrollBarVisibility(grid, ScrollBarVisibility.Disabled);
+                ScrollViewer.SetCanContentScroll(grid, false);
+            }
+            if (rowHeightsOverride != null && rowHeightsOverride.Count > 0)
+            {
+                if (enableDrag)
+                {
+                    // Ensure row heights are applied even when rendering offscreen (preview/PDF),
+                    // where Loaded timing can differ.
+                    grid.LoadingRow += (s, e) =>
+                    {
+                        var idx = e.Row.GetIndex();
+                        if (idx >= 0 && idx < rowHeightsOverride.Count)
+                        {
+                            var h = rowHeightsOverride[idx];
+                            if (h > 0) e.Row.Height = h;
+                        }
+                    };
+
+                    RoutedEventHandler applyOnce = null;
+                    applyOnce = (s, e) =>
+                    {
+                        grid.Loaded -= applyOnce;
+                        grid.Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            try
+                            {
+                                grid.UpdateLayout();
+                                for (int i = 0; i < Math.Min(grid.Items.Count, rowHeightsOverride.Count); i++)
+                                {
+                                    var row = grid.ItemContainerGenerator.ContainerFromIndex(i) as DataGridRow;
+                                    if (row == null) continue;
+                                    var h = rowHeightsOverride[i];
+                                    if (h > 0) row.Height = h;
+                                }
+                            }
+                            catch { }
+                        }), System.Windows.Threading.DispatcherPriority.Loaded);
+                    };
+                    grid.Loaded += applyOnce;
+                }
+                else
+                {
+                    grid.LoadingRow += (s, e) =>
+                    {
+                        var idx = e.Row.GetIndex();
+                        if (idx >= 0 && idx < rowHeightsOverride.Count)
+                        {
+                            var h = rowHeightsOverride[idx];
+                            if (h > 0) e.Row.Height = h;
+                        }
+                    };
+                }
+            }
+            var cellStyle = new Style(typeof(DataGridCell));
+            cellStyle.Setters.Add(new Setter(Control.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(220, 220, 220))));
+            cellStyle.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0.5)));
+            cellStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(2, 0, 2, 0)));
+            cellStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+            cellStyle.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Stretch));
+            cellStyle.Setters.Add(new Setter(Control.BackgroundProperty, Brushes.White));
+            var selectedTrigger = new Trigger { Property = DataGridCell.IsSelectedProperty, Value = true };
+            selectedTrigger.Setters.Add(new Setter(Control.BackgroundProperty, new SolidColorBrush(Color.FromRgb(217, 237, 255))));
+            selectedTrigger.Setters.Add(new Setter(Control.ForegroundProperty, Brushes.Black));
+            selectedTrigger.Setters.Add(new Setter(Control.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(124, 181, 236))));
+            cellStyle.Triggers.Add(selectedTrigger);
+            if (!enableDrag || verticalOnlyBorders)
+            {
+                // In print-preview mode, use DataGrid vertical grid lines only.
+                // Per-cell borders create tiny seams ("cuts") between rows on some DPI settings.
+                cellStyle.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
+                cellStyle.Setters.Add(new Setter(Control.BorderBrushProperty, Brushes.Transparent));
+                // Keep text anchored at top when row heights are increased.
+                cellStyle.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Top));
+                cellStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(2, 2, 2, 0)));
+
+                // Force top placement at template level to avoid theme-level vertical centering.
+                var cellTemplate = new ControlTemplate(typeof(DataGridCell));
+                var border = new FrameworkElementFactory(typeof(Border));
+                border.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
+                border.SetValue(Border.BorderBrushProperty, new TemplateBindingExtension(Control.BorderBrushProperty));
+                border.SetValue(Border.BorderThicknessProperty, new TemplateBindingExtension(Control.BorderThicknessProperty));
+
+                var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
+                presenter.SetValue(FrameworkElement.MarginProperty, new TemplateBindingExtension(Control.PaddingProperty));
+                presenter.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Stretch);
+                presenter.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Top);
+                presenter.SetValue(TextBlock.TextAlignmentProperty, tAlign);
+                border.AppendChild(presenter);
+                cellTemplate.VisualTree = border;
+                cellStyle.Setters.Add(new Setter(Control.TemplateProperty, cellTemplate));
+            }
+            grid.CellStyle = cellStyle;
+            if (!enableDrag || verticalOnlyBorders)
+            {
+                var printRowStyle = new Style(typeof(DataGridRow));
+                printRowStyle.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Top));
+                printRowStyle.Setters.Add(new Setter(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Top));
+                grid.RowStyle = printRowStyle;
+            }
+
+            if (enableDrag)
+            {
+                VirtualizingPanel.SetIsVirtualizing(grid, false);
+                var editRowStyle = new Style(typeof(DataGridRow));
+                editRowStyle.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, 24.0));
+                editRowStyle.Setters.Add(new Setter(FrameworkElement.HeightProperty, double.NaN));
+                grid.RowStyle = editRowStyle;
+                DataGridRow resizingRow = null;
+                double resizeStartY = 0;
+                double resizeStartHeight = 0;
+                bool manualRowResize = false;
+
+                var cellMenu = new ContextMenu();
+                var insertAboveItem = new MenuItem { Header = "Insert Row Above" };
+                var insertBelowItem = new MenuItem { Header = "Insert Row Below" };
+                var deleteRowItem = new MenuItem { Header = "Delete Row" };
+                cellMenu.Items.Add(insertAboveItem);
+                cellMenu.Items.Add(insertBelowItem);
+                cellMenu.Items.Add(new Separator());
+                cellMenu.Items.Add(deleteRowItem);
+                grid.ContextMenu = cellMenu;
+
+                Action<bool> insertRow = insertAbove =>
+                {
+                    grid.CommitEdit(DataGridEditingUnit.Cell, true);
+                    grid.CommitEdit(DataGridEditingUnit.Row, true);
+                    var current = grid.CurrentCell;
+                    if (current.Item == null) return;
+                    var rowIndex = editableLines.IndexOf(current.Item as BillPreviewLine);
+                    if (rowIndex < 0) return;
+                    var insertIndex = insertAbove ? rowIndex : rowIndex + 1;
+                    insertIndex = Math.Max(0, Math.Min(insertIndex, editableLines.Count));
+                    var newLine = new BillPreviewLine();
+                    editableLines.Insert(insertIndex, newLine);
+                    grid.SelectedCells.Clear();
+                    grid.CurrentCell = new DataGridCellInfo(newLine, grid.Columns.FirstOrDefault());
+                    grid.SelectedItem = newLine;
+                    grid.ScrollIntoView(newLine);
+                    grid.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            if (rowHeightsOverride == null) return;
+                            rowHeightsOverride.Clear();
+                            for (int i = 0; i < grid.Items.Count; i++)
+                            {
+                                var rowContainer = grid.ItemContainerGenerator.ContainerFromIndex(i) as DataGridRow;
+                                rowHeightsOverride.Add(rowContainer != null && rowContainer.ActualHeight > 0 ? rowContainer.ActualHeight : rowHeight);
+                            }
+                        }
+                        catch { }
+                    }), System.Windows.Threading.DispatcherPriority.Background);
+                };
+
+                insertAboveItem.Click += (s, e) => insertRow(true);
+                insertBelowItem.Click += (s, e) => insertRow(false);
+                deleteRowItem.Click += (s, e) =>
+                {
+                    grid.CommitEdit(DataGridEditingUnit.Cell, true);
+                    grid.CommitEdit(DataGridEditingUnit.Row, true);
+                    var current = grid.CurrentCell;
+                    if (current.Item == null) return;
+                    var row = current.Item as BillPreviewLine;
+                    if (row == null) return;
+                    var idx = editableLines.IndexOf(row);
+                    if (idx < 0) return;
+                    editableLines.RemoveAt(idx);
+                    if (editableLines.Count == 0) return;
+                    var nextIdx = Math.Min(idx, editableLines.Count - 1);
+                    var nextRow = editableLines[nextIdx];
+                    var firstCol = grid.Columns.FirstOrDefault();
+                    if (firstCol != null)
+                    {
+                        grid.CurrentCell = new DataGridCellInfo(nextRow, firstCol);
+                        grid.SelectedCells.Clear();
+                        grid.SelectedCells.Add(grid.CurrentCell);
+                    }
+                    grid.SelectedItem = nextRow;
+                    grid.ScrollIntoView(nextRow);
+                    grid.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            if (rowHeightsOverride == null) return;
+                            rowHeightsOverride.Clear();
+                            for (int i = 0; i < grid.Items.Count; i++)
+                            {
+                                var rowContainerAfterDelete = grid.ItemContainerGenerator.ContainerFromIndex(i) as DataGridRow;
+                                rowHeightsOverride.Add(rowContainerAfterDelete != null && rowContainerAfterDelete.ActualHeight > 0 ? rowContainerAfterDelete.ActualHeight : rowHeight);
+                            }
+                        }
+                        catch { }
+                    }), System.Windows.Threading.DispatcherPriority.Background);
+                };
+
+                grid.ContextMenuOpening += (s, e) =>
+                {
+                    var hit = Mouse.DirectlyOver as DependencyObject;
+                    var cell = FindParent<DataGridCell>(hit);
+                    if (cell == null) return;
+                    cell.Focus();
+                    grid.CurrentCell = new DataGridCellInfo(cell);
+                    grid.SelectedCells.Clear();
+                    grid.SelectedCells.Add(grid.CurrentCell);
+                };
+
+                grid.PreviewMouseLeftButtonDown += (s, e) =>
+                {
+                    var source = e.OriginalSource as DependencyObject;
+                    var hitRow = FindParent<DataGridRow>(source);
+                    if (hitRow != null)
+                    {
+                        var hitHeader = FindParent<DataGridRowHeader>(source);
+                        var posInRow = e.GetPosition(hitRow);
+                        var nearBottomRow = posInRow.Y >= Math.Max(0, hitRow.ActualHeight - 8);
+                        var nearBottomHeader = false;
+                        if (hitHeader != null)
+                        {
+                            var posInHeader = e.GetPosition(hitHeader);
+                            nearBottomHeader = posInHeader.Y >= Math.Max(0, hitHeader.ActualHeight - 8);
+                        }
+                        if (nearBottomRow || nearBottomHeader)
+                        {
+                            manualRowResize = true;
+                            resizingRow = hitRow;
+                            resizeStartY = e.GetPosition(grid).Y;
+                            resizeStartHeight = hitRow.ActualHeight > 0 ? hitRow.ActualHeight : (grid.RowHeight > 0 ? grid.RowHeight : 24);
+                            hitRow.CaptureMouse();
+                            e.Handled = true;
+                            return;
+                        }
+                    }
+
+                    var hit = e.OriginalSource as DependencyObject;
+                    var cell = FindParent<DataGridCell>(hit);
+                    if (cell == null) return;
+                    if (cell.IsEditing) return;
+                    cell.Focus();
+                    grid.CurrentCell = new DataGridCellInfo(cell);
+                };
+                grid.PreviewMouseMove += (s, e) =>
+                {
+                    var source = e.OriginalSource as DependencyObject;
+                    if (!manualRowResize)
+                    {
+                        var hoverRow = FindParent<DataGridRow>(source);
+                        if (hoverRow != null)
+                        {
+                            var hoverHeader = FindParent<DataGridRowHeader>(source);
+                            var posInRow = e.GetPosition(hoverRow);
+                            var nearBottomRow = posInRow.Y >= Math.Max(0, hoverRow.ActualHeight - 8);
+                            var nearBottomHeader = false;
+                            if (hoverHeader != null)
+                            {
+                                var posInHeader = e.GetPosition(hoverHeader);
+                                nearBottomHeader = posInHeader.Y >= Math.Max(0, hoverHeader.ActualHeight - 8);
+                            }
+                            grid.Cursor = (nearBottomRow || nearBottomHeader) ? Cursors.SizeNS : Cursors.Arrow;
+                        }
+                        else
+                        {
+                            grid.Cursor = Cursors.Arrow;
+                        }
+                        return;
+                    }
+
+                    if (resizingRow == null) return;
+                    var currentY = e.GetPosition(grid).Y;
+                    var delta = currentY - resizeStartY;
+                    var target = Math.Max(grid.MinRowHeight > 0 ? grid.MinRowHeight : 24, resizeStartHeight + delta);
+                    resizingRow.Height = target;
+                    e.Handled = true;
+                };
+                grid.PreviewMouseLeftButtonUp += (s, e) =>
+                {
+                    if (!manualRowResize) return;
+                    manualRowResize = false;
+                    if (resizingRow != null)
+                    {
+                        try { resizingRow.ReleaseMouseCapture(); } catch { }
+                        resizingRow = null;
+                    }
+                    grid.Cursor = Cursors.Arrow;
+                    grid.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            if (rowHeightsOverride == null) return;
+                            rowHeightsOverride.Clear();
+                            for (int i = 0; i < grid.Items.Count; i++)
+                            {
+                                var row = grid.ItemContainerGenerator.ContainerFromIndex(i) as DataGridRow;
+                                rowHeightsOverride.Add(row != null && row.ActualHeight > 0 ? row.ActualHeight : rowHeight);
+                            }
+                        }
+                        catch { }
+                    }), System.Windows.Threading.DispatcherPriority.Background);
+                    e.Handled = true;
+                };
+
+                grid.PreparingCellForEdit += (s, e) =>
+                {
+                    // Keep a spreadsheet-like experience while editing cells.
+                    if (e.EditingElement is TextBox editor)
+                    {
+                        grid.Dispatcher.BeginInvoke(new Action(() => editor.SelectAll()), System.Windows.Threading.DispatcherPriority.Input);
+                    }
+                };
+                grid.PreviewKeyDown += (s, e) =>
+                {
+                    if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control && e.Key == Key.A)
+                    {
+                        grid.SelectAllCells();
+                        e.Handled = true;
+                        return;
+                    }
+                    if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control && e.Key == Key.C)
+                    {
+                        CopySelectedCellsToClipboard(grid);
+                        e.Handled = true;
+                        return;
+                    }
+                    if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control && e.Key == Key.V)
+                    {
+                        PasteClipboardIntoGrid(grid);
+                        e.Handled = true;
+                        return;
+                    }
+                    if (e.Key == Key.Delete)
+                    {
+                        try { grid.CommitEdit(DataGridEditingUnit.Cell, true); } catch { }
+                        try { grid.CommitEdit(DataGridEditingUnit.Row, true); } catch { }
+                        foreach (var sc in grid.SelectedCells)
+                        {
+                            if (sc.Item == null || sc.Column == null || sc.Column.IsReadOnly) continue;
+                            SetCellValueFromText(sc.Item, sc.Column, string.Empty);
+                        }
+                        grid.Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            try
+                            {
+                                var view = CollectionViewSource.GetDefaultView(grid.ItemsSource ?? grid.Items);
+                                view?.Refresh();
+                            }
+                            catch { }
+                        }), System.Windows.Threading.DispatcherPriority.Background);
+                        e.Handled = true;
+                        return;
+                    }
+                    if (e.Key == Key.Enter)
+                    {
+                        var current = grid.CurrentCell;
+                        if (current.Item == null || current.Column == null) return;
+                        var rowIndex = grid.Items.IndexOf(current.Item);
+                        var nextIndex = Math.Min(rowIndex + 1, grid.Items.Count - 1);
+                        if (nextIndex >= 0 && nextIndex < grid.Items.Count)
+                        {
+                            var nextItem = grid.Items[nextIndex];
+                            grid.CurrentCell = new DataGridCellInfo(nextItem, current.Column);
+                            grid.SelectedCells.Clear();
+                            grid.SelectedCells.Add(grid.CurrentCell);
+                            grid.ScrollIntoView(nextItem, current.Column);
+                            e.Handled = true;
+                        }
+                    }
+                };
+            }
             var centeredHeaderStyle = new Style(typeof(DataGridColumnHeader));
             centeredHeaderStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Center));
             centeredHeaderStyle.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
@@ -6001,14 +9114,49 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             grid.ColumnHeaderStyle = centeredHeaderStyle;
 
             var centeredTextStyle = new Style(typeof(TextBlock));
-            centeredTextStyle.Setters.Add(new Setter(TextBlock.TextAlignmentProperty, TextAlignment.Center));
-            centeredTextStyle.Setters.Add(new Setter(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center));
-            centeredTextStyle.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
+            centeredTextStyle.Setters.Add(new Setter(TextBlock.TextAlignmentProperty, tAlign));
+            centeredTextStyle.Setters.Add(new Setter(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Stretch));
+            centeredTextStyle.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Top));
+            centeredTextStyle.Setters.Add(new Setter(TextBlock.MarginProperty, new Thickness(2, 2, 2, 0)));
 
-            grid.Columns.Add(new DataGridTextColumn { Header = "C/N No", Binding = new Binding("LRNo"), Width = 90, ElementStyle = centeredTextStyle });
-            grid.Columns.Add(new DataGridTextColumn { Header = "Date", Binding = new Binding("LRDate"), Width = 90, ElementStyle = centeredTextStyle });
-            grid.Columns.Add(new DataGridTextColumn { Header = "Invoice No", Binding = new Binding("Invoice"), Width = 150, ElementStyle = centeredTextStyle });
-            grid.Columns.Add(new DataGridTextColumn { Header = "Vehicle No.", Binding = new Binding("Vehicle"), Width = 110, ElementStyle = centeredTextStyle });
+            var invoiceTextStyle = new Style(typeof(TextBlock), centeredTextStyle);
+            invoiceTextStyle.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Top));
+            invoiceTextStyle.Setters.Add(new Setter(TextBlock.TextWrappingProperty, TextWrapping.Wrap));
+
+            var invoiceEditStyle = new Style(typeof(TextBox));
+            invoiceEditStyle.Setters.Add(new Setter(TextBox.TextAlignmentProperty, tAlign));
+            invoiceEditStyle.Setters.Add(new Setter(TextBox.HorizontalAlignmentProperty, HorizontalAlignment.Stretch));
+            invoiceEditStyle.Setters.Add(new Setter(TextBox.VerticalContentAlignmentProperty, VerticalAlignment.Top));
+            invoiceEditStyle.Setters.Add(new Setter(TextBox.TextWrappingProperty, TextWrapping.Wrap));
+            invoiceEditStyle.Setters.Add(new Setter(TextBox.AcceptsReturnProperty, true));
+            invoiceEditStyle.Setters.Add(new Setter(TextBox.BorderThicknessProperty, new Thickness(0)));
+            invoiceEditStyle.Setters.Add(new Setter(TextBox.BackgroundProperty, Brushes.Transparent));
+
+            Func<string, string, double, Style, DataGridColumn> makeCol = (header, path, width, style) =>
+            {
+                if (enableDrag)
+                {
+                    if (string.Equals(path, "Invoice", StringComparison.Ordinal))
+                        return new DataGridTextColumn { Header = header, Binding = new Binding(path), Width = width, ElementStyle = style, EditingElementStyle = invoiceEditStyle };
+                    return new DataGridTextColumn { Header = header, Binding = new Binding(path), Width = width, ElementStyle = style };
+                }
+
+                var dt = new DataTemplate();
+                var tb = new FrameworkElementFactory(typeof(TextBlock));
+                tb.SetBinding(TextBlock.TextProperty, new Binding(path));
+                tb.SetValue(TextBlock.TextWrappingProperty, wrapMode ? TextWrapping.Wrap : TextWrapping.NoWrap);
+                tb.SetValue(TextBlock.TextAlignmentProperty, tAlign);
+                tb.SetValue(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Stretch);
+                tb.SetValue(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Top);
+                tb.SetValue(TextBlock.MarginProperty, new Thickness(2, 2, 2, 0));
+                dt.VisualTree = tb;
+                return new DataGridTemplateColumn { Header = header, Width = width, CellTemplate = dt };
+            };
+
+            grid.Columns.Add(makeCol("C/N No", "LRNo", 90, centeredTextStyle));
+            grid.Columns.Add(makeCol("Date", "LRDate", 90, centeredTextStyle));
+            grid.Columns.Add(makeCol("Invoice No", "Invoice", 150, invoiceTextStyle));
+            grid.Columns.Add(makeCol("Vehicle No.", "Vehicle", 110, centeredTextStyle));
             var freightHeader = new StackPanel { Orientation = Orientation.Vertical };
             freightHeader.Children.Add(new TextBlock
             {
@@ -6020,8 +9168,8 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             var freightHeaderSub = new Grid { Margin = new Thickness(4, 2, 4, 0) };
             freightHeaderSub.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             freightHeaderSub.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var fromHdr = new TextBlock { Text = "From", HorizontalAlignment = HorizontalAlignment.Left, FontSize = 11 };
-            var toHdr = new TextBlock { Text = "To", HorizontalAlignment = HorizontalAlignment.Right, FontSize = 11 };
+            var fromHdr = new TextBlock { Text = "From", HorizontalAlignment = HorizontalAlignment.Left, FontSize = Math.Max(10, baseFont - 2) };
+            var toHdr = new TextBlock { Text = "To", HorizontalAlignment = HorizontalAlignment.Right, FontSize = Math.Max(10, baseFont - 2) };
             Grid.SetColumn(fromHdr, 0);
             Grid.SetColumn(toHdr, 1);
             freightHeaderSub.Children.Add(fromHdr);
@@ -6031,61 +9179,86 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             var freightCellTemplate = new DataTemplate();
             var freightCellStack = new FrameworkElementFactory(typeof(StackPanel));
             freightCellStack.SetValue(StackPanel.OrientationProperty, Orientation.Vertical);
-            freightCellStack.SetValue(FrameworkElement.MarginProperty, new Thickness(4, 0, 4, 0));
+            freightCellStack.SetValue(FrameworkElement.MarginProperty, new Thickness(0));
+            freightCellStack.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Stretch);
 
-            var routeRow = new FrameworkElementFactory(typeof(DockPanel));
-            routeRow.SetValue(DockPanel.LastChildFillProperty, true);
+            FrameworkElementFactory chargesCell;
+            if (enableDrag)
+            {
+                chargesCell = new FrameworkElementFactory(typeof(TextBox));
+                chargesCell.SetBinding(TextBox.TextProperty, new Binding("ChargesBreakdown") { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged });
+                chargesCell.SetValue(TextBox.TextWrappingProperty, wrapMode ? TextWrapping.Wrap : TextWrapping.NoWrap);
+                chargesCell.SetValue(TextBox.AcceptsReturnProperty, true);
+                chargesCell.SetValue(TextBox.VerticalContentAlignmentProperty, VerticalAlignment.Top);
+                chargesCell.SetValue(TextBox.HorizontalContentAlignmentProperty, hAlign);
+                chargesCell.SetValue(TextBox.FontSizeProperty, baseFont);
+                chargesCell.SetValue(TextBox.MarginProperty, new Thickness(0));
+                chargesCell.SetValue(TextBox.ForegroundProperty, Brushes.Black);
+                chargesCell.SetValue(TextBox.TextAlignmentProperty, tAlign);
+                chargesCell.SetValue(TextBox.HorizontalAlignmentProperty, HorizontalAlignment.Stretch);
+                chargesCell.SetValue(TextBox.BorderThicknessProperty, new Thickness(0));
+                chargesCell.SetValue(TextBox.BackgroundProperty, Brushes.Transparent);
+            }
+            else
+            {
+                chargesCell = new FrameworkElementFactory(typeof(TextBlock));
+                chargesCell.SetBinding(TextBlock.TextProperty, new Binding("ChargesBreakdown"));
+                chargesCell.SetValue(TextBlock.TextWrappingProperty, wrapMode ? TextWrapping.Wrap : TextWrapping.NoWrap);
+                chargesCell.SetValue(TextBlock.FontSizeProperty, baseFont);
+                chargesCell.SetValue(TextBlock.MarginProperty, new Thickness(2, 2, 2, 0));
+                chargesCell.SetValue(TextBlock.ForegroundProperty, Brushes.Black);
+                chargesCell.SetValue(TextBlock.TextAlignmentProperty, tAlign);
+                chargesCell.SetValue(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Stretch);
+                chargesCell.SetValue(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Top);
+            }
 
-            var toCell = new FrameworkElementFactory(typeof(TextBlock));
-            toCell.SetBinding(TextBlock.TextProperty, new Binding("To"));
-            toCell.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap);
-            toCell.SetValue(TextBlock.WidthProperty, 120.0);
-            toCell.SetValue(TextBlock.TextAlignmentProperty, TextAlignment.Center);
-            toCell.SetValue(TextBlock.FontWeightProperty, FontWeights.SemiBold);
-            toCell.SetValue(DockPanel.DockProperty, Dock.Right);
-
-            var fromCell = new FrameworkElementFactory(typeof(TextBlock));
-            fromCell.SetBinding(TextBlock.TextProperty, new Binding("From"));
-            fromCell.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap);
-            fromCell.SetValue(TextBlock.WidthProperty, 120.0);
-            fromCell.SetValue(TextBlock.TextAlignmentProperty, TextAlignment.Center);
-            fromCell.SetValue(TextBlock.FontWeightProperty, FontWeights.SemiBold);
-            fromCell.SetValue(DockPanel.DockProperty, Dock.Left);
-
-            routeRow.AppendChild(fromCell);
-            routeRow.AppendChild(toCell);
-
-            var chargesCell = new FrameworkElementFactory(typeof(TextBlock));
-            chargesCell.SetBinding(TextBlock.TextProperty, new Binding("ChargesBreakdown"));
-            chargesCell.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap);
-            chargesCell.SetValue(TextBlock.FontSizeProperty, 13.0);
-            chargesCell.SetValue(TextBlock.MarginProperty, new Thickness(0, 2, 0, 0));
-            chargesCell.SetValue(TextBlock.ForegroundProperty, Brushes.Black);
-            chargesCell.SetValue(TextBlock.TextAlignmentProperty, TextAlignment.Center);
-            chargesCell.SetValue(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-
-            freightCellStack.AppendChild(routeRow);
             freightCellStack.AppendChild(chargesCell);
             freightCellTemplate.VisualTree = freightCellStack;
+
+            var freightCellStyle = new Style(typeof(DataGridCell), cellStyle);
+            freightCellStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(0)));
 
             grid.Columns.Add(new DataGridTemplateColumn
             {
                 Header = freightHeader,
                 CellTemplate = freightCellTemplate,
+                CellStyle = freightCellStyle,
                 Width = 290
             });
-            grid.Columns.Add(new DataGridTextColumn { Header = "Weight", Binding = new Binding("WeightOrType"), Width = 110, ElementStyle = centeredTextStyle });
-            grid.Columns.Add(new DataGridTextColumn { Header = "Rate", Binding = new Binding("Rate"), Width = 90, ElementStyle = centeredTextStyle });
+            grid.Columns.Add(makeCol("Weight", "WeightOrType", 110, centeredTextStyle));
+            grid.Columns.Add(makeCol("Rate", "Rate", 90, centeredTextStyle));
             var amountTemplate = new DataTemplate();
             var amountText = new FrameworkElementFactory(typeof(TextBlock));
             amountText.SetBinding(TextBlock.TextProperty, new Binding("Amount"));
             amountText.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap);
-            amountText.SetValue(TextBlock.TextAlignmentProperty, TextAlignment.Center);
-            amountText.SetValue(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            amountText.SetValue(TextBlock.TextAlignmentProperty, tAlign);
+            amountText.SetValue(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Stretch);
             amountText.SetValue(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Top);
             amountText.SetValue(TextBlock.MarginProperty, new Thickness(2, 0, 2, 0));
             amountTemplate.VisualTree = amountText;
             grid.Columns.Add(new DataGridTemplateColumn { Header = "Amount", CellTemplate = amountTemplate, Width = 110 });
+            if (!enableDrag || verticalOnlyBorders)
+            {
+                // Keep a stable letterhead-sized table even when there is only 1 bill line.
+                const int minPrintRows = 10;
+                while (editableLines.Count < minPrintRows)
+                    editableLines.Add(new BillPreviewLine());
+
+                // Prevent trailing filler area that looks like an extra column after Amount in print/preview.
+                grid.HorizontalAlignment = HorizontalAlignment.Left;
+                grid.Width = billTableWidth;
+                var headerHeight = grid.ColumnHeaderHeight > 0 ? grid.ColumnHeaderHeight : 46;
+                var contentRows = Math.Max(1, editableLines.Count);
+                double rowsHeight = 0;
+                for (int i = 0; i < contentRows; i++)
+                {
+                    var h = (rowHeightsOverride != null && i < rowHeightsOverride.Count && rowHeightsOverride[i] > 0)
+                        ? rowHeightsOverride[i]
+                        : rowHeight;
+                    rowsHeight += h;
+                }
+                grid.Height = headerHeight + rowsHeight + 2;
+            }
             Grid.SetRow(grid, 2);
             root.Children.Add(grid);
 
@@ -6093,8 +9266,13 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             totalRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             totalRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             totalRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
-            totalRow.Children.Add(new TextBlock { Text = $"Rupees in Words : {preview.TotalWords}", FontSize = 13, FontWeight = FontWeights.SemiBold });
-            var totalLabel = new TextBlock { Text = "Total", FontSize = 13, FontWeight = FontWeights.Bold, Margin = new Thickness(12, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+            if (!enableDrag || verticalOnlyBorders)
+            {
+                totalRow.HorizontalAlignment = HorizontalAlignment.Left;
+                totalRow.Width = billTableWidth;
+            }
+            totalRow.Children.Add(new TextBlock { Text = $"Rupees in Words : {preview.TotalWords}", FontSize = baseFont, FontWeight = FontWeights.SemiBold, TextWrapping = wrapMode ? TextWrapping.Wrap : TextWrapping.NoWrap });
+            var totalLabel = new TextBlock { Text = "Total", FontSize = baseFont, FontWeight = FontWeights.Bold, Margin = new Thickness(12, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(totalLabel, 1);
             totalRow.Children.Add(totalLabel);
             var totalValue = new Border
@@ -6102,7 +9280,7 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                 BorderBrush = Brushes.Black,
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(8, 4, 8, 4),
-                Child = new TextBlock { Text = preview.Total, FontSize = 13, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Right }
+                Child = new TextBlock { Text = preview.Total, FontSize = baseFont, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Right }
             };
             Grid.SetColumn(totalValue, 2);
             totalRow.Children.Add(totalValue);
@@ -6112,12 +9290,266 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             var footer = new Grid { Margin = new Thickness(0, 22, 0, 0) };
             footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(340) });
+            if (!enableDrag || verticalOnlyBorders)
+            {
+                footer.HorizontalAlignment = HorizontalAlignment.Left;
+                footer.Width = billTableWidth;
+            }
             footer.Children.Add(new TextBlock { Text = "Encl…………Ack / ment", FontSize = 12 });
             var sign = new TextBlock { Text = "For Awagaman Trans Logistics", FontSize = 13, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Right };
             Grid.SetColumn(sign, 1);
             footer.Children.Add(sign);
             Grid.SetRow(footer, 4);
             root.Children.Add(footer);
+
+            if (layout.TextBoxes != null && layout.TextBoxes.Count > 0)
+            {
+                var overlay = new Canvas { IsHitTestVisible = enableDrag };
+                Grid.SetRowSpan(overlay, 5);
+                foreach (var t in layout.TextBoxes)
+                {
+                    FrameworkElement tb;
+                    TextBox editBox = null;
+                    if (enableDrag)
+                    {
+                        editBox = new TextBox
+                        {
+                            Text = t.Text ?? string.Empty,
+                            FontSize = t.FontSize > 0 ? t.FontSize : baseFont,
+                            TextWrapping = t.Wrap ? TextWrapping.Wrap : TextWrapping.NoWrap,
+                            Width = t.Width > 10 ? t.Width : 180,
+                            Height = t.Height > 10 ? t.Height : 24,
+                            Foreground = Brushes.Black,
+                            Background = Brushes.Transparent,
+                            BorderThickness = new Thickness(0),
+                            AcceptsReturn = true,
+                            VerticalContentAlignment = VerticalAlignment.Top
+                        };
+                        editBox.TextChanged += (s, e) =>
+                        {
+                            t.Text = editBox.Text ?? string.Empty;
+                            SaveBillFormatLayout(layout);
+                            onLayoutChanged?.Invoke();
+                        };
+                        tb = editBox;
+                    }
+                    else
+                    {
+                        tb = new TextBlock
+                        {
+                            Text = t.Text ?? string.Empty,
+                            FontSize = t.FontSize > 0 ? t.FontSize : baseFont,
+                            TextWrapping = t.Wrap ? TextWrapping.Wrap : TextWrapping.NoWrap,
+                            Width = t.Width > 10 ? t.Width : 180,
+                            Height = t.Height > 10 ? t.Height : 24,
+                            Foreground = Brushes.Black
+                        };
+                    }
+                    if (!enableDrag)
+                    {
+                        Canvas.SetLeft(tb, t.X);
+                        Canvas.SetTop(tb, t.Y);
+                        overlay.Children.Add(tb);
+                    }
+                    else
+                    {
+                        var moveGrip = new Border
+                        {
+                            Height = 18,
+                            Background = new SolidColorBrush(Color.FromRgb(90, 90, 90)),
+                            HorizontalAlignment = HorizontalAlignment.Stretch,
+                            VerticalAlignment = VerticalAlignment.Top,
+                            Margin = new Thickness(0),
+                            Cursor = Cursors.SizeAll
+                        };
+                        var resizeGrip = new Border
+                        {
+                            Width = 10,
+                            Height = 10,
+                            Background = new SolidColorBrush(Color.FromRgb(120, 120, 120)),
+                            HorizontalAlignment = HorizontalAlignment.Right,
+                            VerticalAlignment = VerticalAlignment.Bottom,
+                            Margin = new Thickness(0),
+                            Cursor = Cursors.SizeNWSE
+                        };
+                        var holderGrid = new Grid();
+                        holderGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(18) });
+                        holderGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                        Grid.SetRow(moveGrip, 0);
+                        Grid.SetRow(tb, 1);
+                        Grid.SetRow(resizeGrip, 1);
+                        holderGrid.Children.Add(tb);
+                        holderGrid.Children.Add(moveGrip);
+                        holderGrid.Children.Add(resizeGrip);
+
+                        var holder = new Border
+                        {
+                            BorderBrush = new SolidColorBrush(Color.FromRgb(180, 180, 180)),
+                            BorderThickness = new Thickness(1),
+                            Background = Brushes.Transparent,
+                            Child = holderGrid,
+                            Cursor = Cursors.SizeAll,
+                            ToolTip = "Drag: Alt + Left mouse (or Right-drag)"
+                        };
+                        holder.Width = t.Width > 10 ? t.Width : 180;
+                        holder.Height = (t.Height > 10 ? t.Height : 24) + 18;
+                        Canvas.SetLeft(holder, t.X);
+                        Canvas.SetTop(holder, t.Y);
+
+                        Point dragStart = new Point();
+                        double startX = 0;
+                        double startY = 0;
+                        bool dragging = false;
+
+                        moveGrip.MouseLeftButtonDown += (s, e) =>
+                        {
+                            dragging = true;
+                            dragStart = e.GetPosition(overlay);
+                            startX = Canvas.GetLeft(holder);
+                            startY = Canvas.GetTop(holder);
+                            moveGrip.CaptureMouse();
+                            e.Handled = true;
+                        };
+                        moveGrip.MouseMove += (s, e) =>
+                        {
+                            if (!dragging) return;
+                            var p = e.GetPosition(overlay);
+                            var dx = p.X - dragStart.X;
+                            var dy = p.Y - dragStart.Y;
+                            var nx = Math.Max(0, startX + dx);
+                            var ny = Math.Max(0, startY + dy);
+                            Canvas.SetLeft(holder, nx);
+                            Canvas.SetTop(holder, ny);
+                        };
+                        moveGrip.MouseLeftButtonUp += (s, e) =>
+                        {
+                            if (!dragging) return;
+                            dragging = false;
+                            moveGrip.ReleaseMouseCapture();
+                            t.X = Canvas.GetLeft(holder);
+                            t.Y = Canvas.GetTop(holder);
+                            SaveBillFormatLayout(layout);
+                            onLayoutChanged?.Invoke();
+                            e.Handled = true;
+                        };
+
+                        // Guaranteed move gesture: Alt + Left drag anywhere on the textbox container.
+                        bool altDragging = false;
+                        Point altDragStart = new Point();
+                        double altStartX = 0;
+                        double altStartY = 0;
+                        holder.PreviewMouseLeftButtonDown += (s, e) =>
+                        {
+                            if ((Keyboard.Modifiers & ModifierKeys.Alt) != ModifierKeys.Alt) return;
+                            altDragging = true;
+                            altDragStart = e.GetPosition(overlay);
+                            altStartX = Canvas.GetLeft(holder);
+                            altStartY = Canvas.GetTop(holder);
+                            holder.CaptureMouse();
+                            e.Handled = true;
+                        };
+                        holder.PreviewMouseMove += (s, e) =>
+                        {
+                            if (!altDragging) return;
+                            var p = e.GetPosition(overlay);
+                            var dx = p.X - altDragStart.X;
+                            var dy = p.Y - altDragStart.Y;
+                            Canvas.SetLeft(holder, Math.Max(0, altStartX + dx));
+                            Canvas.SetTop(holder, Math.Max(0, altStartY + dy));
+                        };
+                        holder.PreviewMouseLeftButtonUp += (s, e) =>
+                        {
+                            if (!altDragging) return;
+                            altDragging = false;
+                            holder.ReleaseMouseCapture();
+                            t.X = Canvas.GetLeft(holder);
+                            t.Y = Canvas.GetTop(holder);
+                            SaveBillFormatLayout(layout);
+                            onLayoutChanged?.Invoke();
+                            e.Handled = true;
+                        };
+
+                        // Drag from anywhere on text box using right mouse button
+                        bool rightDragging = false;
+                        Point rightDragStart = new Point();
+                        double rightStartX = 0;
+                        double rightStartY = 0;
+                        holder.PreviewMouseRightButtonDown += (s, e) =>
+                        {
+                            rightDragging = true;
+                            rightDragStart = e.GetPosition(overlay);
+                            rightStartX = Canvas.GetLeft(holder);
+                            rightStartY = Canvas.GetTop(holder);
+                            holder.CaptureMouse();
+                            e.Handled = true;
+                        };
+                        holder.PreviewMouseMove += (s, e) =>
+                        {
+                            if (!rightDragging) return;
+                            var p = e.GetPosition(overlay);
+                            var dx = p.X - rightDragStart.X;
+                            var dy = p.Y - rightDragStart.Y;
+                            var nx = Math.Max(0, rightStartX + dx);
+                            var ny = Math.Max(0, rightStartY + dy);
+                            Canvas.SetLeft(holder, nx);
+                            Canvas.SetTop(holder, ny);
+                        };
+                        holder.PreviewMouseRightButtonUp += (s, e) =>
+                        {
+                            if (!rightDragging) return;
+                            rightDragging = false;
+                            holder.ReleaseMouseCapture();
+                            t.X = Canvas.GetLeft(holder);
+                            t.Y = Canvas.GetTop(holder);
+                            SaveBillFormatLayout(layout);
+                            onLayoutChanged?.Invoke();
+                            e.Handled = true;
+                        };
+
+                        Point resizeStart = new Point();
+                        double startW = 0;
+                        double startH = 0;
+                        bool resizing = false;
+                        resizeGrip.MouseLeftButtonDown += (s, e) =>
+                        {
+                            resizing = true;
+                            resizeStart = e.GetPosition(overlay);
+                            startW = holder.Width;
+                            startH = holder.Height;
+                            resizeGrip.CaptureMouse();
+                            e.Handled = true;
+                        };
+                        resizeGrip.MouseMove += (s, e) =>
+                        {
+                            if (!resizing) return;
+                            var p = e.GetPosition(overlay);
+                            var dx = p.X - resizeStart.X;
+                            var dy = p.Y - resizeStart.Y;
+                            holder.Width = Math.Max(40, startW + dx);
+                            holder.Height = Math.Max(20, startH + dy);
+                            if (tb is TextBox etb)
+                            {
+                                etb.Width = holder.Width;
+                                etb.Height = Math.Max(20, holder.Height - 18);
+                            }
+                        };
+                        resizeGrip.MouseLeftButtonUp += (s, e) =>
+                        {
+                            if (!resizing) return;
+                            resizing = false;
+                            resizeGrip.ReleaseMouseCapture();
+                            t.Width = holder.Width;
+                            t.Height = Math.Max(20, holder.Height - 18);
+                            SaveBillFormatLayout(layout);
+                            onLayoutChanged?.Invoke();
+                            e.Handled = true;
+                        };
+
+                        overlay.Children.Add(holder);
+                    }
+                }
+                root.Children.Add(overlay);
+            }
 
             return page;
         }
@@ -6192,7 +9624,11 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
 
         private static string BuildChargesLabelLines(decimal hamali, decimal detention, decimal other)
         {
+            var hasParticulars = hamali != 0m || detention != 0m || other != 0m;
+            if (!hasParticulars) return string.Empty;
             var lines = new List<string>();
+            // Keep one blank line so charge labels align with Amount column lines after freight.
+            lines.Add(string.Empty);
             if (hamali != 0m) lines.Add("Hamali");
             if (detention != 0m) lines.Add("Detention");
             if (other != 0m) lines.Add("Other");
@@ -6202,12 +9638,133 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
         private static string BuildAmountLines(decimal freight, decimal hamali, decimal detention, decimal other)
         {
             var lines = new List<string>();
+            // First line maps to freight (From/To transport charge).
             if (freight != 0m) lines.Add(freight.ToString("0.##"));
-            if (hamali != 0m) lines.Add(hamali.ToString("0.##"));
-            if (detention != 0m) lines.Add(detention.ToString("0.##"));
-            if (other != 0m) lines.Add(other.ToString("0.##"));
+
+            // Keep one visual gap before charge particulars so labels and amounts align.
+            var hasParticulars = hamali != 0m || detention != 0m || other != 0m;
+            if (hasParticulars)
+            {
+                lines.Add(string.Empty);
+                if (hamali != 0m) lines.Add(hamali.ToString("0.##"));
+                if (detention != 0m) lines.Add(detention.ToString("0.##"));
+                if (other != 0m) lines.Add(other.ToString("0.##"));
+            }
             return string.Join("\n", lines);
         }
+
+        private static string BuildAmountParticularLines(decimal freight, decimal hamali, decimal detention, decimal other)
+        {
+            var lines = new List<string>();
+            lines.Add("Freight");
+            if (hamali != 0m) lines.Add("Hamali");
+            if (detention != 0m) lines.Add("Detention");
+            if (other != 0m) lines.Add("Other");
+            return string.Join("\n", lines);
+        }
+
+        private List<BillPreviewLine> BuildBillPreviewLinesForGrid(List<BillEntry> billRows)
+        {
+            var output = new List<BillPreviewLine>();
+            var rows = (billRows ?? new List<BillEntry>()).Where(x => x.Total != 0m).ToList();
+            foreach (var x in rows)
+            {
+                var lrNo = (x.LRNo ?? string.Empty).Trim();
+                var lrDate = x.LRDate.HasValue ? x.LRDate.Value.ToString("dd.MM.yy") : string.Empty;
+                var invoiceValues = SplitInvoiceValues(GetLRInvoice(x.LRNo));
+                var vehicle = GetLRVehicleNo(x.LRNo);
+                var from = (x.From ?? string.Empty).Trim();
+                var to = (x.To ?? string.Empty).Trim();
+                var weight = (x.VehicleType ?? string.Empty).Trim();
+                var blockRows = new List<BillPreviewLine>();
+
+                // Base freight line
+                blockRows.Add(new BillPreviewLine
+                {
+                    LRNo = lrNo,
+                    LRDate = lrDate,
+                    Invoice = string.Empty,
+                    Vehicle = vehicle,
+                    From = from,
+                    To = to,
+                    ChargesBreakdown = string.IsNullOrWhiteSpace(from) && string.IsNullOrWhiteSpace(to)
+                        ? string.Empty
+                        : ((from ?? string.Empty) + "        " + (to ?? string.Empty)).Trim(),
+                    WeightOrType = weight,
+                    Rate = string.Empty,
+                    Amount = x.Freight != 0m ? x.Freight.ToString("0.##") : string.Empty
+                });
+
+                // Individual charge lines with amount in separate cells.
+                if (x.HML != 0m)
+                {
+                    blockRows.Add(new BillPreviewLine
+                    {
+                        LRNo = string.Empty, LRDate = string.Empty, Invoice = string.Empty, Vehicle = string.Empty,
+                        From = "Hamali", To = string.Empty,
+                        ChargesBreakdown = "Hamali",
+                        WeightOrType = string.Empty,
+                        Rate = string.Empty,
+                        Amount = x.HML.ToString("0.##")
+                    });
+                }
+                if (x.Detention != 0m)
+                {
+                    blockRows.Add(new BillPreviewLine
+                    {
+                        LRNo = string.Empty, LRDate = string.Empty, Invoice = string.Empty, Vehicle = string.Empty,
+                        From = "Detention", To = string.Empty,
+                        ChargesBreakdown = "Detention",
+                        WeightOrType = string.Empty,
+                        Rate = string.Empty,
+                        Amount = x.Detention.ToString("0.##")
+                    });
+                }
+                if (x.OTHR != 0m)
+                {
+                    blockRows.Add(new BillPreviewLine
+                    {
+                        LRNo = string.Empty, LRDate = string.Empty, Invoice = string.Empty, Vehicle = string.Empty,
+                        From = "Other", To = string.Empty,
+                        ChargesBreakdown = "Other",
+                        WeightOrType = string.Empty,
+                        Rate = string.Empty,
+                        Amount = x.OTHR.ToString("0.##")
+                    });
+                }
+
+                // Fill invoice values vertically inside the same C/N block rows first,
+                // so Hamali/Detention/Other rows are not pushed down by invoice rows.
+                for (int invIndex = 0; invIndex < invoiceValues.Count; invIndex++)
+                {
+                    if (invIndex < blockRows.Count)
+                    {
+                        blockRows[invIndex].Invoice = invoiceValues[invIndex];
+                    }
+                    else
+                    {
+                        // Only if invoices exceed available block rows, append invoice-only rows.
+                        blockRows.Add(new BillPreviewLine
+                        {
+                            LRNo = string.Empty,
+                            LRDate = string.Empty,
+                            Invoice = invoiceValues[invIndex],
+                            Vehicle = string.Empty,
+                            From = string.Empty,
+                            To = string.Empty,
+                            ChargesBreakdown = string.Empty,
+                            WeightOrType = string.Empty,
+                            Rate = string.Empty,
+                            Amount = string.Empty
+                        });
+                    }
+                }
+
+                output.AddRange(blockRows);
+            }
+            return output;
+        }
+
 
         private string GetLRInvoice(string lrNo)
         {
@@ -6231,6 +9788,56 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             {
                 return string.Empty;
             }
+        }
+
+        private static string FormatInvoiceForDisplay(string rawInvoice)
+        {
+            var raw = (rawInvoice ?? string.Empty).Trim();
+            if (raw.Length == 0) return string.Empty;
+
+            var normalized = raw.Replace("\r\n", "\n").Replace('\r', '\n');
+            var lines = new List<string>();
+            foreach (var line in normalized.Split('\n'))
+            {
+                var parts = line.Split(new[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0)
+                {
+                    var single = (line ?? string.Empty).Trim();
+                    if (single.Length > 0) lines.Add(single);
+                    continue;
+                }
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    var val = (parts[i] ?? string.Empty).Trim();
+                    if (val.Length > 0) lines.Add(val);
+                }
+            }
+
+            return string.Join("\n", lines);
+        }
+
+        private static List<string> SplitInvoiceValues(string rawInvoice)
+        {
+            var raw = (rawInvoice ?? string.Empty).Trim();
+            var result = new List<string>();
+            if (raw.Length == 0) return result;
+            var normalized = raw.Replace("\r\n", "\n").Replace('\r', '\n');
+            foreach (var line in normalized.Split('\n'))
+            {
+                var parts = line.Split(new[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0)
+                {
+                    var single = (line ?? string.Empty).Trim();
+                    if (single.Length > 0) result.Add(single);
+                    continue;
+                }
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    var val = (parts[i] ?? string.Empty).Trim();
+                    if (val.Length > 0) result.Add(val);
+                }
+            }
+            return result;
         }
 
         private string GetLRVehicleNo(string lrNo)
@@ -6357,7 +9964,24 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             }
             return string.Empty;
         }
-        private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e) { }
+        private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (CBSLedgerView != null && CBSLedgerView.Visibility == Visibility.Visible)
+            {
+                if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.N)
+                {
+                    e.Handled = true;
+                    CBSAddRow_Click(sender, new RoutedEventArgs());
+                    return;
+                }
+                if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.S)
+                {
+                    e.Handled = true;
+                    TryCommitGridEdits(CBSGrid);
+                    return;
+                }
+            }
+        }
         private void ToggleSidebar_Click(object sender, RoutedEventArgs e) { }
         private void TrackingRefresh_Click(object sender, RoutedEventArgs e) { if (TrackingSearchBox != null) TrackingSearchBox.Text = string.Empty; if (StatusFilterCombo != null) StatusFilterCombo.SelectedIndex = 0; if (TrackingLedgerGrid != null) TrackingLedgerGrid.UnselectAllCells(); }
     }

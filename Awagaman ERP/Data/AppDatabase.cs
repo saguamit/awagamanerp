@@ -248,6 +248,32 @@ CREATE TABLE IF NOT EXISTS Parties (
                     try { ExecuteNonQuery(connection, "ALTER TABLE Bills ADD COLUMN Remarks TEXT;"); } catch { }
 
                     ExecuteNonQuery(connection, @"
+CREATE TABLE IF NOT EXISTS CBSAccounts (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    Sr INTEGER NOT NULL,
+    AccountName TEXT NOT NULL UNIQUE,
+    IsActive INTEGER NOT NULL DEFAULT 1
+);");
+                    ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_CBSAccounts_AccountName ON CBSAccounts(AccountName);");
+
+                    ExecuteNonQuery(connection, @"
+CREATE TABLE IF NOT EXISTS CashBankStatements (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    Sr INTEGER NOT NULL,
+    CBS TEXT,
+    Date TEXT NOT NULL,
+    AccountName TEXT,
+    Particulars TEXT,
+    Remarks TEXT,
+    BankDr REAL NOT NULL DEFAULT 0,
+    BankCr REAL NOT NULL DEFAULT 0,
+    CashDr REAL NOT NULL DEFAULT 0,
+    CashCr REAL NOT NULL DEFAULT 0
+);");
+                    ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_CashBankStatements_Date ON CashBankStatements(Date);");
+                    ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_CashBankStatements_AccountName ON CashBankStatements(AccountName);");
+
+                    ExecuteNonQuery(connection, @"
 CREATE TABLE IF NOT EXISTS VehicleLedger (
     Id INTEGER PRIMARY KEY AUTOINCREMENT,
     Sr INTEGER NOT NULL,

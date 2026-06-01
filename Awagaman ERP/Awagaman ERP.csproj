@@ -44,6 +44,15 @@
     <Reference Include="Microsoft.Xaml.Behaviors, Version=1.1.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
       <HintPath>packages\Microsoft.Xaml.Behaviors.Wpf.1.1.19\lib\net45\Microsoft.Xaml.Behaviors.dll</HintPath>
     </Reference>
+    <Reference Include="Microsoft.ReportViewer.WinForms, Version=15.0.0.0, Culture=neutral, PublicKeyToken=89845dcd8080cc91, processorArchitecture=MSIL">
+      <HintPath>packages\Microsoft.ReportingServices.ReportViewerControl.Winforms.150.1652.0\lib\net40\Microsoft.ReportViewer.WinForms.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.ReportViewer.Common, Version=15.0.0.0, Culture=neutral, PublicKeyToken=89845dcd8080cc91, processorArchitecture=MSIL">
+      <HintPath>packages\Microsoft.ReportingServices.ReportViewerControl.Winforms.150.1652.0\lib\net40\Microsoft.ReportViewer.Common.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.SqlServer.Types, Version=14.0.0.0, Culture=neutral, PublicKeyToken=89845dcd8080cc91, processorArchitecture=MSIL">
+      <HintPath>packages\Microsoft.SqlServer.Types.14.0.314.76\lib\net40\Microsoft.SqlServer.Types.dll</HintPath>
+    </Reference>
     <Reference Include="DataGridExtensions">
       <HintPath>packages\DataGridExtensions.2.6.0\lib\net462\DataGridExtensions.dll</HintPath>
     </Reference>
@@ -67,6 +76,8 @@
     <Reference Include="System.Configuration" />
     <Reference Include="System.Data" />
     <Reference Include="System.Printing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="WindowsFormsIntegration" />
     <Reference Include="System.Web" />
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Xml" />
@@ -100,6 +111,8 @@
     <Compile Include="Data\PartyRepository.cs" />
     <Compile Include="Data\CommentRepository.cs" />
     <Compile Include="Data\BillRepository.cs" />
+    <Compile Include="Data\CBSAccountRepository.cs" />
+    <Compile Include="Data\CashBankStatementRepository.cs" />
     <Compile Include="Data\VehicleRepository.cs" />
     <Compile Include="Data\BillPrefixSettings.cs" />
     <Compile Include="ViewModels\ChallanViewModel.cs" />
@@ -199,6 +212,8 @@
     <Compile Include="Models\ChallanComment.cs" />
     <Compile Include="Models\LRComment.cs" />
     <Compile Include="Models\BillEntry.cs" />
+    <Compile Include="Models\CBSAccountEntry.cs" />
+    <Compile Include="Models\CashBankStatementEntry.cs" />
     <Compile Include="Models\VehicleEntry.cs" />
     <Compile Include="Models\BillComment.cs" />
     <Compile Include="Properties\AssemblyInfo.cs">
@@ -218,6 +233,9 @@
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
+    <None Include="Reports\BillReport.rdlc">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="packages.config" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
@@ -240,6 +258,10 @@
     </None>
     <None Include="..\bill format.png">
       <Link>bill format.png</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\bill format.xlsx">
+      <Link>bill format.xlsx</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Include="lr_format_layout.default.txt">

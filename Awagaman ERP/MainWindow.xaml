@@ -425,9 +425,8 @@
 
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
                                 <Button x:Name="TabDashboard" Content="Dashboard" Style="{StaticResource ActiveTabButtonStyle}" Width="160" Click="OpenDashboard_Click" />
-                                <Button Content="Sales Invoices" Style="{StaticResource TabButtonStyle}" Width="160" />
-                                <Button Content="Credit/Debit Notes" Style="{StaticResource TabButtonStyle}" Width="160" />
                                 <Button x:Name="TabBillLedger" Content="Bill Ledger" Style="{StaticResource TabButtonStyle}" Width="160" Click="OpenBillLedger_Click" />
+                                <Button x:Name="TabCBSLedger" Content="CBS" Style="{StaticResource TabButtonStyle}" Width="120" Click="OpenCBSLedger_Click" />
                                 <Button x:Name="TabPartyLedger" Content="Party Ledger" Style="{StaticResource TabButtonStyle}" Width="160" Click="OpenPartyLedgerTab_Click" />
                                 <Button x:Name="TabVehicleLedger" Content="Vehicle Ledger" Style="{StaticResource TabButtonStyle}" Width="160" Click="OpenVehicleLedgerTab_Click" />
                                 <Button x:Name="TabLRLedger" Content="LR Ledger" Style="{StaticResource TabButtonStyle}" Width="160" Click="OpenLRLedger_Click" />
@@ -973,6 +972,213 @@
                                     <DataGridTextColumn Header="Vehicle Type" Binding="{Binding VehicleType}" Width="120" />
                                 </DataGrid.Columns>
                             </DataGrid>
+                        </Grid>
+                    </Grid>
+
+                    <!-- CBS View -->
+                    <Grid x:Name="CBSLedgerView" Grid.Row="1" Grid.RowSpan="4" Visibility="Collapsed" Background="White">
+                            <Grid Margin="20">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0" Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock Grid.Column="0" Text="CASH BANK STATEMENT" FontSize="22" FontWeight="Bold" Foreground="#0F172A" VerticalAlignment="Center" />
+                                <TextBox Grid.Column="1" x:Name="CBSSearchBox" Width="180" Height="28" Margin="0,0,8,0" Padding="6,2" VerticalContentAlignment="Center" Text="Search CBS..." Foreground="#9CA3AF" TextChanged="CBSSearchBox_TextChanged" GotFocus="CBSSearchBox_GotFocus" LostFocus="CBSSearchBox_LostFocus" />
+                                <Button Grid.Column="2" Content="+ Account" Height="28" Margin="0,0,8,0" Padding="10,0" Background="#1565C0" Foreground="White" BorderThickness="0" Cursor="Hand" Click="CBSAddAccount_Click" />
+                                <Button Grid.Column="3" Content="+ Row" Height="28" Margin="0,0,8,0" Padding="10,0" Background="#00B08B" Foreground="White" BorderThickness="0" Cursor="Hand" Click="CBSAddRow_Click" />
+                                <Button Grid.Column="4" Content="🗑 Delete" Height="28" Padding="10,0" Background="#DC2626" Foreground="White" BorderThickness="0" Cursor="Hand" Click="CBSDeleteSelected_Click" />
+                            </Grid>
+
+                            <DataGrid x:Name="CBSGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
+                                      Background="White" BorderThickness="1" BorderBrush="#374151" RowHeight="30"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                      GridLinesVisibility="All" HeadersVisibility="Column" RowHeaderWidth="0"
+                                      SelectionMode="Extended" SelectionUnit="CellOrRowHeader"
+                                      ColumnHeaderStyle="{StaticResource DataGridHeaderStyle}"
+                                      Loaded="CBSGrid_Loaded"
+                                      CellEditEnding="CBSGrid_CellEditEnding"
+                                      PreviewKeyDown="CBSGrid_PreviewKeyDown"
+                                      SelectedCellsChanged="CBSGrid_SelectedCellsChanged"
+                                      PreviewMouseLeftButtonDown="CBSGrid_PreviewMouseLeftButtonDown"
+                                      PreviewMouseMove="CBSGrid_PreviewMouseMove"
+                                      PreviewMouseLeftButtonUp="CBSGrid_PreviewMouseLeftButtonUp"
+                                      PreviewMouseRightButtonUp="CBSGrid_PreviewMouseRightButtonUp"
+                                      Sorting="CBSGrid_SortingMenuOnly">
+                                <DataGrid.CellStyle>
+                                    <Style TargetType="DataGridCell">
+                                        <Setter Property="BorderBrush" Value="#D1D5DB" />
+                                        <Setter Property="BorderThickness" Value="0,0,1,1" />
+                                        <Style.Triggers>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter Property="Background" Value="#DBEAFE" />
+                                                <Setter Property="BorderBrush" Value="#93C5FD" />
+                                                <Setter Property="Foreground" Value="#0F172A" />
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGrid.CellStyle>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="CBS" Binding="{Binding CBS}" Width="90" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="Date" Binding="{Binding Date, StringFormat=dd.MM.yy}" Width="110" />
+                                    <DataGridTemplateColumn Header="A/C" SortMemberPath="AccountName" Width="220">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding AccountName}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                        <DataGridTemplateColumn.CellEditingTemplate>
+                                            <DataTemplate>
+                                                <ComboBox ItemsSource="{Binding ElementName=Root, Path=CBSAccountNames}"
+                                                          SelectedItem="{Binding AccountName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                          IsEditable="True"
+                                                          IsTextSearchEnabled="True"
+                                                          StaysOpenOnEdit="True" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellEditingTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Particulars" Binding="{Binding Particulars}" Width="330" />
+                                    <DataGridTextColumn Header="Remarks" Binding="{Binding Remarks}" Width="200" />
+
+                                    <DataGridTextColumn Header="Bank Dr" Binding="{Binding BankDr, StringFormat=0.##}" Width="120">
+                                        <DataGridTextColumn.ElementStyle>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="TextAlignment" Value="Right" />
+                                                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                                <Setter Property="Padding" Value="0,0,6,0" />
+                                            </Style>
+                                        </DataGridTextColumn.ElementStyle>
+                                        <DataGridTextColumn.CellStyle>
+                                            <Style TargetType="DataGridCell">
+                                                <Setter Property="Background" Value="#DFF4FB" />
+                                                <Setter Property="BorderBrush" Value="#9CCBDF" />
+                                                <Setter Property="BorderThickness" Value="0,0,1,1" />
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter Property="Background" Value="#BFDBFE" />
+                                                        <Setter Property="BorderBrush" Value="#60A5FA" />
+                                                        <Setter Property="Foreground" Value="#0F172A" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </DataGridTextColumn.CellStyle>
+                                        <DataGridTextColumn.EditingElementStyle>
+                                            <Style TargetType="TextBox">
+                                                <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                            </Style>
+                                        </DataGridTextColumn.EditingElementStyle>
+                                    </DataGridTextColumn>
+                                    <DataGridTextColumn Header="Bank Cr" Binding="{Binding BankCr, StringFormat=0.##}" Width="120">
+                                        <DataGridTextColumn.ElementStyle>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="TextAlignment" Value="Right" />
+                                                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                                <Setter Property="Padding" Value="0,0,6,0" />
+                                            </Style>
+                                        </DataGridTextColumn.ElementStyle>
+                                        <DataGridTextColumn.CellStyle>
+                                            <Style TargetType="DataGridCell">
+                                                <Setter Property="Background" Value="#DFF4FB" />
+                                                <Setter Property="BorderBrush" Value="#9CCBDF" />
+                                                <Setter Property="BorderThickness" Value="0,0,1,1" />
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter Property="Background" Value="#BFDBFE" />
+                                                        <Setter Property="BorderBrush" Value="#60A5FA" />
+                                                        <Setter Property="Foreground" Value="#0F172A" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </DataGridTextColumn.CellStyle>
+                                        <DataGridTextColumn.EditingElementStyle>
+                                            <Style TargetType="TextBox">
+                                                <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                            </Style>
+                                        </DataGridTextColumn.EditingElementStyle>
+                                    </DataGridTextColumn>
+                                    <DataGridTextColumn Header="Cash Dr" Binding="{Binding CashDr, StringFormat=0.##}" Width="120">
+                                        <DataGridTextColumn.ElementStyle>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="TextAlignment" Value="Right" />
+                                                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                                <Setter Property="Padding" Value="0,0,6,0" />
+                                            </Style>
+                                        </DataGridTextColumn.ElementStyle>
+                                        <DataGridTextColumn.CellStyle>
+                                            <Style TargetType="DataGridCell">
+                                                <Setter Property="Background" Value="#FCEBD9" />
+                                                <Setter Property="BorderBrush" Value="#E8C5A1" />
+                                                <Setter Property="BorderThickness" Value="0,0,1,1" />
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter Property="Background" Value="#BFDBFE" />
+                                                        <Setter Property="BorderBrush" Value="#60A5FA" />
+                                                        <Setter Property="Foreground" Value="#0F172A" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </DataGridTextColumn.CellStyle>
+                                        <DataGridTextColumn.EditingElementStyle>
+                                            <Style TargetType="TextBox">
+                                                <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                            </Style>
+                                        </DataGridTextColumn.EditingElementStyle>
+                                    </DataGridTextColumn>
+                                    <DataGridTextColumn Header="Cash Cr" Binding="{Binding CashCr, StringFormat=0.##}" Width="120">
+                                        <DataGridTextColumn.ElementStyle>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="TextAlignment" Value="Right" />
+                                                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                                <Setter Property="Padding" Value="0,0,6,0" />
+                                            </Style>
+                                        </DataGridTextColumn.ElementStyle>
+                                        <DataGridTextColumn.CellStyle>
+                                            <Style TargetType="DataGridCell">
+                                                <Setter Property="Background" Value="#FCEBD9" />
+                                                <Setter Property="BorderBrush" Value="#E8C5A1" />
+                                                <Setter Property="BorderThickness" Value="0,0,1,1" />
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter Property="Background" Value="#BFDBFE" />
+                                                        <Setter Property="BorderBrush" Value="#60A5FA" />
+                                                        <Setter Property="Foreground" Value="#0F172A" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </DataGridTextColumn.CellStyle>
+                                        <DataGridTextColumn.EditingElementStyle>
+                                            <Style TargetType="TextBox">
+                                                <EventSetter Event="GotKeyboardFocus" Handler="LRNumericTextBox_GotKeyboardFocus" />
+                                                <EventSetter Event="PreviewMouseLeftButtonDown" Handler="LRNumericTextBox_PreviewMouseLeftButtonDown" />
+                                            </Style>
+                                        </DataGridTextColumn.EditingElementStyle>
+                                    </DataGridTextColumn>
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <Border Grid.Row="2" Background="White" BorderBrush="#EEEEEE" BorderThickness="0,1,0,0" Padding="10,8">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="CBSRecordsTextBlock" Text="Records: 0" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextDark}" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="CBSSelectedSumTextBlock" Grid.Column="1" Text="" FontSize="13" FontWeight="Bold" Foreground="#10B981" VerticalAlignment="Center" HorizontalAlignment="Right" Visibility="Collapsed" />
+                                </Grid>
+                            </Border>
                         </Grid>
                     </Grid>
 
