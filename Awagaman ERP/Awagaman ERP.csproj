@@ -8,6 +8,7 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>Awagaman_ERP</RootNamespace>
     <AssemblyName>Awagaman ERP</AssemblyName>
+    <ApplicationIcon>logo.ico</ApplicationIcon>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <ProjectTypeGuids>{60dc8134-eba5-43b8-bcc9-bb4bc16c2548};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
@@ -111,6 +112,7 @@
     <Compile Include="Data\PartyRepository.cs" />
     <Compile Include="Data\CommentRepository.cs" />
     <Compile Include="Data\BillRepository.cs" />
+    <Compile Include="Data\BillReceiptRepository.cs" />
     <Compile Include="Data\CBSAccountRepository.cs" />
     <Compile Include="Data\CashBankStatementRepository.cs" />
     <Compile Include="Data\VehicleRepository.cs" />
@@ -212,6 +214,7 @@
     <Compile Include="Models\ChallanComment.cs" />
     <Compile Include="Models\LRComment.cs" />
     <Compile Include="Models\BillEntry.cs" />
+    <Compile Include="Models\BillReceiptEntry.cs" />
     <Compile Include="Models\CBSAccountEntry.cs" />
     <Compile Include="Models\CashBankStatementEntry.cs" />
     <Compile Include="Models\VehicleEntry.cs" />
@@ -244,6 +247,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+    <None Include="logo.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="..\LR format.png">
       <Link>LR format.png</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

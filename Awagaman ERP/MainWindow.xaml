@@ -21,7 +21,8 @@
         Title="Awagaman ERP - Challan Ledger" 
 
         Height="650" Width="1300"
-        Icon="logo.png"
+        Background="#EEEEEE"
+        Icon="pack://siteoforigin:,,,/logo.ico"
 
         WindowState="Maximized"
 
@@ -275,7 +276,7 @@
 
 
 
-    <Grid Background="{StaticResource AppBg}">
+    <Grid Background="#EEEEEE">
 
         <Grid.ColumnDefinitions>
 
@@ -606,19 +607,22 @@
                                     </Grid>
                                 </Border>
 
-                                <Border Grid.Column="4" Style="{StaticResource DashboardCardStyle}" Background="#FFFBEB">
+                                <Border x:Name="DashboardCbsCard" Grid.Column="4" Style="{StaticResource DashboardCardStyle}" Background="#EFF6FF"
+                                        Cursor="Hand" ToolTip="Open CBS ledger" MouseLeftButtonUp="DashboardCBSCard_Click">
                                     <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="*" />
                                         </Grid.RowDefinitions>
-                                        <Border Background="#D97706" CornerRadius="12" HorizontalAlignment="Left" Padding="10,5">
-                                            <TextBlock Text="Follow-up" Foreground="White" FontSize="11" FontWeight="SemiBold" />
+                                        <Border Background="#2563EB" CornerRadius="12" HorizontalAlignment="Left" Padding="10,5">
+                                            <TextBlock Text="CBS" Foreground="White" FontSize="11" FontWeight="SemiBold" />
                                         </Border>
                                         <StackPanel Grid.Row="1" Margin="0,16,0,0">
-                                            <TextBlock Text="Pending Bills" Style="{StaticResource DashboardMetricLabel}" Foreground="#B45309" />
-                                            <TextBlock x:Name="DashboardPendingBill" Text="0" Style="{StaticResource DashboardMetricValue}" Foreground="#92400E" Margin="0,4,0,0" />
-                                            <TextBlock Text="Delivered LR entries still waiting for a bill" Style="{StaticResource DashboardMetricHint}" Foreground="#B45309" Margin="0,6,0,0" />
+                                            <TextBlock Text="Bank Net" Style="{StaticResource DashboardMetricLabel}" Foreground="#1D4ED8" />
+                                            <TextBlock x:Name="DashboardCBSBankNet" Text="₹ 0.00" Style="{StaticResource DashboardMetricValue}" Foreground="#1E3A8A" Margin="0,4,0,0" />
+                                            <TextBlock Text="Cash Net" Style="{StaticResource DashboardMetricLabel}" Foreground="#0369A1" Margin="0,10,0,0" />
+                                            <TextBlock x:Name="DashboardCBSCashNet" Text="₹ 0.00" Style="{StaticResource DashboardMetricValue}" Foreground="#0F766E" Margin="0,4,0,0" />
+                                            <TextBlock Text="Open CBS ledger" Style="{StaticResource DashboardMetricHint}" Foreground="#1D4ED8" Margin="0,6,0,0" />
                                         </StackPanel>
                                     </Grid>
                                 </Border>
@@ -803,6 +807,7 @@
                                 <Button Content="↻" Background="{StaticResource ThemeGreen}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="BillRefresh_Click" ToolTip="Clear Filters" />
                                 <Button Content="📂" Background="#1565C0" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ImportBill_Click" ToolTip="Import Bills from CSV" />
                                 <Button Content="₹" Background="#00897B" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenReceiveBillAmount_Click" ToolTip="Receive Bill Amount" />
+                                <Button Content="🧾" Background="#6D4C41" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenBillReceiptHistory_Click" ToolTip="Bill Receipt History" />
                                 <Button Content="Σ" Background="#6D4C41" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenPartyBillSummary_Click" ToolTip="Party-wise Bill Due Summary" />
                                 <Button Content="⚙P" Background="#7C3AED" Foreground="White" BorderThickness="0" Width="30" Height="26" Margin="4,0" Cursor="Hand" Click="OpenBillPrefixSettings_Click" ToolTip="Bill Prefix Settings" />
                                 <Button Content="⚙" Background="{StaticResource ThemeBlue}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ShowBillColumnsMenu_Click" ToolTip="Show/Hide Columns" />
@@ -1176,9 +1181,20 @@
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="220" />
+                                        <ColumnDefinition Width="220" />
+                                        <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock x:Name="CBSRecordsTextBlock" Text="Records: 0" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextDark}" VerticalAlignment="Center" />
-                                    <TextBlock x:Name="CBSSelectedSumTextBlock" Grid.Column="1" Text="" FontSize="13" FontWeight="Bold" Foreground="#10B981" VerticalAlignment="Center" HorizontalAlignment="Right" Visibility="Collapsed" />
+                                    <StackPanel Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <TextBlock Text="Bank Net (Dr - Cr)" FontSize="11" Foreground="#64748B" HorizontalAlignment="Center" />
+                                        <TextBlock x:Name="CBSBankNetTextBlock" Text="₹ 0.00" FontSize="16" FontWeight="Bold" Foreground="#1D4ED8" HorizontalAlignment="Center" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="3" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <TextBlock Text="Cash Net (Dr - Cr)" FontSize="11" Foreground="#64748B" HorizontalAlignment="Center" />
+                                        <TextBlock x:Name="CBSCashNetTextBlock" Text="₹ 0.00" FontSize="16" FontWeight="Bold" Foreground="#D97706" HorizontalAlignment="Center" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="CBSSelectedSumTextBlock" Grid.Column="4" Text="" FontSize="13" FontWeight="Bold" Foreground="#10B981" VerticalAlignment="Center" HorizontalAlignment="Right" Visibility="Collapsed" />
                                 </Grid>
                             </Border>
                         </Grid>

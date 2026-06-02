@@ -18,6 +18,8 @@ Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
+SetupIconFile=c:\amit sagu\awagaman project\ATL ERP\Awagaman ERP\logo.ico
+UninstallDisplayIcon={app}\Awagaman ERP.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -32,14 +34,15 @@ Source: "{#MySourceDir}\Awagaman ERP.exe"; DestDir: "{app}"; Flags: ignoreversio
 Source: "{#MySourceDir}\Awagaman ERP.exe.config"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\*.png"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MySourceDir}\logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\lr_format_layout.default.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\de\*"; DestDir: "{app}\de"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MySourceDir}\x64\*"; DestDir: "{app}\x64"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MySourceDir}\x86\*"; DestDir: "{app}\x86"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\Awagaman ERP"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\Awagaman ERP"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\Awagaman ERP"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\logo.ico"
+Name: "{autodesktop}\Awagaman ERP"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; IconFilename: "{app}\logo.ico"
 
 [Run]
 Filename: "{tmp}\VC_redist.x64.exe"; Parameters: "/install /quiet /norestart"; Flags: runhidden waituntilterminated

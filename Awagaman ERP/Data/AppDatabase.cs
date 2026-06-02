@@ -331,6 +331,23 @@ CREATE TABLE IF NOT EXISTS VehicleLedger (
                         Id INTEGER PRIMARY KEY AUTOINCREMENT, BillId INTEGER NOT NULL,
                         Comment TEXT NOT NULL, CreatedAt TEXT NOT NULL);");
                     ExecuteNonQuery(c, "CREATE INDEX IF NOT EXISTS IX_BillComments_BillId ON BillComments(BillId);");
+                    ExecuteNonQuery(c, @"CREATE TABLE IF NOT EXISTS BillReceipts (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        BillNo TEXT NOT NULL,
+                        Party TEXT,
+                        BillTotal REAL NOT NULL DEFAULT 0,
+                        BillDate TEXT,
+                        ReceiptDate TEXT NOT NULL,
+                        RCVD REAL NOT NULL DEFAULT 0,
+                        TDS REAL NOT NULL DEFAULT 0,
+                        DED REAL NOT NULL DEFAULT 0,
+                        MOP TEXT,
+                        MR TEXT,
+                        Remarks TEXT,
+                        DueAfter REAL NOT NULL DEFAULT 0,
+                        CreatedAt TEXT NOT NULL);");
+                    try { ExecuteNonQuery(c, "ALTER TABLE BillReceipts ADD COLUMN BillDate TEXT;"); } catch { }
+                    ExecuteNonQuery(c, "CREATE INDEX IF NOT EXISTS IX_BillReceipts_BillNo ON BillReceipts(BillNo);");
                 }
             }
             catch { }
