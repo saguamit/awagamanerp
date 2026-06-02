@@ -327,6 +327,14 @@ namespace Awagaman_ERP
                 return;
             }
 
+            if (string.IsNullOrWhiteSpace(CurrentEntry?.BillParty))
+            {
+                MessageBox.Show("Bill Party is mandatory.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                BillPartyBox?.Focus();
+                BillPartyBox?.SelectAll();
+                return;
+            }
+
             // Auto-save parties to Party Ledger
             SavePartyIfNew(CurrentEntry.ConsignorName, CurrentEntry.ConsignorAddress, CurrentEntry.ConsignorGST);
             SavePartyIfNew(CurrentEntry.ConsigneeName, CurrentEntry.ConsigneeAddress, CurrentEntry.ConsigneeGST);
@@ -370,6 +378,11 @@ WHERE TRIM(LRNo) = TRIM(@lrNo)
             ShowSuggestions(ConsigneeNameBox?.Text, ConsigneeSuggestionList, ConsigneePopup);
         }
 
+        private void BillPartyBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            ShowSuggestions(BillPartyBox?.Text, BillPartySuggestionList, BillPartyPopup);
+        }
+
         private void LRFormWindow_PreviewKeyDown(object sender, KeyEventArgs e)
         {
             if (e.Key == Key.Down || e.Key == Key.Up || e.Key == Key.Enter || e.Key == Key.Escape)
@@ -395,6 +408,10 @@ WHERE TRIM(LRNo) = TRIM(@lrNo)
                             CurrentEntry.ConsigneeGST = val.GSTNo;
                         }
                     });
+                }
+                else if (BillPartyPopup.IsOpen && BillPartyBox.IsFocused)
+                {
+                    HandleSuggestionKey(e, BillPartySuggestionList, BillPartyBox, BillPartyPopup, _ => { });
                 }
             }
         }
@@ -483,6 +500,12 @@ WHERE TRIM(LRNo) = TRIM(@lrNo)
                     CurrentEntry.ConsigneeGST = val.GSTNo;
                 }
             });
+        }
+
+        private void BillPartySuggestionList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_ignoreSelection) return;
+            ApplySuggestion(BillPartySuggestionList, BillPartyBox, BillPartyPopup, _ => { });
         }
 
         private void ApplySuggestion(ListBox listBox, TextBox textBox, Popup popup, Action<PartyEntry> onFill)

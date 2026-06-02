@@ -821,6 +821,7 @@
                                       VirtualizingPanel.VirtualizationMode="Recycling"
                                       Background="White" BorderThickness="0" RowHeight="30" RowHeaderWidth="28" HeadersVisibility="All"
                                       FontSize="12" SelectionUnit="CellOrRowHeader"
+                                      BeginningEdit="BillLedgerGrid_BeginningEdit"
                                       CellEditEnding="BillLedgerGrid_CellEditEnding"
                                       PreviewKeyDown="DataGrid_PreviewKeyDown"
                                       PreviewMouseLeftButtonDown="BillLedgerGrid_PreviewMouseLeftButtonDown"
@@ -1004,6 +1005,7 @@
                                       ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"
                                       GridLinesVisibility="All" HeadersVisibility="All" RowHeaderWidth="28"
                                       SelectionMode="Extended" SelectionUnit="CellOrRowHeader"
+                                      FontSize="12.5"
                                       ColumnHeaderStyle="{StaticResource DataGridHeaderStyle}"
                                       Loaded="CBSGrid_Loaded"
                                       CellEditEnding="CBSGrid_CellEditEnding"
@@ -1012,6 +1014,7 @@
                                       PreviewMouseLeftButtonDown="CBSGrid_PreviewMouseLeftButtonDown"
                                       PreviewMouseMove="CBSGrid_PreviewMouseMove"
                                       PreviewMouseLeftButtonUp="CBSGrid_PreviewMouseLeftButtonUp"
+                                      MouseDoubleClick="CBSGrid_MouseDoubleClick"
                                       PreviewMouseRightButtonUp="CBSGrid_PreviewMouseRightButtonUp"
                                       Sorting="CBSGrid_SortingMenuOnly">
                                 <DataGrid.CellStyle>
@@ -1378,6 +1381,7 @@
                                          PreviewMouseMove="LedgerGrid_PreviewMouseMove"
                                          PreviewMouseLeftButtonUp="LedgerGrid_PreviewMouseLeftButtonUp"
                                          SelectedCellsChanged="LedgerGrid_SelectedCellsChanged"
+                                         BeginningEdit="LedgerGrid_BeginningEdit"
                                          CellEditEnding="LedgerGrid_CellEditEnding"
                                          PreviewKeyDown="DataGrid_PreviewKeyDown"
                                          PreviewMouseRightButtonUp="LedgerGrid_PreviewMouseRightButtonUp"
@@ -1615,7 +1619,7 @@
 
                                         <DataGridTextColumn Header="Bill Amount" Binding="{Binding BillAmount}" Width="70" IsReadOnly="True" Visibility="{Binding DataContext.ShowBillAmount, ElementName=Root, Converter={StaticResource BoolToVis}}" />
 
-                                        <DataGridTextColumn Header="Margin" Binding="{Binding Margin}" Width="60" Visibility="{Binding DataContext.ShowMargin, ElementName=Root, Converter={StaticResource BoolToVis}}" />
+                                        <DataGridTextColumn Header="Margin" Binding="{Binding Margin}" Width="60" IsReadOnly="True" Visibility="{Binding DataContext.ShowMargin, ElementName=Root, Converter={StaticResource BoolToVis}}" />
 
                                     </DataGrid.Columns>
 

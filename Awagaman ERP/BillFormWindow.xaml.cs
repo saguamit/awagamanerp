@@ -259,7 +259,7 @@ namespace Awagaman_ERP
                         cmd.CommandText = @"SELECT lr.Id, lr.LRNo, lr.BillNo, lr.ConsignorName, lr.BillParty, lr.FromLocation, lr.ToLocation, lr.VehicleNo, lr.VehicleType, lr.Date,
                             lr.TotalFreight, lr.Hamali, lr.Detention, lr.Others, lr.StCharge, lr.NEFT, lr.CASH, lr.TDS, lr.Ded
                             FROM LREntries lr
-                            WHERE (lr.BillNo IS NULL OR lr.BillNo = '')
+                            WHERE (lr.BillNo IS NULL OR TRIM(lr.BillNo) = '')
                             ORDER BY lr.LRNo;";
                         using (var r = cmd.ExecuteReader())
                         {
@@ -267,7 +267,7 @@ namespace Awagaman_ERP
                             {
                                 var consignorName = (r["ConsignorName"] as string) ?? string.Empty;
                                 var billParty = (r["BillParty"] as string) ?? string.Empty;
-                                var effectiveParty = string.IsNullOrWhiteSpace(billParty) ? consignorName : billParty;
+                                var effectiveParty = (billParty ?? string.Empty).Trim();
                                 if (!string.IsNullOrWhiteSpace(filterParty) && !IsSameParty(effectiveParty, filterParty))
                                     continue;
 
@@ -418,17 +418,24 @@ namespace Awagaman_ERP
             }
         }
 
+        private static string NormalizePartyKey(string value)
+        {
+            var raw = (value ?? string.Empty).Trim();
+            if (raw.Length == 0) return string.Empty;
+            var parts = raw.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            return string.Join(" ", parts).ToUpperInvariant();
+        }
+
         private static bool IsSameParty(string left, string right)
         {
-            return string.Equals((left ?? string.Empty).Trim(), (right ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
+            return string.Equals(NormalizePartyKey(left), NormalizePartyKey(right), StringComparison.Ordinal);
         }
 
         private static string GetPreferredBillParty(LREntry lr)
         {
             if (lr == null) return string.Empty;
             var billParty = (lr.BillParty ?? string.Empty).Trim();
-            if (!string.IsNullOrWhiteSpace(billParty)) return billParty;
-            return (lr.ConsignorName ?? string.Empty).Trim();
+            return billParty;
         }
 
         private void LRNoBox_LostFocus(object sender, RoutedEventArgs e)

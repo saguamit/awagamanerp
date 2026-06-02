@@ -150,6 +150,14 @@ namespace Awagaman_ERP.Data
                 {
                     Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "Bank A/c", IsActive = true });
                 }
+                if (FindByName("LHS") == null)
+                {
+                    Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "LHS", IsActive = true });
+                }
+                if (FindByName("BFRS") == null)
+                {
+                    Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "BFRS", IsActive = true });
+                }
             }
             catch { }
         }

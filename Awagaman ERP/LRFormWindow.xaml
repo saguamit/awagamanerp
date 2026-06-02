@@ -426,8 +426,28 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
-                                <TextBlock Text="Bill Party" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CurrentEntry.BillParty, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                                <TextBlock Style="{StaticResource FieldLabelStyle}">
+                                    <Run Text="Bill Party" />
+                                    <Run Text=" *" Foreground="#D32F2F" />
+                                </TextBlock>
+                                <Grid>
+                                    <TextBox x:Name="BillPartyBox"
+                                             Text="{Binding CurrentEntry.BillParty, UpdateSourceTrigger=PropertyChanged}"
+                                             Style="{StaticResource InputTextBoxStyle}"
+                                             TextChanged="BillPartyBox_TextChanged" />
+                                    <Popup x:Name="BillPartyPopup"
+                                           PlacementTarget="{Binding ElementName=BillPartyBox}"
+                                           Placement="Bottom"
+                                           StaysOpen="False"
+                                           Width="{Binding ActualWidth, ElementName=BillPartyBox}">
+                                        <Border BorderBrush="#AAA" BorderThickness="1" Background="White" CornerRadius="4">
+                                            <ListBox x:Name="BillPartySuggestionList"
+                                                     MaxHeight="200"
+                                                     FontSize="13"
+                                                     SelectionChanged="BillPartySuggestionList_SelectionChanged" />
+                                        </Border>
+                                    </Popup>
+                                </Grid>
                             </StackPanel>
                         </Grid>
                         </StackPanel>
