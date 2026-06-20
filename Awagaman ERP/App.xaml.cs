@@ -8,16 +8,26 @@ using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows;
 using System.Diagnostics;
+using Awagaman_ERP.Data;
 
 namespace Awagaman_ERP
 {
     public partial class App : Application
     {
+        private static Process _localApiProcess;
+
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
             TryRegisterSyncfusionLicense();
+            TryStartLocalApiServer();
             _ = CheckForUpdatesAsync(showUpToDateMessage: false);
+        }
+
+        protected override void OnExit(ExitEventArgs e)
+        {
+            TryStopLocalApiServer();
+            base.OnExit(e);
         }
 
         private static void TryRegisterSyncfusionLicense()
@@ -38,6 +48,109 @@ namespace Awagaman_ERP
             catch
             {
                 // Non-fatal by design.
+            }
+        }
+
+        private static void TryStartLocalApiServer()
+        {
+            try
+            {
+                if (!BackendSettings.RunLocalApiServer)
+                {
+                    return;
+                }
+
+                var path = BackendSettings.LocalApiExecutablePath;
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    return;
+                }
+
+                if (!Path.IsPathRooted(path))
+                {
+                    path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, path);
+                }
+
+                if (!File.Exists(path))
+                {
+                    return;
+                }
+
+                if (_localApiProcess != null && !_localApiProcess.HasExited)
+                {
+                    return;
+                }
+
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = path,
+                    WorkingDirectory = Path.GetDirectoryName(path) ?? AppDomain.CurrentDomain.BaseDirectory,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+
+                _localApiProcess = Process.Start(startInfo);
+                WaitForLocalApiReadyAsync().GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // Server mode should not block app startup if API cannot launch.
+            }
+        }
+
+        private static void TryStopLocalApiServer()
+        {
+            try
+            {
+                if (_localApiProcess == null)
+                {
+                    return;
+                }
+
+                if (!_localApiProcess.HasExited)
+                {
+                    _localApiProcess.Kill();
+                    _localApiProcess.WaitForExit(5000);
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _localApiProcess = null;
+            }
+        }
+
+        private static async Task WaitForLocalApiReadyAsync()
+        {
+            try
+            {
+                using (var client = new HttpClient())
+                {
+                    var baseUrl = BackendSettings.ApiBaseUrl;
+                    var healthUrl = baseUrl.EndsWith("/") ? baseUrl + "api/health" : baseUrl + "/api/health";
+                    for (var i = 0; i < 30; i++)
+                    {
+                        try
+                        {
+                            var response = await client.GetAsync(healthUrl).ConfigureAwait(false);
+                            if (response.IsSuccessStatusCode)
+                            {
+                                return;
+                            }
+                        }
+                        catch
+                        {
+                        }
+
+                        await Task.Delay(500).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch
+            {
             }
         }
 

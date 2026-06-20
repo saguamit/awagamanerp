@@ -1,8 +1,9 @@
 #define MyAppName "Awagaman ERP"
-#define MyAppVersion "1.0.11"
+#define MyAppVersion "1.0.12"
 #define MyAppPublisher "Awagaman ERP"
 #define MyAppExeName "Awagaman ERP.exe"
 #define MySourceDir "c:\amit sagu\awagaman project\ATL ERP\Awagaman ERP\bin\Release"
+#define MyApiSourceDir "c:\amit sagu\awagaman project\ATL ERP\Awagaman.Api\bin\Release\net8.0\publish"
 
 [Setup]
 AppId={{CC0D8D4A-A778-4CD8-9F47-D4C6AA12E33A}
@@ -36,6 +37,7 @@ Source: "{#MySourceDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\*.png"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\lr_format_layout.default.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyApiSourceDir}\*"; DestDir: "{app}\ApiServer"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MySourceDir}\de\*"; DestDir: "{app}\de"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MySourceDir}\x64\*"; DestDir: "{app}\x64"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MySourceDir}\x86\*"; DestDir: "{app}\x86"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -48,4 +50,99 @@ Name: "{autodesktop}\Awagaman ERP"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Filename: "{tmp}\VC_redist.x64.exe"; Parameters: "/install /quiet /norestart"; Flags: runhidden waituntilterminated
 Filename: "{tmp}\VC_redist.x86.exe"; Parameters: "/install /quiet /norestart"; Flags: runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,Awagaman ERP}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+var
+  InstallModePage: TInputOptionWizardPage;
+  ServerUrlPage: TInputQueryWizardPage;
+
+function NormalizeApiUrl(const Value: string): string;
+var
+  Text: string;
+begin
+  Text := Trim(Value);
+  if Text = '' then
+    Text := 'http://localhost:5088';
+  if Pos('http://', LowerCase(Text)) <> 1 then
+    if Pos('https://', LowerCase(Text)) <> 1 then
+      Text := 'http://' + Text;
+  if (Length(Text) > 0) and (Text[Length(Text)] = '/') then
+    Delete(Text, Length(Text), 1);
+  Result := Text;
+end;
+
+function NetworkSettingsPath: string;
+begin
+  Result := ExpandConstant('{commonappdata}\Awagaman ERP\network.settings.json');
+end;
+
+procedure InitializeWizard;
+begin
+  InstallModePage := CreateInputOptionPage(
+    wpSelectDir,
+    'Connection Mode',
+    'Choose how this installation should connect to data',
+    'Select server mode for this PC, or client mode to point to another PC.',
+    False,
+    False);
+  InstallModePage.Add('This PC is the server and should start the API locally');
+  InstallModePage.Add('This PC is a client and should connect to another server');
+  InstallModePage.SelectedValueIndex := 0;
+
+  ServerUrlPage := CreateInputQueryPage(
+    InstallModePage.ID,
+    'Server Address',
+    'Enter the server URL for client installs',
+    'Leave the default when this PC is the server.');
+  ServerUrlPage.Add('API Base URL:', False);
+  ServerUrlPage.Values[0] := 'http://localhost:5088';
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = ServerUrlPage.ID then
+  begin
+    if InstallModePage.SelectedValueIndex = 0 then
+      ServerUrlPage.Values[0] := 'http://localhost:5088';
+  end;
+end;
+
+procedure WriteNetworkSettings;
+var
+  JsonText: string;
+  ApiUrl: string;
+  DirName: string;
+  ServerMode: Boolean;
+begin
+  ServerMode := InstallModePage.SelectedValueIndex = 0;
+  if ServerMode then
+    ApiUrl := 'http://localhost:5088'
+  else
+    ApiUrl := NormalizeApiUrl(ServerUrlPage.Values[0]);
+
+  DirName := ExtractFileDir(NetworkSettingsPath);
+  if not DirExists(DirName) then
+    ForceDirectories(DirName);
+
+  JsonText :=
+    '{' + #13#10 +
+    '  "UseRemoteApi": true,' + #13#10 +
+    '  "ApiBaseUrl": "' + ApiUrl + '",' + #13#10 +
+    '  "RunLocalApiServer": __SERVERMODE__,' + #13#10 +
+    '  "LocalApiExecutablePath": "{app}\ApiServer\Awagaman.Api.exe"' + #13#10 +
+    '}';
+
+  StringChangeEx(JsonText, '{app}', ExpandConstant('{app}'), True);
+  if ServerMode then
+    StringChangeEx(JsonText, '__SERVERMODE__', 'true', True)
+  else
+    StringChangeEx(JsonText, '__SERVERMODE__', 'false', True);
+  SaveStringToFile(NetworkSettingsPath, JsonText, False);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    WriteNetworkSettings;
+end;
 
