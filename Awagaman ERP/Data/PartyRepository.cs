@@ -11,6 +11,10 @@ namespace Awagaman_ERP.Data
 
         public List<PartyEntry> GetAll()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<PartyEntry>("api/parties");
+            }
             var list = new List<PartyEntry>();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT * FROM Parties ORDER BY Sr, Id;", c))
@@ -33,6 +37,11 @@ namespace Awagaman_ERP.Data
         public PartyEntry FindByName(string name)
         {
             if (string.IsNullOrWhiteSpace(name)) return null;
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<PartyEntry>("api/parties")
+                    .Find(p => string.Equals((p.PartyName ?? string.Empty).Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase));
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT * FROM Parties WHERE LOWER(PartyName) = LOWER(@name)", c))
             {
@@ -56,6 +65,13 @@ namespace Awagaman_ERP.Data
         {
             var list = new List<string>();
             if (string.IsNullOrWhiteSpace(filter)) return list;
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<PartyEntry>("api/parties")
+                    .FindAll(p => !string.IsNullOrWhiteSpace(p.PartyName) &&
+                                  p.PartyName.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
+                    .ConvertAll(p => p.PartyName);
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT PartyName FROM Parties WHERE PartyName LIKE @f ORDER BY PartyName LIMIT 20", c))
             {
@@ -70,6 +86,18 @@ namespace Awagaman_ERP.Data
         public void Upsert(PartyEntry entry)
         {
             if (entry == null || string.IsNullOrWhiteSpace(entry.PartyName)) return;
+            if (BackendSettings.UseRemoteApi)
+            {
+                if (entry.Id <= 0)
+                {
+                    entry.Id = RemoteApiClient.PostAndReadInt("api/parties", entry);
+                }
+                else
+                {
+                    RemoteApiClient.Put($"api/parties/{entry.Id}", entry);
+                }
+                return;
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = c.CreateCommand())
             {
@@ -92,6 +120,23 @@ namespace Awagaman_ERP.Data
                     cmd.Parameters.AddWithValue("@gst", (object)entry.GSTNo ?? "");
                     cmd.ExecuteNonQuery();
                 }
+            }
+        }
+
+        public void Delete(PartyEntry entry)
+        {
+            if (entry == null || entry.Id <= 0) return;
+            if (BackendSettings.UseRemoteApi)
+            {
+                RemoteApiClient.Delete($"api/parties/{entry.Id}");
+                return;
+            }
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand("DELETE FROM Parties WHERE Id = @id;", c))
+            {
+                cmd.Parameters.AddWithValue("@id", entry.Id);
+                c.Open();
+                cmd.ExecuteNonQuery();
             }
         }
     }

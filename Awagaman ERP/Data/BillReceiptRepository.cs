@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Linq;
 using Awagaman_ERP.Models;
 
 namespace Awagaman_ERP.Data
@@ -15,6 +16,16 @@ namespace Awagaman_ERP.Data
 
         public List<BillReceiptEntry> GetByBillNo(string billNo)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                billNo = (billNo ?? string.Empty).Trim();
+                if (billNo.Length == 0) return new List<BillReceiptEntry>();
+                return RemoteApiClient.GetList<BillReceiptEntry>("api/bill-receipts")
+                    .FindAll(x => string.Equals((x.BillNo ?? string.Empty).Trim(), billNo, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(x => x.ReceiptDate)
+                    .ThenBy(x => x.Id)
+                    .ToList();
+            }
             var list = new List<BillReceiptEntry>();
             billNo = (billNo ?? string.Empty).Trim();
             if (billNo.Length == 0) return list;
@@ -39,6 +50,10 @@ ORDER BY ReceiptDate ASC, Id ASC;", c))
 
         public List<BillReceiptEntry> GetAll()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<BillReceiptEntry>("api/bill-receipts");
+            }
             var list = new List<BillReceiptEntry>();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT * FROM BillReceipts ORDER BY ReceiptDate DESC, Id DESC;", c))
@@ -56,6 +71,11 @@ ORDER BY ReceiptDate ASC, Id ASC;", c))
         public void Add(BillReceiptEntry entry)
         {
             if (entry == null) return;
+            if (BackendSettings.UseRemoteApi)
+            {
+                entry.Id = RemoteApiClient.PostAndReadInt("api/bill-receipts", entry);
+                return;
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = c.CreateCommand())
             {
@@ -78,6 +98,23 @@ VALUES
                 cmd.Parameters.AddWithValue("@Remarks", (object)entry.Remarks ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@DueAfter", entry.DueAfter);
                 cmd.Parameters.AddWithValue("@CreatedAt", entry.CreatedAt == default(DateTime) ? DateTime.Now.ToString("o") : entry.CreatedAt.ToString("o"));
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        public void Delete(BillReceiptEntry entry)
+        {
+            if (entry == null || entry.Id <= 0) return;
+            if (BackendSettings.UseRemoteApi)
+            {
+                RemoteApiClient.Delete($"api/bill-receipts/{entry.Id}");
+                return;
+            }
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand("DELETE FROM BillReceipts WHERE Id = @id;", c))
+            {
+                cmd.Parameters.AddWithValue("@id", entry.Id);
+                c.Open();
                 cmd.ExecuteNonQuery();
             }
         }

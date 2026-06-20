@@ -341,7 +341,7 @@
 
                         <Button Content="Imports" Tag="📥" Style="{StaticResource SidebarButtonStyle}" />
                         <Button Content="Reconciliation" Tag="📄" Style="{StaticResource SidebarButtonStyle}" />
-                        <Button Content="Reports" Tag="⊞" Style="{StaticResource SidebarButtonStyle}" />
+                        <Button Content="Reports" Tag="⊞" Style="{StaticResource SidebarButtonStyle}" Click="OpenReports_Click" />
 
                     </StackPanel>
 
@@ -453,7 +453,7 @@
                                 <Setter Property="Background" Value="White" />
                                 <Setter Property="BorderBrush" Value="#DDE6F4" />
                                 <Setter Property="BorderThickness" Value="1" />
-                                <Setter Property="Padding" Value="20" />
+                                <Setter Property="Padding" Value="18" />
                                 <Setter Property="Effect">
                                     <Setter.Value>
                                         <DropShadowEffect BlurRadius="18" ShadowDepth="2" Color="#1A335A" Opacity="0.10" />
@@ -476,44 +476,47 @@
                             </Style>
                             <Style x:Key="DashboardSectionTitle" TargetType="TextBlock">
                                 <Setter Property="Foreground" Value="#153B63" />
-                                <Setter Property="FontSize" Value="16" />
+                                <Setter Property="FontSize" Value="15" />
                                 <Setter Property="FontWeight" Value="Bold" />
                             </Style>
                             <Style x:Key="DashboardSectionSubTitle" TargetType="TextBlock">
                                 <Setter Property="Foreground" Value="#64748B" />
-                                <Setter Property="FontSize" Value="11" />
+                                <Setter Property="FontSize" Value="10.5" />
                             </Style>
                             <Style x:Key="DashboardGridStyle" TargetType="DataGrid">
                                 <Setter Property="Background" Value="White" />
                                 <Setter Property="BorderThickness" Value="0" />
                                 <Setter Property="HeadersVisibility" Value="Column" />
                                 <Setter Property="GridLinesVisibility" Value="Horizontal" />
-                                <Setter Property="HorizontalGridLinesBrush" Value="#E8EEF6" />
+                                <Setter Property="HorizontalGridLinesBrush" Value="#E3EAF4" />
                                 <Setter Property="RowBackground" Value="White" />
                                 <Setter Property="AlternatingRowBackground" Value="#F8FBFF" />
                                 <Setter Property="AlternationCount" Value="2" />
-                                <Setter Property="FontSize" Value="12" />
+                                <Setter Property="FontSize" Value="12.5" />
                                 <Setter Property="RowHeight" Value="30" />
                                 <Setter Property="CanUserAddRows" Value="False" />
                                 <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
                                 <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
                                 <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
                                 <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel" />
+                                <Setter Property="BorderBrush" Value="#DDE6F4" />
+                                <Setter Property="BorderThickness" Value="1" />
                             </Style>
                             <Style x:Key="DashboardTableRowStyle" TargetType="DataGridRow">
                                 <Setter Property="MinHeight" Value="34" />
                                 <Setter Property="Background" Value="White" />
-                                <Setter Property="BorderThickness" Value="0" />
+                                <Setter Property="BorderThickness" Value="0,0,0,1" />
+                                <Setter Property="BorderBrush" Value="#E7EDF6" />
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                                 <Setter Property="VerticalContentAlignment" Value="Center" />
+                                <Setter Property="SnapsToDevicePixels" Value="True" />
                                 <Style.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
                                         <Setter Property="Background" Value="#F5F9FF" />
                                     </Trigger>
                                     <Trigger Property="IsSelected" Value="True">
-                                        <Setter Property="Background" Value="#E8F0FF" />
-                                        <Setter Property="BorderBrush" Value="#B5C9F5" />
-                                        <Setter Property="BorderThickness" Value="1" />
+                                        <Setter Property="Background" Value="#EAF2FF" />
+                                        <Setter Property="BorderBrush" Value="#B8CDF8" />
                                     </Trigger>
                                 </Style.Triggers>
                             </Style>
@@ -536,9 +539,9 @@
                                 <Setter Property="Background" Value="#7C3AED" />
                                 <Setter Property="Foreground" Value="White" />
                                 <Setter Property="BorderThickness" Value="0" />
-                                <Setter Property="Padding" Value="14,0" />
-                                <Setter Property="Height" Value="26" />
-                                <Setter Property="MinWidth" Value="0" />
+                                <Setter Property="Padding" Value="12,0" />
+                                <Setter Property="Height" Value="28" />
+                                <Setter Property="MinWidth" Value="84" />
                                 <Setter Property="FontSize" Value="10" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
                                 <Setter Property="Cursor" Value="Hand" />
@@ -546,7 +549,10 @@
                                 <Setter Property="Template">
                                     <Setter.Value>
                                         <ControlTemplate TargetType="Button">
-                                            <Border Background="{TemplateBinding Background}" CornerRadius="13" Padding="{TemplateBinding Padding}">
+                                            <Border Background="{TemplateBinding Background}" CornerRadius="15" Padding="{TemplateBinding Padding}">
+                                                <Border.Effect>
+                                                    <DropShadowEffect BlurRadius="8" ShadowDepth="1" Color="#1A335A" Opacity="0.12" />
+                                                </Border.Effect>
                                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
                                         </ControlTemplate>
@@ -556,10 +562,9 @@
                         </Grid.Resources>
 
                         <Grid Margin="24">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
 
                             <Grid Grid.Row="0">
                                 <Grid.ColumnDefinitions>
@@ -590,7 +595,8 @@
                                     </Grid>
                                 </Border>
 
-                                <Border Grid.Column="2" Style="{StaticResource DashboardCardStyle}" Background="#ECFDF3">
+                                <Border x:Name="DashboardBillsCard" Grid.Column="2" Style="{StaticResource DashboardCardStyle}" Background="#ECFDF3"
+                                        Cursor="Hand" ToolTip="Open pending bills window" MouseLeftButtonUp="DashboardBillsCard_Click">
                                     <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
@@ -627,7 +633,8 @@
                                     </Grid>
                                 </Border>
 
-                                <Border Grid.Column="6" Style="{StaticResource DashboardCardStyle}" Background="#F5F3FF">
+                                <Border x:Name="DashboardBookingsCard" Grid.Column="6" Style="{StaticResource DashboardCardStyle}" Background="#F5F3FF"
+                                        Cursor="Hand" ToolTip="Open LR creation form" MouseLeftButtonUp="DashboardBookingsCard_Click">
                                     <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
@@ -641,135 +648,6 @@
                                             <TextBlock x:Name="DashboardNewBookings" Text="0" Style="{StaticResource DashboardMetricValue}" Foreground="#5B21B6" Margin="0,4,0,0" />
                                             <TextBlock Text="Challans without an LR number yet" Style="{StaticResource DashboardMetricHint}" Foreground="#6D28D9" Margin="0,6,0,0" />
                                         </StackPanel>
-                                    </Grid>
-                                </Border>
-                            </Grid>
-
-                            <Grid Grid.Row="1" Margin="0,18,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="18" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-
-                                <Border Grid.Column="0" Style="{StaticResource DashboardCardStyle}">
-                                    <Grid>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="*" />
-                                        </Grid.RowDefinitions>
-                                        <Grid Grid.Row="0" Margin="0,0,0,14">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel>
-                                                <TextBlock Text="New Bookings" Style="{StaticResource DashboardSectionTitle}" />
-                                                <TextBlock Text="Challans that need an LR number assigned." Style="{StaticResource DashboardSectionSubTitle}" Margin="0,4,0,0" />
-                                            </StackPanel>
-                                            <Border Grid.Column="1" Background="#F3E8FF" CornerRadius="999" Padding="12,5" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding DashboardNewBookings.Text, ElementName=DashboardNewBookings}" Foreground="#6D28D9" FontSize="11" FontWeight="Bold" />
-                                            </Border>
-                                        </Grid>
-                                        <DataGrid x:Name="NewBookingGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
-                                                  Style="{StaticResource DashboardGridStyle}"
-                                                  RowStyle="{StaticResource DashboardTableRowStyle}"
-                                                  CellStyle="{StaticResource DashboardTableCellStyle}"
-                                                  SelectionUnit="FullRow"
-                                                  CellEditEnding="NewBookingGrid_CellEditEnding">
-                                            <DataGrid.Resources>
-                                                <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource DataGridHeaderStyle}">
-                                                    <Setter Property="Background" Value="#F6F0FF" />
-                                                    <Setter Property="Foreground" Value="#5B21B6" />
-                                                    <Setter Property="Padding" Value="12,9" />
-                                                </Style>
-                                                <Style TargetType="ScrollBar">
-                                                    <Style.Triggers>
-                                                        <Trigger Property="Orientation" Value="Vertical">
-                                                            <Setter Property="Width" Value="14" />
-                                                        </Trigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </DataGrid.Resources>
-                                            <DataGrid.Columns>
-                                                <DataGridTextColumn Header="Challan No" Binding="{Binding ChallanNumber}" Width="120" FontWeight="SemiBold" />
-                                                <DataGridTextColumn Header="From" Binding="{Binding From}" Width="90" />
-                                                <DataGridTextColumn Header="To" Binding="{Binding To}" Width="90" />
-                                                <DataGridTextColumn Header="Vehicle No" Binding="{Binding VehicleNumber}" Width="110" />
-                                                <DataGridTextColumn Header="Broker" Binding="{Binding BrokerName}" Width="130" />
-                                                <DataGridTemplateColumn Header="" Width="112">
-                                                    <DataGridTemplateColumn.CellTemplate>
-                                                        <DataTemplate>
-                                                            <Button Content="Create LR" Style="{StaticResource DashboardActionButtonStyle}" ToolTip="Create LR"
-                                                                    Cursor="Hand" Click="DashboardMakeLR_Click" Tag="{Binding}"
-                                                                    HorizontalAlignment="Right" Margin="0,0,8,0" />
-                                                        </DataTemplate>
-                                                    </DataGridTemplateColumn.CellTemplate>
-                                                </DataGridTemplateColumn>
-                                            </DataGrid.Columns>
-                                        </DataGrid>
-                                    </Grid>
-                                </Border>
-
-                                <Border Grid.Column="2" Style="{StaticResource DashboardCardStyle}" Background="#FFFDF5">
-                                    <Grid>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="*" />
-                                        </Grid.RowDefinitions>
-                                        <Grid Grid.Row="0" Margin="0,0,0,14">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel>
-                                                <TextBlock Text="Pending Bills" Style="{StaticResource DashboardSectionTitle}" />
-                                                <TextBlock Text="Delivered LR entries that still need billing." Style="{StaticResource DashboardSectionSubTitle}" Margin="0,4,0,0" />
-                                            </StackPanel>
-                                            <Border Grid.Column="1" Background="#FFEDD5" CornerRadius="999" Padding="12,5" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding DashboardPendingBill.Text, ElementName=DashboardPendingBill}" Foreground="#B45309" FontSize="11" FontWeight="Bold" />
-                                            </Border>
-                                        </Grid>
-                                        <DataGrid x:Name="DashboardPendingBillGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
-                                                  Style="{StaticResource DashboardGridStyle}"
-                                                  RowStyle="{StaticResource DashboardTableRowStyle}"
-                                                  CellStyle="{StaticResource DashboardTableCellStyle}"
-                                                  SelectionUnit="FullRow"
-                                                  Background="White"
-                                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                                  ScrollViewer.VerticalScrollBarVisibility="Visible"
-                                                  ScrollViewer.CanContentScroll="True">
-                                            <DataGrid.Resources>
-                                                <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource DataGridHeaderStyle}">
-                                                    <Setter Property="Background" Value="#FFF1D6" />
-                                                    <Setter Property="Foreground" Value="#B45309" />
-                                                    <Setter Property="Padding" Value="12,9" />
-                                                </Style>
-                                                <Style TargetType="ScrollBar">
-                                                    <Style.Triggers>
-                                                        <Trigger Property="Orientation" Value="Vertical">
-                                                            <Setter Property="Width" Value="14" />
-                                                        </Trigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </DataGrid.Resources>
-                                            <DataGrid.Columns>
-                                                <DataGridTextColumn Header="LR No" Binding="{Binding LRNo}" Width="120" FontWeight="SemiBold" />
-                                                <DataGridTextColumn Header="Party" Binding="{Binding ConsignorName}" Width="*" />
-                                                <DataGridTextColumn Header="From" Binding="{Binding From}" Width="90" />
-                                                <DataGridTextColumn Header="To" Binding="{Binding To}" Width="90" />
-                                                <DataGridTextColumn Header="Veh" Binding="{Binding VehicleNo}" Width="100" />
-                                                <DataGridTemplateColumn Header="" Width="120">
-                                                    <DataGridTemplateColumn.CellTemplate>
-                                                        <DataTemplate>
-                                                            <Button Content="Create Bill" Style="{StaticResource DashboardActionButtonStyle}"
-                                                                    Click="DashboardMakeBill_Click" Tag="{Binding}"
-                                                                    HorizontalAlignment="Stretch" VerticalAlignment="Center" />
-                                                        </DataTemplate>
-                                                    </DataGridTemplateColumn.CellTemplate>
-                                                </DataGridTemplateColumn>
-                                            </DataGrid.Columns>
-                                        </DataGrid>
                                     </Grid>
                                 </Border>
                             </Grid>

@@ -11,6 +11,10 @@ namespace Awagaman_ERP.Data
 
         public List<VehicleEntry> GetAll()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<VehicleEntry>("api/vehicles");
+            }
             var list = new List<VehicleEntry>();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT * FROM VehicleLedger ORDER BY VehicleNumber;", c))
@@ -26,6 +30,13 @@ namespace Awagaman_ERP.Data
 
         public List<VehicleEntry> SearchByVehicleNumber(string query)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                query = (query ?? string.Empty).Trim();
+                return RemoteApiClient.GetList<VehicleEntry>("api/vehicles").FindAll(v =>
+                    !string.IsNullOrWhiteSpace(v.VehicleNumber) &&
+                    v.VehicleNumber.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0);
+            }
             var list = new List<VehicleEntry>();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = c.CreateCommand())
@@ -47,6 +58,12 @@ namespace Awagaman_ERP.Data
         public VehicleEntry FindByVehicleNumber(string vehicleNumber)
         {
             if (string.IsNullOrWhiteSpace(vehicleNumber)) return null;
+            if (BackendSettings.UseRemoteApi)
+            {
+                vehicleNumber = vehicleNumber.Trim();
+                return RemoteApiClient.GetList<VehicleEntry>("api/vehicles").Find(v =>
+                    string.Equals((v.VehicleNumber ?? string.Empty).Trim(), vehicleNumber, StringComparison.OrdinalIgnoreCase));
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = c.CreateCommand())
             {
@@ -64,6 +81,23 @@ namespace Awagaman_ERP.Data
         public void UpsertFromChallan(ChallanEntry entry)
         {
             if (entry == null || string.IsNullOrWhiteSpace(entry.VehicleNumber)) return;
+            if (BackendSettings.UseRemoteApi)
+            {
+                var existing = FindByVehicleNumber(entry.VehicleNumber);
+                var payload = new VehicleEntry
+                {
+                    Id = existing != null ? existing.Id : 0,
+                    Sr = existing != null ? existing.Sr : GetAll().Count + 1,
+                    VehicleNumber = entry.VehicleNumber.Trim().ToUpperInvariant(),
+                    OwnerName = entry.OwnerName,
+                    PANNumber = entry.PAN,
+                    EngineNumber = entry.EngineNo,
+                    ChassisNumber = entry.ChassisNo,
+                    VehicleType = entry.VehicleType
+                };
+                Upsert(payload);
+                return;
+            }
             var vno = entry.VehicleNumber.Trim().ToUpperInvariant();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             {
@@ -124,6 +158,19 @@ namespace Awagaman_ERP.Data
         public void Upsert(VehicleEntry e)
         {
             if (e == null || string.IsNullOrWhiteSpace(e.VehicleNumber)) return;
+            if (BackendSettings.UseRemoteApi)
+            {
+                e.VehicleNumber = e.VehicleNumber.Trim().ToUpperInvariant();
+                if (e.Id <= 0)
+                {
+                    e.Id = RemoteApiClient.PostAndReadInt("api/vehicles", e);
+                }
+                else
+                {
+                    RemoteApiClient.Put($"api/vehicles/{e.Id}", e);
+                }
+                return;
+            }
             e.VehicleNumber = e.VehicleNumber.Trim().ToUpperInvariant();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = c.CreateCommand())
@@ -153,6 +200,23 @@ namespace Awagaman_ERP.Data
             }
         }
 
+        public void Delete(VehicleEntry entry)
+        {
+            if (entry == null || entry.Id <= 0) return;
+            if (BackendSettings.UseRemoteApi)
+            {
+                RemoteApiClient.Delete($"api/vehicles/{entry.Id}");
+                return;
+            }
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand("DELETE FROM VehicleLedger WHERE Id = @id;", c))
+            {
+                cmd.Parameters.AddWithValue("@id", entry.Id);
+                c.Open();
+                cmd.ExecuteNonQuery();
+            }
+        }
+
         private static VehicleEntry Map(SQLiteDataReader r)
         {
             return new VehicleEntry
@@ -169,4 +233,3 @@ namespace Awagaman_ERP.Data
         }
     }
 }
-

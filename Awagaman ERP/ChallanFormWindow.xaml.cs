@@ -84,7 +84,11 @@ namespace Awagaman_ERP
                 var existing = _repository.FindByChallanNumber(num);
                 ChallanDuplicateWarning.Visibility = (existing != null && existing.Sr != _editingSr) ? Visibility.Visible : Visibility.Collapsed;
             }
-            catch { ChallanDuplicateWarning.Visibility = Visibility.Collapsed; }
+            catch (System.Exception ex)
+            {
+                AppLogger.LogException(nameof(ChallanNo_LostFocus), ex);
+                ChallanDuplicateWarning.Visibility = Visibility.Collapsed;
+            }
         }
 
         private void Save_Click(object sender, RoutedEventArgs e)
@@ -104,7 +108,10 @@ namespace Awagaman_ERP
                     return;
                 }
             }
-            catch { }
+            catch (System.Exception ex)
+            {
+                AppLogger.LogException(nameof(Save_Click), ex);
+            }
 
             if (!string.IsNullOrWhiteSpace(Result.LRNumber))
             {

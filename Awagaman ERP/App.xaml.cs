@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Reflection;
 using System.Net.Http;
+using System.IO;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows;
@@ -69,18 +70,14 @@ namespace Awagaman_ERP
                 }
 
                 var result = MessageBox.Show(
-                    $"A newer version is available.\n\nCurrent: {current}\nLatest: {latest.Version}\n\nDo you want to download and install the update now?",
+                    $"A newer version is available.\n\nCurrent: {current}\nLatest: {latest.Version}\n\nDo you want to download and install the update now?\nThe app will close and the installer will run.",
                     "Update Available",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Information);
 
                 if (result != MessageBoxResult.Yes) return;
 
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = latest.DownloadUrl,
-                    UseShellExecute = true
-                });
+                await DownloadAndRunInstallerAsync(latest).ConfigureAwait(false);
             }
             catch
             {
@@ -95,6 +92,46 @@ namespace Awagaman_ERP
         {
             public Version Version { get; set; }
             public string DownloadUrl { get; set; }
+            public string AssetName { get; set; }
+        }
+
+        private static async Task DownloadAndRunInstallerAsync(ReleaseInfo latest)
+        {
+            if (latest == null || string.IsNullOrWhiteSpace(latest.DownloadUrl))
+            {
+                MessageBox.Show("Update package could not be found.", "Update Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            var safeName = string.IsNullOrWhiteSpace(latest.AssetName) ? "AwagamanERP-Setup.exe" : latest.AssetName;
+            var tempDir = Path.Combine(Path.GetTempPath(), "AwagamanERP-Updates");
+            Directory.CreateDirectory(tempDir);
+            var localPath = Path.Combine(tempDir, safeName);
+
+            using (var client = new HttpClient())
+            {
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("AwagamanERP-Updater");
+                var bytes = await client.GetByteArrayAsync(latest.DownloadUrl).ConfigureAwait(false);
+                File.WriteAllBytes(localPath, bytes);
+            }
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = localPath,
+                UseShellExecute = true,
+                WorkingDirectory = tempDir
+            });
+
+            Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    Application.Current?.Shutdown();
+                }
+                catch
+                {
+                }
+            }));
         }
 
         private static async Task<ReleaseInfo> GetLatestReleaseAsync()
@@ -113,6 +150,7 @@ namespace Awagaman_ERP
                 if (version == null) return null;
 
                 string downloadUrl = null;
+                string assetName = null;
                 if (root.ContainsKey("assets"))
                 {
                     var assets = root["assets"] as System.Collections.IEnumerable;
@@ -124,19 +162,22 @@ namespace Awagaman_ERP
                             if (asset == null) continue;
                             var name = asset.ContainsKey("name") ? Convert.ToString(asset["name"]) : string.Empty;
                             var url = asset.ContainsKey("browser_download_url") ? Convert.ToString(asset["browser_download_url"]) : string.Empty;
-                            if (string.Equals(name, "AwagamanERP-Setup.exe", StringComparison.OrdinalIgnoreCase))
+                            if (!string.IsNullOrWhiteSpace(name) &&
+                                (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)) &&
+                                (string.IsNullOrWhiteSpace(downloadUrl) || name.IndexOf("setup", StringComparison.OrdinalIgnoreCase) >= 0))
                             {
                                 downloadUrl = url;
-                                break;
+                                assetName = name;
+                                if (name.IndexOf("setup", StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    break;
+                                }
                             }
                         }
                     }
                 }
 
-                if (string.IsNullOrWhiteSpace(downloadUrl) && root.ContainsKey("html_url"))
-                    downloadUrl = Convert.ToString(root["html_url"]);
-
-                return new ReleaseInfo { Version = version, DownloadUrl = downloadUrl };
+                return new ReleaseInfo { Version = version, DownloadUrl = downloadUrl, AssetName = assetName };
             }
         }
 

@@ -4,16 +4,28 @@ using System.IO;
 
 namespace Awagaman_ERP.Data
 {
-    internal static class AppDatabase
+    public static class AppDatabase
     {
         private static readonly object SyncRoot = new object();
         private static bool _initialized;
+        private static string _databasePathOverride;
 
         public static string DatabasePath =>
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Awagaman ERP", "awagaman_erp.db");
+            string.IsNullOrWhiteSpace(_databasePathOverride)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Awagaman ERP", "awagaman_erp.db")
+                : _databasePathOverride;
 
         public static string ConnectionString =>
             $"Data Source={DatabasePath};Version=3;Pooling=True;";
+
+        public static void SetDatabasePathForTesting(string databasePath)
+        {
+            lock (SyncRoot)
+            {
+                _databasePathOverride = string.IsNullOrWhiteSpace(databasePath) ? null : Path.GetFullPath(databasePath);
+                _initialized = false;
+            }
+        }
 
         public static void EnsureInitialized()
         {
@@ -39,7 +51,7 @@ namespace Awagaman_ERP.Data
                 if (File.Exists(oldPath) && !File.Exists(DatabasePath))
                 {
                     try { File.Copy(oldPath, DatabasePath); }
-                    catch { /* Migration failed, new DB will be created */ }
+                    catch (Exception ex) { AppLogger.LogException(nameof(EnsureInitialized) + ".MigrateDatabase", ex); }
                 }
 
                 Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath));
@@ -91,8 +103,8 @@ CREATE TABLE IF NOT EXISTS Challans (
 );");
 
                     // Add Balance/Due columns for existing databases (safe if already exist)
-                    try { ExecuteNonQuery(connection, "ALTER TABLE Challans ADD COLUMN ImportedBalance REAL;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE Challans ADD COLUMN ImportedDue REAL;"); } catch { }
+                    TryExecuteNonQuery(connection, "ALTER TABLE Challans ADD COLUMN ImportedBalance REAL;", "EnsureInitialized.Challans.ImportedBalance");
+                    TryExecuteNonQuery(connection, "ALTER TABLE Challans ADD COLUMN ImportedDue REAL;", "EnsureInitialized.Challans.ImportedDue");
 
                     ExecuteNonQuery(connection, @"
 CREATE TABLE IF NOT EXISTS LREntries (
@@ -159,22 +171,22 @@ CREATE TABLE IF NOT EXISTS TrackingEntries (
     DeliveredTime TEXT
 );");
 
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Invoice TEXT;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Value TEXT;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Weight REAL NOT NULL DEFAULT 0;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Hamali REAL NOT NULL DEFAULT 0;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Detention REAL NOT NULL DEFAULT 0;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Others REAL NOT NULL DEFAULT 0;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN StCharge REAL NOT NULL DEFAULT 0;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN TDS REAL NOT NULL DEFAULT 0;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Ded REAL NOT NULL DEFAULT 0;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN SizeL REAL NOT NULL DEFAULT 0;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN SizeW REAL NOT NULL DEFAULT 0;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN SizeH REAL NOT NULL DEFAULT 0;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN ActualWeight REAL NOT NULL DEFAULT 0;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN ChargedWeight REAL NOT NULL DEFAULT 0;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN PkgType TEXT;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN PayType TEXT;"); } catch { }
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Invoice TEXT;", "EnsureInitialized.LREntries.Invoice");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Value TEXT;", "EnsureInitialized.LREntries.Value");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Weight REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.Weight");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Hamali REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.Hamali");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Detention REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.Detention");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Others REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.Others");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN StCharge REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.StCharge");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN TDS REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.TDS");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Ded REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.Ded");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN SizeL REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.SizeL");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN SizeW REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.SizeW");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN SizeH REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.SizeH");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN ActualWeight REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.ActualWeight");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN ChargedWeight REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.ChargedWeight");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN PkgType TEXT;", "EnsureInitialized.LREntries.PkgType");
+                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN PayType TEXT;", "EnsureInitialized.LREntries.PayType");
 
                     ExecuteNonQuery(connection, @"
 CREATE TABLE IF NOT EXISTS ReportingTracks (
@@ -248,8 +260,8 @@ CREATE TABLE IF NOT EXISTS Parties (
     Remarks TEXT,
     Date TEXT
 );");
-                    try { ExecuteNonQuery(connection, "ALTER TABLE Bills ADD COLUMN Remarks TEXT;"); } catch { }
-                    try { ExecuteNonQuery(connection, "ALTER TABLE Bills ADD COLUMN StCharge REAL DEFAULT 0;"); } catch { }
+                    TryExecuteNonQuery(connection, "ALTER TABLE Bills ADD COLUMN Remarks TEXT;", "EnsureInitialized.Bills.Remarks");
+                    TryExecuteNonQuery(connection, "ALTER TABLE Bills ADD COLUMN StCharge REAL DEFAULT 0;", "EnsureInitialized.Bills.StCharge");
 
                     ExecuteNonQuery(connection, @"
 CREATE TABLE IF NOT EXISTS CBSAccounts (
@@ -325,8 +337,8 @@ CREATE TABLE IF NOT EXISTS VehicleLedger (
                         Freight REAL DEFAULT 0, Detention REAL DEFAULT 0, HML REAL DEFAULT 0, OTHR REAL DEFAULT 0,
                         StCharge REAL DEFAULT 0,
                         RCVD REAL DEFAULT 0, TDS REAL DEFAULT 0, DED REAL DEFAULT 0, MOP TEXT, MR TEXT, Remarks TEXT, Date TEXT);");
-                    try { ExecuteNonQuery(c, "ALTER TABLE Bills ADD COLUMN Remarks TEXT;"); } catch { }
-                    try { ExecuteNonQuery(c, "ALTER TABLE Bills ADD COLUMN StCharge REAL DEFAULT 0;"); } catch { }
+                    TryExecuteNonQuery(c, "ALTER TABLE Bills ADD COLUMN Remarks TEXT;", "EnsureBillTablesExist.Bills.Remarks");
+                    TryExecuteNonQuery(c, "ALTER TABLE Bills ADD COLUMN StCharge REAL DEFAULT 0;", "EnsureBillTablesExist.Bills.StCharge");
                     ExecuteNonQuery(c, @"CREATE TABLE IF NOT EXISTS BillComments (
                         Id INTEGER PRIMARY KEY AUTOINCREMENT, BillId INTEGER NOT NULL,
                         Comment TEXT NOT NULL, CreatedAt TEXT NOT NULL);");
@@ -346,11 +358,26 @@ CREATE TABLE IF NOT EXISTS VehicleLedger (
                         Remarks TEXT,
                         DueAfter REAL NOT NULL DEFAULT 0,
                         CreatedAt TEXT NOT NULL);");
-                    try { ExecuteNonQuery(c, "ALTER TABLE BillReceipts ADD COLUMN BillDate TEXT;"); } catch { }
+                    TryExecuteNonQuery(c, "ALTER TABLE BillReceipts ADD COLUMN BillDate TEXT;", "EnsureBillTablesExist.BillReceipts.BillDate");
                     ExecuteNonQuery(c, "CREATE INDEX IF NOT EXISTS IX_BillReceipts_BillNo ON BillReceipts(BillNo);");
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(nameof(EnsureBillTablesExist), ex);
+            }
+        }
+
+        private static void TryExecuteNonQuery(SQLiteConnection connection, string sql, string context)
+        {
+            try
+            {
+                ExecuteNonQuery(connection, sql);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(context, ex);
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Linq;
 using Awagaman_ERP.Models;
 
 namespace Awagaman_ERP.Data
@@ -14,6 +15,10 @@ namespace Awagaman_ERP.Data
 
         public List<TrackingEntry> GetAll()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<TrackingEntry>("api/tracking");
+            }
             var entries = new List<TrackingEntry>();
 
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
@@ -49,7 +54,21 @@ namespace Awagaman_ERP.Data
 
         public Dictionary<int, string> GetLatestReportForAll()
         {
-            var result = new Dictionary<int, string>();
+            if (BackendSettings.UseRemoteApi)
+            {
+                var result = new Dictionary<int, string>();
+                foreach (var entry in RemoteApiClient.GetList<TrackingEntry>("api/tracking"))
+                {
+                    var reports = RemoteApiClient.GetList<ReportingTrackEntry>($"api/tracking/{entry.Id}/reports");
+                    var latest = reports.OrderByDescending(x => x.ReportDateTime).FirstOrDefault();
+                    if (latest != null)
+                    {
+                        result[entry.Id] = $"{latest.ReportDateTime:dd-MMM HH:mm} - {latest.Remarks}";
+                    }
+                }
+                return result;
+            }
+            var localResult = new Dictionary<int, string>();
 
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = new SQLiteCommand(@"
@@ -65,16 +84,20 @@ ORDER BY TrackingEntryId;", connection))
                         var id = Convert.ToInt32(reader["TrackingEntryId"]);
                         var dt = ParseDate(reader["ReportDateTime"], DateTime.Now);
                         var remarks = reader["Remarks"] as string ?? "";
-                        result[id] = $"{dt:dd-MMM HH:mm} - {remarks}";
+                        localResult[id] = $"{dt:dd-MMM HH:mm} - {remarks}";
                     }
                 }
             }
 
-            return result;
+            return localResult;
         }
 
         public List<ReportingTrackEntry> GetReportingTracks(int trackingEntryId)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<ReportingTrackEntry>($"api/tracking/{trackingEntryId}/reports");
+            }
             var entries = new List<ReportingTrackEntry>();
 
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
@@ -103,6 +126,19 @@ ORDER BY TrackingEntryId;", connection))
         public void Upsert(TrackingEntry entry)
         {
             if (entry == null) return;
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                if (entry.Id <= 0)
+                {
+                    entry.Id = RemoteApiClient.PostAndReadInt("api/tracking", entry);
+                }
+                else
+                {
+                    RemoteApiClient.Put($"api/tracking/{entry.Id}", entry);
+                }
+                return;
+            }
 
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = connection.CreateCommand())
@@ -151,6 +187,12 @@ WHERE Id = @Id;";
         {
             if (entry == null) return;
 
+            if (BackendSettings.UseRemoteApi)
+            {
+                entry.Id = RemoteApiClient.PostAndReadInt($"api/tracking/{entry.TrackingEntryId}/reports", entry);
+                return;
+            }
+
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = connection.CreateCommand())
             {
@@ -169,6 +211,15 @@ SELECT last_insert_rowid();";
         public void Delete(TrackingEntry entry)
         {
             if (entry == null) return;
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                if (entry.Id > 0)
+                {
+                    RemoteApiClient.Delete($"api/tracking/{entry.Id}");
+                }
+                return;
+            }
 
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = connection.CreateCommand())

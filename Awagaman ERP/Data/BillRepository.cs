@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Linq;
 using Awagaman_ERP.Models;
 
 namespace Awagaman_ERP.Data
@@ -42,6 +43,13 @@ namespace Awagaman_ERP.Data
 
         public List<BillEntry> GetPage(int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return ApplySort(GetAllRemoteSafe(), sortColumn, sortAscending)
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList();
+            }
             var list = new List<BillEntry>();
             int offset = (pageNumber - 1) * pageSize;
             string orderBy = BuildOrderBy(sortColumn, sortAscending);
@@ -57,8 +65,40 @@ namespace Awagaman_ERP.Data
             return list;
         }
 
+        public List<BillEntry> GetAll()
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetAllRemoteSafe();
+            }
+            var list = new List<BillEntry>();
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand("SELECT * FROM Bills ORDER BY BillDate DESC, Sr DESC, Id DESC;", c))
+            {
+                c.Open();
+                using (var r = cmd.ExecuteReader())
+                    while (r.Read()) list.Add(MapReader(r));
+            }
+            return list;
+        }
+
         public List<BillEntry> Search(string filter, int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                filter = (filter ?? string.Empty).Trim();
+                return ApplySort(GetAllRemoteSafe().Where(e =>
+                    Contains(e.BillNo, filter) ||
+                    Contains(e.Party, filter) ||
+                    Contains(e.LRNo, filter) ||
+                    Contains(e.From, filter) ||
+                    Contains(e.To, filter) ||
+                    Contains(e.MR, filter) ||
+                    Contains(e.Remarks, filter)), sortColumn, sortAscending)
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList();
+            }
             var list = new List<BillEntry>();
             int offset = (pageNumber - 1) * pageSize;
             string orderBy = BuildOrderBy(sortColumn, sortAscending);
@@ -78,6 +118,18 @@ namespace Awagaman_ERP.Data
 
         public int GetTotalCount(string filter = "")
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                if (string.IsNullOrWhiteSpace(filter)) return GetAllRemoteSafe().Count;
+                return GetAllRemoteSafe().Count(e =>
+                    Contains(e.BillNo, filter) ||
+                    Contains(e.Party, filter) ||
+                    Contains(e.LRNo, filter) ||
+                    Contains(e.From, filter) ||
+                    Contains(e.To, filter) ||
+                    Contains(e.MR, filter) ||
+                    Contains(e.Remarks, filter));
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand(
                 string.IsNullOrWhiteSpace(filter) ? "SELECT COUNT(*) FROM Bills;"
@@ -92,6 +144,18 @@ namespace Awagaman_ERP.Data
         public void Upsert(BillEntry e)
         {
             if (e == null) return;
+            if (BackendSettings.UseRemoteApi)
+            {
+                if (e.Id <= 0)
+                {
+                    e.Id = RemoteApiClient.PostAndReadInt("api/bills", e);
+                }
+                else
+                {
+                    RemoteApiClient.Put($"api/bills/{e.Id}", e);
+                }
+                return;
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = c.CreateCommand())
             {
@@ -138,6 +202,11 @@ namespace Awagaman_ERP.Data
         public void Delete(BillEntry e)
         {
             if (e == null || e.Id <= 0) return;
+            if (BackendSettings.UseRemoteApi)
+            {
+                RemoteApiClient.Delete($"api/bills/{e.Id}");
+                return;
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("DELETE FROM Bills WHERE Id=@id;", c))
             {
@@ -212,5 +281,62 @@ LRNo {d}, Sr, Id";
                 default: return "Sr, Id";
             }
         }
+
+        private static List<BillEntry> GetAllRemoteSafe()
+        {
+            return RemoteApiClient.GetList<BillEntry>("api/bills")
+                .OrderByDescending(x => x.BillDate)
+                .ThenByDescending(x => x.Sr)
+                .ThenByDescending(x => x.Id)
+                .ToList();
+        }
+
+        private static IEnumerable<BillEntry> ApplySort(IEnumerable<BillEntry> source, string col, bool asc)
+        {
+            var ordered = source ?? Enumerable.Empty<BillEntry>();
+            Func<BillEntry, object> key;
+            switch ((col ?? string.Empty).ToLowerInvariant())
+            {
+                case "billno": key = x => x.BillNo ?? string.Empty; break;
+                case "billdate": key = x => x.BillDate; break;
+                case "party": key = x => x.Party ?? string.Empty; break;
+                case "lrno": key = x => x.LRNo ?? string.Empty; break;
+                case "lrdate": key = x => x.LRDate ?? DateTime.MinValue; break;
+                case "from": key = x => x.From ?? string.Empty; break;
+                case "to": key = x => x.To ?? string.Empty; break;
+                case "vehicletype": key = x => x.VehicleType ?? string.Empty; break;
+                case "freight": key = x => x.Freight; break;
+                case "detention": key = x => x.Detention; break;
+                case "hml": key = x => x.HML; break;
+                case "othr": key = x => x.OTHR; break;
+                case "stcharge": key = x => x.StCharge; break;
+                case "rcvd": key = x => x.RCVD; break;
+                case "tds": key = x => x.TDS; break;
+                case "ded": key = x => x.DED; break;
+                case "mop": key = x => x.MOP ?? string.Empty; break;
+                case "mr": key = x => x.MR ?? string.Empty; break;
+                case "remarks": key = x => x.Remarks ?? string.Empty; break;
+                case "date": key = x => x.Date; break;
+                default: key = x => x.Sr; break;
+            }
+            return asc ? ordered.OrderBy(key).ThenBy(x => x.Id) : ordered.OrderByDescending(key).ThenByDescending(x => x.Id);
+        }
+
+        public int GetMaxSr()
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetAllRemoteSafe().Select(x => x.Sr).DefaultIfEmpty(0).Max();
+            }
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand("SELECT COALESCE(MAX(Sr), 0) FROM Bills;", c))
+            {
+                c.Open();
+                return Convert.ToInt32(cmd.ExecuteScalar());
+            }
+        }
+
+        private static bool Contains(string value, string filter)
+            => !string.IsNullOrWhiteSpace(value) && !string.IsNullOrWhiteSpace(filter) && value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }

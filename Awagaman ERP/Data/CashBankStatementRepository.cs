@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Linq;
 using Awagaman_ERP.Models;
 
 namespace Awagaman_ERP.Data
@@ -14,6 +15,10 @@ namespace Awagaman_ERP.Data
 
         public List<CashBankStatementEntry> GetAll()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<CashBankStatementEntry>("api/cbs/statements");
+            }
             var list = new List<CashBankStatementEntry>();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT * FROM CashBankStatements ORDER BY Date DESC, Id DESC;", c))
@@ -32,6 +37,20 @@ namespace Awagaman_ERP.Data
 
         public List<CashBankStatementEntry> Search(string filter)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                filter = (filter ?? string.Empty).Trim();
+                if (filter.Length == 0) return GetAll();
+                return RemoteApiClient.GetList<CashBankStatementEntry>("api/cbs/statements")
+                    .FindAll(x =>
+                        Contains(x.CBS, filter) ||
+                        Contains(x.AccountName, filter) ||
+                        Contains(x.Particulars, filter) ||
+                        Contains(x.Remarks, filter))
+                    .OrderByDescending(x => x.Date)
+                    .ThenByDescending(x => x.Id)
+                    .ToList();
+            }
             var list = new List<CashBankStatementEntry>();
             filter = (filter ?? string.Empty).Trim();
             if (filter.Length == 0) return GetAll();
@@ -57,6 +76,10 @@ ORDER BY Date DESC, Id DESC;", c))
 
         public int GetMaxSr()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<CashBankStatementEntry>("api/cbs/statements").Select(x => x.Sr).DefaultIfEmpty(0).Max();
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT COALESCE(MAX(Sr), 0) FROM CashBankStatements;", c))
             {
@@ -69,6 +92,19 @@ ORDER BY Date DESC, Id DESC;", c))
         {
             if (entry == null) return;
             entry.CBS = string.IsNullOrWhiteSpace(entry.CBS) ? entry.Date.ToString("MMM-yy") : entry.CBS;
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                if (entry.Id <= 0)
+                {
+                    entry.Id = RemoteApiClient.PostAndReadInt("api/cbs/statements", entry);
+                }
+                else
+                {
+                    RemoteApiClient.Put($"api/cbs/statements/{entry.Id}", entry);
+                }
+                return;
+            }
 
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = c.CreateCommand())
@@ -122,6 +158,11 @@ WHERE Id = @Id;";
         public void Delete(CashBankStatementEntry entry)
         {
             if (entry == null || entry.Id <= 0) return;
+            if (BackendSettings.UseRemoteApi)
+            {
+                RemoteApiClient.Delete($"api/cbs/statements/{entry.Id}");
+                return;
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("DELETE FROM CashBankStatements WHERE Id = @id;", c))
             {
@@ -154,6 +195,13 @@ WHERE Id = @Id;";
                 CashDr = Convert.ToDecimal(r["CashDr"]),
                 CashCr = Convert.ToDecimal(r["CashCr"])
             };
+        }
+
+        private static bool Contains(string value, string filter)
+        {
+            return !string.IsNullOrWhiteSpace(value) &&
+                   !string.IsNullOrWhiteSpace(filter) &&
+                   value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }

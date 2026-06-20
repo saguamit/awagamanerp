@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Globalization;
+using System.Linq;
 using Awagaman_ERP.Models;
 
 namespace Awagaman_ERP.Data
@@ -15,6 +16,10 @@ namespace Awagaman_ERP.Data
 
         public List<LREntry> GetAll()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<LREntry>("api/lr");
+            }
             var entries = new List<LREntry>();
 
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
@@ -35,6 +40,13 @@ namespace Awagaman_ERP.Data
 
         public List<LREntry> GetPage(int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return ApplySort(GetAllRemoteSafe(), sortColumn, sortAscending)
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList();
+            }
             var entries = new List<LREntry>();
             int offset = (pageNumber - 1) * pageSize;
             string orderBy = BuildOrderBy(sortColumn, sortAscending);
@@ -57,6 +69,20 @@ namespace Awagaman_ERP.Data
 
         public List<LREntry> Search(string searchFilter, int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                var filter = (searchFilter ?? string.Empty).Trim();
+                return ApplySort(GetAllRemoteSafe().Where(e =>
+                    Contains(e.LRNo, filter) ||
+                    Contains(e.ConsignorName, filter) ||
+                    Contains(e.ConsigneeName, filter) ||
+                    Contains(e.VehicleNo, filter) ||
+                    Contains(e.BillNo, filter) ||
+                    Contains(e.CHNo, filter)), sortColumn, sortAscending)
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList();
+            }
             var entries = new List<LREntry>();
             int offset = (pageNumber - 1) * pageSize;
             string orderBy = BuildOrderBy(sortColumn, sortAscending);
@@ -78,6 +104,18 @@ namespace Awagaman_ERP.Data
 
         public int GetTotalCount(string searchFilter)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                var filter = (searchFilter ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(filter)) return GetAllRemoteSafe().Count;
+                return GetAllRemoteSafe().Count(e =>
+                    Contains(e.LRNo, filter) ||
+                    Contains(e.ConsignorName, filter) ||
+                    Contains(e.ConsigneeName, filter) ||
+                    Contains(e.VehicleNo, filter) ||
+                    Contains(e.BillNo, filter) ||
+                    Contains(e.CHNo, filter));
+            }
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = connection.CreateCommand())
             {
@@ -95,6 +133,10 @@ namespace Awagaman_ERP.Data
 
         public int GetMaxSr()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetAllRemoteSafe().Select(e => e.Sr).DefaultIfEmpty(0).Max();
+            }
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = new SQLiteCommand("SELECT COALESCE(MAX(Sr), 0) FROM LREntries;", connection))
             {
@@ -157,6 +199,19 @@ namespace Awagaman_ERP.Data
         {
             if (entry == null)
             {
+                return;
+            }
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                if (entry.Id <= 0)
+                {
+                    entry.Id = RemoteApiClient.PostAndReadInt("api/lr", entry);
+                }
+                else
+                {
+                    RemoteApiClient.Put($"api/lr/{entry.Id}", entry);
+                }
                 return;
             }
 
@@ -242,6 +297,15 @@ WHERE Id = @Id;";
         {
             if (entry == null)
             {
+                return;
+            }
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                if (entry.Id > 0)
+                {
+                    RemoteApiClient.Delete($"api/lr/{entry.Id}");
+                }
                 return;
             }
 
@@ -392,6 +456,58 @@ LRNo {dir}, Sr, Id";
                 case "paid": return $"Paid {dir}, Sr, Id";
                 default: return "Sr, Id";
             }
+        }
+
+        private static List<LREntry> GetAllRemoteSafe()
+        {
+            return RemoteApiClient.GetList<LREntry>("api/lr")
+                .OrderBy(e => e.Sr)
+                .ThenBy(e => e.Id)
+                .ToList();
+        }
+
+        private static IEnumerable<LREntry> ApplySort(IEnumerable<LREntry> source, string sortColumn, bool ascending)
+        {
+            var ordered = source ?? Enumerable.Empty<LREntry>();
+            Func<LREntry, object> keySelector;
+            switch ((sortColumn ?? string.Empty).ToLowerInvariant())
+            {
+                case "lrno": keySelector = e => e.LRNo ?? string.Empty; break;
+                case "date": keySelector = e => e.Date; break;
+                case "consignorname": keySelector = e => e.ConsignorName ?? string.Empty; break;
+                case "consignee_name":
+                case "consigneename": keySelector = e => e.ConsigneeName ?? string.Empty; break;
+                case "from": keySelector = e => e.From ?? string.Empty; break;
+                case "to": keySelector = e => e.To ?? string.Empty; break;
+                case "vehicleno": keySelector = e => e.VehicleNo ?? string.Empty; break;
+                case "vehicletype": keySelector = e => e.VehicleType ?? string.Empty; break;
+                case "invoice": keySelector = e => e.Invoice ?? string.Empty; break;
+                case "value": keySelector = e => e.Value ?? string.Empty; break;
+                case "chno": keySelector = e => e.CHNo ?? string.Empty; break;
+                case "totalfreight": keySelector = e => e.TotalFreight; break;
+                case "hamali": keySelector = e => e.Hamali; break;
+                case "detention": keySelector = e => e.Detention; break;
+                case "others": keySelector = e => e.Others; break;
+                case "stcharge": keySelector = e => e.StCharge; break;
+                case "neft": keySelector = e => e.NEFT; break;
+                case "cash": keySelector = e => e.CASH; break;
+                case "tds": keySelector = e => e.TDS; break;
+                case "ded": keySelector = e => e.Ded; break;
+                case "billno": keySelector = e => e.BillNo ?? string.Empty; break;
+                case "billdate": keySelector = e => e.BillDate ?? DateTime.MinValue; break;
+                case "bill": keySelector = e => e.BILL; break;
+                case "billparty": keySelector = e => e.BillParty ?? string.Empty; break;
+                case "broker": keySelector = e => e.Broker ?? string.Empty; break;
+                default: keySelector = e => e.Sr; break;
+            }
+            return ascending ? ordered.OrderBy(keySelector).ThenBy(e => e.Id) : ordered.OrderByDescending(keySelector).ThenByDescending(e => e.Id);
+        }
+
+        private static bool Contains(string value, string filter)
+        {
+            return !string.IsNullOrWhiteSpace(value) &&
+                   !string.IsNullOrWhiteSpace(filter) &&
+                   value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }

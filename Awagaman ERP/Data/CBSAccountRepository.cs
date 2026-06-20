@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Linq;
 using Awagaman_ERP.Models;
 
 namespace Awagaman_ERP.Data
@@ -15,6 +16,11 @@ namespace Awagaman_ERP.Data
 
         public List<CBSAccountEntry> GetAll()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                EnsureRemoteDefaults();
+                return RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts");
+            }
             EnsureDefaults();
             var list = new List<CBSAccountEntry>();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
@@ -40,6 +46,14 @@ namespace Awagaman_ERP.Data
 
         public List<string> GetActiveAccountNames()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                EnsureRemoteDefaults();
+                return RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts")
+                    .FindAll(x => x.IsActive)
+                    .ConvertAll(x => (x.AccountName ?? string.Empty).Trim())
+                    .FindAll(x => x.Length > 0);
+            }
             EnsureDefaults();
             var list = new List<string>();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
@@ -60,6 +74,11 @@ namespace Awagaman_ERP.Data
 
         public int GetMaxSr()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                EnsureRemoteDefaults();
+                return RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts").Select(x => x.Sr).DefaultIfEmpty(0).Max();
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT COALESCE(MAX(Sr), 0) FROM CBSAccounts;", c))
             {
@@ -72,6 +91,12 @@ namespace Awagaman_ERP.Data
         {
             var key = (accountName ?? string.Empty).Trim();
             if (key.Length == 0) return null;
+            if (BackendSettings.UseRemoteApi)
+            {
+                EnsureRemoteDefaults();
+                return RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts")
+                    .Find(x => string.Equals((x.AccountName ?? string.Empty).Trim(), key, StringComparison.OrdinalIgnoreCase));
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT Id, Sr, AccountName, IsActive FROM CBSAccounts WHERE LOWER(TRIM(AccountName)) = LOWER(TRIM(@name)) LIMIT 1;", c))
             {
@@ -96,6 +121,19 @@ namespace Awagaman_ERP.Data
             if (entry == null) return;
             entry.AccountName = (entry.AccountName ?? string.Empty).Trim();
             if (entry.AccountName.Length == 0) return;
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                if (entry.Id <= 0)
+                {
+                    entry.Id = RemoteApiClient.PostAndReadInt("api/cbs/accounts", entry);
+                }
+                else
+                {
+                    RemoteApiClient.Put($"api/cbs/accounts/{entry.Id}", entry);
+                }
+                return;
+            }
 
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = c.CreateCommand())
@@ -129,6 +167,11 @@ namespace Awagaman_ERP.Data
         public void Delete(CBSAccountEntry entry)
         {
             if (entry == null || entry.Id <= 0) return;
+            if (BackendSettings.UseRemoteApi)
+            {
+                RemoteApiClient.Delete($"api/cbs/accounts/{entry.Id}");
+                return;
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("DELETE FROM CBSAccounts WHERE Id = @id;", c))
             {
@@ -158,6 +201,18 @@ namespace Awagaman_ERP.Data
                 {
                     Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "BFRS", IsActive = true });
                 }
+            }
+            catch { }
+        }
+
+        private void EnsureRemoteDefaults()
+        {
+            try
+            {
+                if (FindByName("Cash A/c") == null) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "Cash A/c", IsActive = true });
+                if (FindByName("Bank A/c") == null) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "Bank A/c", IsActive = true });
+                if (FindByName("LHS") == null) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "LHS", IsActive = true });
+                if (FindByName("BFRS") == null) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "BFRS", IsActive = true });
             }
             catch { }
         }

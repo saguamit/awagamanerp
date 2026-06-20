@@ -27,39 +27,43 @@ namespace Awagaman_ERP
         {
             try
             {
-                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var lrEntries = new LRRepository().GetAll();
+                foreach (var lr in lrEntries)
                 {
-                    conn.Open();
-                    var names = new HashSet<string>();
-                    // Import Consignors
-                    using (var cmd = conn.CreateCommand())
+                    if (!string.IsNullOrWhiteSpace(lr.ConsignorName) &&
+                        names.Add(lr.ConsignorName.Trim()) &&
+                        _repo.FindByName(lr.ConsignorName) == null)
                     {
-                        cmd.CommandText = "SELECT DISTINCT ConsignorName, ConsignorAddress, ConsignorGST FROM LREntries WHERE ConsignorName IS NOT NULL AND ConsignorName != ''";
-                        using (var r = cmd.ExecuteReader())
-                            while (r.Read())
-                            {
-                                var name = r["ConsignorName"] as string;
-                                if (string.IsNullOrWhiteSpace(name) || !names.Add(name.ToLower()) || _repo.FindByName(name) != null) continue;
-                                var all = _repo.GetAll();
-                                _repo.Upsert(new PartyEntry { Sr = all.Count + 1, PartyName = name.Trim(), Address = (r["ConsignorAddress"] as string)?.Trim() ?? "", GSTNo = (r["ConsignorGST"] as string)?.Trim() ?? "" });
-                            }
+                        var all = _repo.GetAll();
+                        _repo.Upsert(new PartyEntry
+                        {
+                            Sr = all.Count + 1,
+                            PartyName = lr.ConsignorName.Trim(),
+                            Address = (lr.ConsignorAddress ?? string.Empty).Trim(),
+                            GSTNo = (lr.ConsignorGST ?? string.Empty).Trim()
+                        });
                     }
-                    // Import Consignees
-                    using (var cmd = conn.CreateCommand())
+
+                    if (!string.IsNullOrWhiteSpace(lr.ConsigneeName) &&
+                        names.Add(lr.ConsigneeName.Trim()) &&
+                        _repo.FindByName(lr.ConsigneeName) == null)
                     {
-                        cmd.CommandText = "SELECT DISTINCT ConsigneeName, ConsigneeAddress, ConsigneeGST FROM LREntries WHERE ConsigneeName IS NOT NULL AND ConsigneeName != ''";
-                        using (var r = cmd.ExecuteReader())
-                            while (r.Read())
-                            {
-                                var name = r["ConsigneeName"] as string;
-                                if (string.IsNullOrWhiteSpace(name) || !names.Add(name.ToLower()) || _repo.FindByName(name) != null) continue;
-                                var all = _repo.GetAll();
-                                _repo.Upsert(new PartyEntry { Sr = all.Count + 1, PartyName = name.Trim(), Address = (r["ConsigneeAddress"] as string)?.Trim() ?? "", GSTNo = (r["ConsigneeGST"] as string)?.Trim() ?? "" });
-                            }
+                        var all = _repo.GetAll();
+                        _repo.Upsert(new PartyEntry
+                        {
+                            Sr = all.Count + 1,
+                            PartyName = lr.ConsigneeName.Trim(),
+                            Address = (lr.ConsigneeAddress ?? string.Empty).Trim(),
+                            GSTNo = (lr.ConsigneeGST ?? string.Empty).Trim()
+                        });
                     }
                 }
             }
-            catch { }
+            catch (System.Exception ex)
+            {
+                AppLogger.LogException(nameof(PopulateFromLR), ex);
+            }
         }
 
         private void LoadParties()

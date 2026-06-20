@@ -20,6 +20,10 @@ namespace Awagaman_ERP.Data
 
         public List<ChallanEntry> GetAll()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<ChallanEntry>("api/challans");
+            }
             var entries = new List<ChallanEntry>();
 
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
@@ -79,6 +83,13 @@ namespace Awagaman_ERP.Data
 
         public List<ChallanEntry> GetPage(int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return ApplySort(GetAllRemoteSafe(), sortColumn, sortAscending)
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList();
+            }
             var entries = new List<ChallanEntry>();
             int offset = (pageNumber - 1) * pageSize;
             string orderBy = BuildOrderBy(sortColumn, sortAscending);
@@ -139,6 +150,23 @@ namespace Awagaman_ERP.Data
 
         public List<ChallanEntry> Search(string searchFilter, int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                var filter = (searchFilter ?? string.Empty).Trim();
+                return ApplySort(GetAllRemoteSafe().Where(e =>
+                    Contains(e.ChallanNumber, filter) ||
+                    Contains(e.LRNumber, filter) ||
+                    Contains(e.VehicleNumber, filter) ||
+                    Contains(e.VehicleType, filter) ||
+                    Contains(e.DriverName, filter) ||
+                    Contains(e.BrokerName, filter) ||
+                    Contains(e.From, filter) ||
+                    Contains(e.To, filter) ||
+                    Contains(e.OwnerName, filter)), sortColumn, sortAscending)
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList();
+            }
             var entries = new List<ChallanEntry>();
             int offset = (pageNumber - 1) * pageSize;
 
@@ -205,6 +233,17 @@ namespace Awagaman_ERP.Data
 
         public List<ChallanEntry> SearchAdvanced(string challanNo, string lrNo, string from, string to, int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return ApplySort(GetAllRemoteSafe().Where(e =>
+                    (string.IsNullOrWhiteSpace(challanNo) || Contains(e.ChallanNumber, challanNo)) &&
+                    (string.IsNullOrWhiteSpace(lrNo) || Contains(e.LRNumber, lrNo)) &&
+                    (string.IsNullOrWhiteSpace(from) || Contains(e.From, from)) &&
+                    (string.IsNullOrWhiteSpace(to) || Contains(e.To, to))), sortColumn, sortAscending)
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList();
+            }
             var entries = new List<ChallanEntry>();
             int offset = (pageNumber - 1) * pageSize;
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
@@ -233,6 +272,14 @@ namespace Awagaman_ERP.Data
 
         public int GetTotalCountAdvanced(string challanNo, string lrNo, string from, string to)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetAllRemoteSafe().Count(e =>
+                    (string.IsNullOrWhiteSpace(challanNo) || Contains(e.ChallanNumber, challanNo)) &&
+                    (string.IsNullOrWhiteSpace(lrNo) || Contains(e.LRNumber, lrNo)) &&
+                    (string.IsNullOrWhiteSpace(from) || Contains(e.From, from)) &&
+                    (string.IsNullOrWhiteSpace(to) || Contains(e.To, to)));
+            }
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = connection.CreateCommand())
             {
@@ -250,11 +297,30 @@ namespace Awagaman_ERP.Data
 
         public int GetTotalCount()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetAllRemoteSafe().Count;
+            }
             return GetTotalCount("");
         }
 
         public int GetTotalCount(string searchFilter)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                var filter = (searchFilter ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(filter)) return GetAllRemoteSafe().Count;
+                return GetAllRemoteSafe().Count(e =>
+                    Contains(e.ChallanNumber, filter) ||
+                    Contains(e.LRNumber, filter) ||
+                    Contains(e.VehicleNumber, filter) ||
+                    Contains(e.VehicleType, filter) ||
+                    Contains(e.DriverName, filter) ||
+                    Contains(e.BrokerName, filter) ||
+                    Contains(e.From, filter) ||
+                    Contains(e.To, filter) ||
+                    Contains(e.OwnerName, filter));
+            }
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = connection.CreateCommand())
             {
@@ -277,6 +343,10 @@ namespace Awagaman_ERP.Data
 
         public int GetMaxSr()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetAllRemoteSafe().Select(x => x.Sr).DefaultIfEmpty(0).Max();
+            }
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = new SQLiteCommand("SELECT COALESCE(MAX(Sr), 0) FROM Challans;", connection))
             {
@@ -288,10 +358,32 @@ namespace Awagaman_ERP.Data
         public ChallanEntry FindByChallanNumber(string challanNumber)
         {
             if (string.IsNullOrWhiteSpace(challanNumber)) return null;
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetAllRemoteSafe().Find(e => string.Equals((e.ChallanNumber ?? string.Empty).Trim(), challanNumber.Trim(), StringComparison.OrdinalIgnoreCase));
+            }
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = new SQLiteCommand("SELECT * FROM Challans WHERE LOWER(ChallanNumber) = LOWER(@num) LIMIT 1;", connection))
             {
                 command.Parameters.AddWithValue("@num", challanNumber.Trim());
+                connection.Open();
+                using (var reader = command.ExecuteReader())
+                    if (reader.Read()) return MapReader(reader);
+            }
+            return null;
+        }
+
+        public ChallanEntry FindById(int id)
+        {
+            if (id <= 0) return null;
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetAllRemoteSafe().Find(e => e.Id == id);
+            }
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = new SQLiteCommand("SELECT * FROM Challans WHERE Id = @id LIMIT 1;", connection))
+            {
+                command.Parameters.AddWithValue("@id", id);
                 connection.Open();
                 using (var reader = command.ExecuteReader())
                     if (reader.Read()) return MapReader(reader);
@@ -316,6 +408,19 @@ namespace Awagaman_ERP.Data
         {
             if (entry == null)
             {
+                return;
+            }
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                if (entry.Id <= 0)
+                {
+                    entry.Id = RemoteApiClient.PostAndReadInt("api/challans", entry);
+                }
+                else
+                {
+                    RemoteApiClient.Put($"api/challans/{entry.Id}", entry);
+                }
                 return;
             }
 
@@ -404,6 +509,15 @@ WHERE Id = @Id;";
                 return;
             }
 
+            if (BackendSettings.UseRemoteApi)
+            {
+                if (entry.Id > 0)
+                {
+                    RemoteApiClient.Delete($"api/challans/{entry.Id}");
+                }
+                return;
+            }
+
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = connection.CreateCommand())
             {
@@ -421,6 +535,50 @@ WHERE Id = @Id;";
 
                 command.ExecuteNonQuery();
             }
+        }
+
+        private static List<ChallanEntry> GetAllRemoteSafe()
+        {
+            return RemoteApiClient.GetList<ChallanEntry>("api/challans")
+                .OrderBy(e => e.Sr)
+                .ThenBy(e => e.Id)
+                .ToList();
+        }
+
+        private static IEnumerable<ChallanEntry> ApplySort(IEnumerable<ChallanEntry> source, string sortColumn, bool ascending)
+        {
+            var ordered = source ?? Enumerable.Empty<ChallanEntry>();
+            Func<ChallanEntry, object> keySelector;
+            switch ((sortColumn ?? string.Empty).ToLowerInvariant())
+            {
+                case "challannumber": keySelector = e => e.ChallanNumber ?? string.Empty; break;
+                case "date": keySelector = e => e.Date; break;
+                case "lrnumber": keySelector = e => e.LRNumber ?? string.Empty; break;
+                case "brokername": keySelector = e => e.BrokerName ?? string.Empty; break;
+                case "from":
+                case "fromlocation": keySelector = e => e.From ?? string.Empty; break;
+                case "to":
+                case "tolocation": keySelector = e => e.To ?? string.Empty; break;
+                case "vehiclenumber": keySelector = e => e.VehicleNumber ?? string.Empty; break;
+                case "vehicletype": keySelector = e => e.VehicleType ?? string.Empty; break;
+                case "drivername": keySelector = e => e.DriverName ?? string.Empty; break;
+                case "ownername": keySelector = e => e.OwnerName ?? string.Empty; break;
+                case "lorryhire": keySelector = e => e.LorryHire; break;
+                case "detention": keySelector = e => e.Detention; break;
+                case "hamali": keySelector = e => e.Hamali; break;
+                case "billamount": keySelector = e => e.BillAmount; break;
+                case "margin": keySelector = e => e.Margin; break;
+                default: keySelector = e => e.Sr; break;
+            }
+
+            return ascending ? ordered.OrderBy(keySelector).ThenBy(e => e.Id) : ordered.OrderByDescending(keySelector).ThenByDescending(e => e.Id);
+        }
+
+        private static bool Contains(string value, string filter)
+        {
+            return !string.IsNullOrWhiteSpace(value) &&
+                   !string.IsNullOrWhiteSpace(filter) &&
+                   value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private void MigrateLegacyXmlIfNeeded()

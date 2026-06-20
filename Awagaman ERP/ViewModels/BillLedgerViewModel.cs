@@ -12,7 +12,6 @@ namespace Awagaman_ERP.ViewModels
     public class BillLedgerViewModel : INotifyPropertyChanged
     {
         private readonly BillRepository _repository = new BillRepository();
-        private bool _suppressPersistence;
         private int _pageSize = 100000;
         private int _currentPage = 1;
         private int _totalCount;
@@ -73,7 +72,6 @@ namespace Awagaman_ERP.ViewModels
         {
             try
             {
-                _suppressPersistence = true;
                 PagedEntries.Clear();
                 if (_countDirty)
                 {
@@ -102,7 +100,6 @@ namespace Awagaman_ERP.ViewModels
                     e.BillNoDisplay = isNewGroup ? e.BillNo : string.Empty;
                 }
 
-                _suppressPersistence = false;
                 FilteredEntriesCount = PagedEntries.Count;
                 FilteredTotalDue = PagedEntries.Sum(e => e?.Due ?? 0);
                 _pageLoaded = true;
@@ -110,7 +107,6 @@ namespace Awagaman_ERP.ViewModels
             catch (Exception ex)
             {
                 System.Windows.MessageBox.Show("Bill ledger error: " + ex.Message, "Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
-                _suppressPersistence = false;
             }
         }
 
@@ -216,7 +212,10 @@ namespace Awagaman_ERP.ViewModels
                 foreach (var e in items)
                     if (e != null) e.HasComments = ids.Contains(e.Id);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(nameof(MarkComments), ex);
+            }
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

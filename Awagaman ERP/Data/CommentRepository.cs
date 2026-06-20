@@ -11,6 +11,10 @@ namespace Awagaman_ERP.Data
 
         public List<ChallanComment> GetByChallanId(int challanId)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<ChallanComment>($"api/comments/challan/{challanId}");
+            }
             var list = new List<ChallanComment>();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT * FROM ChallanComments WHERE ChallanId = @id ORDER BY CreatedAt DESC;", c))
@@ -32,6 +36,11 @@ namespace Awagaman_ERP.Data
 
         public void Add(ChallanComment comment)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                RemoteApiClient.PostAndReadInt("api/comments/challan", comment);
+                return;
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("INSERT INTO ChallanComments (ChallanId, Comment, CreatedAt) VALUES (@cid, @cmt, @dt);", c))
             {
@@ -45,6 +54,11 @@ namespace Awagaman_ERP.Data
 
         public void Delete(int commentId)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                RemoteApiClient.Delete($"api/comments/challan/{commentId}");
+                return;
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("DELETE FROM ChallanComments WHERE Id = @id;", c))
             {
@@ -57,6 +71,10 @@ namespace Awagaman_ERP.Data
         // LR Comments
         public List<LRComment> GetLRByEntryId(int lrEntryId)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<LRComment>($"api/comments/lr/{lrEntryId}");
+            }
             var list = new List<LRComment>();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT * FROM LRComments WHERE LREntryId = @id ORDER BY CreatedAt DESC;", c))
@@ -78,6 +96,11 @@ namespace Awagaman_ERP.Data
 
         public void AddLR(LRComment comment)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                RemoteApiClient.PostAndReadInt("api/comments/lr", comment);
+                return;
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("INSERT INTO LRComments (LREntryId, Comment, CreatedAt) VALUES (@eid, @cmt, @dt);", c))
             {
@@ -91,6 +114,11 @@ namespace Awagaman_ERP.Data
 
         public void DeleteLR(int commentId)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                RemoteApiClient.Delete($"api/comments/lr/{commentId}");
+                return;
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("DELETE FROM LRComments WHERE Id = @id;", c))
             {
@@ -102,6 +130,10 @@ namespace Awagaman_ERP.Data
 
         public HashSet<int> GetLREntryIdsWithComments()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return new HashSet<int>(RemoteApiClient.GetList<LRComment>("api/comments/lr/all").ConvertAll(x => x.LREntryId));
+            }
             var ids = new HashSet<int>();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT DISTINCT LREntryId FROM LRComments;", c))
@@ -116,6 +148,10 @@ namespace Awagaman_ERP.Data
         // Bill Comments
         public List<BillComment> GetBillByBillId(int billId)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<BillComment>($"api/comments/bill/{billId}");
+            }
             var list = new List<BillComment>();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT * FROM BillComments WHERE BillId = @id ORDER BY CreatedAt DESC;", c))
@@ -137,6 +173,11 @@ namespace Awagaman_ERP.Data
 
         public void AddBill(BillComment comment)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                RemoteApiClient.PostAndReadInt("api/comments/bill", comment);
+                return;
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("INSERT INTO BillComments (BillId, Comment, CreatedAt) VALUES (@eid, @cmt, @dt);", c))
             {
@@ -150,6 +191,11 @@ namespace Awagaman_ERP.Data
 
         public void DeleteBill(int commentId)
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                RemoteApiClient.Delete($"api/comments/bill/{commentId}");
+                return;
+            }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("DELETE FROM BillComments WHERE Id = @id;", c))
             {
@@ -161,6 +207,10 @@ namespace Awagaman_ERP.Data
 
         public HashSet<int> GetBillIdsWithComments()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return new HashSet<int>(RemoteApiClient.GetList<BillComment>("api/comments/bill/all").ConvertAll(x => x.BillId));
+            }
             var ids = new HashSet<int>();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT DISTINCT BillId FROM BillComments;", c))
@@ -168,6 +218,23 @@ namespace Awagaman_ERP.Data
                 c.Open();
                 using (var r = cmd.ExecuteReader())
                     while (r.Read()) ids.Add(Convert.ToInt32(r["BillId"]));
+            }
+            return ids;
+        }
+
+        public HashSet<int> GetChallanIdsWithComments()
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return new HashSet<int>(RemoteApiClient.GetList<ChallanComment>("api/comments/challan/all").ConvertAll(x => x.ChallanId));
+            }
+            var ids = new HashSet<int>();
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand("SELECT DISTINCT ChallanId FROM ChallanComments;", c))
+            {
+                c.Open();
+                using (var r = cmd.ExecuteReader())
+                    while (r.Read()) ids.Add(Convert.ToInt32(r["ChallanId"]));
             }
             return ids;
         }

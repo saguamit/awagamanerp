@@ -215,21 +215,13 @@ namespace Awagaman_ERP
             if (string.IsNullOrWhiteSpace(key)) return null;
             try
             {
-                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-                {
-                    conn.Open();
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = "SELECT LorryHire FROM Challans WHERE TRIM(COALESCE(ChallanNumber,'')) = @no LIMIT 1;";
-                        cmd.Parameters.AddWithValue("@no", key);
-                        var value = cmd.ExecuteScalar();
-                        if (value == null || value == DBNull.Value) return null;
-                        return Convert.ToDecimal(value);
-                    }
-                }
+                var challan = new ChallanRepository().GetAll()
+                    .FirstOrDefault(c => string.Equals((c.ChallanNumber ?? string.Empty).Trim(), key, StringComparison.OrdinalIgnoreCase));
+                return challan != null ? challan.LorryHire : (decimal?)null;
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogException(nameof(FindChallanLorryHireFromDatabase), ex);
                 return null;
             }
         }
@@ -256,7 +248,10 @@ namespace Awagaman_ERP
                 CurrentEntry.VehicleType = challan.VehicleType;
                 CurrentEntry.Broker = challan.BrokerName;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(nameof(ApplyChallanDetailsFromCHNo), ex);
+            }
         }
 
         private void RefreshChallanLorryHire(bool clearWhenMissing)
@@ -351,21 +346,9 @@ namespace Awagaman_ERP
         private static bool LRNoExistsInDatabase(string lrNo, int excludeId)
         {
             if (string.IsNullOrWhiteSpace(lrNo)) return false;
-            using (var conn = new System.Data.SQLite.SQLiteConnection(AppDatabase.ConnectionString))
-            {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = @"
-SELECT COUNT(*)
-FROM LREntries
-WHERE TRIM(LRNo) = TRIM(@lrNo)
-  AND (@excludeId <= 0 OR Id <> @excludeId);";
-                    cmd.Parameters.AddWithValue("@lrNo", lrNo.Trim());
-                    cmd.Parameters.AddWithValue("@excludeId", excludeId);
-                    return Convert.ToInt32(cmd.ExecuteScalar()) > 0;
-                }
-            }
+            return new LRRepository().GetAll().Any(x =>
+                x.Id != excludeId &&
+                string.Equals((x.LRNo ?? string.Empty).Trim(), lrNo.Trim(), StringComparison.OrdinalIgnoreCase));
         }
 
         private void ConsignorName_TextChanged(object sender, TextChangedEventArgs e)
@@ -550,7 +533,10 @@ WHERE TRIM(LRNo) = TRIM(@lrNo)
                 var party = new PartyRepository().FindByName(name);
                 if (party != null) onFound(party);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(nameof(AutoFillParty), ex);
+            }
         }
 
         private void SavePartyIfNew(string name, string address, string gst)
@@ -566,7 +552,10 @@ WHERE TRIM(LRNo) = TRIM(@lrNo)
                     repo.Upsert(new PartyEntry { Sr = maxSr + 1, PartyName = name.Trim(), Address = address?.Trim() ?? "", GSTNo = gst?.Trim() ?? "" });
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(nameof(SavePartyIfNew), ex);
+            }
         }
 
         private void Cancel_Click(object sender, RoutedEventArgs e)

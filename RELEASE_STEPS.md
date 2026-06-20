@@ -30,6 +30,8 @@ gh auth login
 Generate:
 - `AwagamanERP-Setup-v1.0.0.exe` (example)
 
+The app's update checker will download the latest release installer asset and run it in place, so the installer must be a normal Windows setup EXE/ MSI that upgrades over the existing install path.
+
 ## 5) Create release + upload installer
 
 ```powershell
@@ -43,6 +45,8 @@ For installer named `AwagamanERP-Setup-v1.0.0.exe`, your stable latest link is:
 https://github.com/saguamit/awagamanerp/releases/latest/download/AwagamanERP-Setup-v1.0.0.exe
 ```
 
+If you use a non-versioned installer name like `AwagamanERP-Setup.exe`, the update checker will still pick it up as long as it is uploaded as the latest release asset.
+
 ## 7) For next update
 Example `v1.0.1`:
 - Build `AwagamanERP-Setup-v1.0.1.exe`
@@ -51,4 +55,3 @@ Example `v1.0.1`:
 ```powershell
 gh release create v1.0.1 "C:\path\to\AwagamanERP-Setup-v1.0.1.exe" --title "Awagaman ERP v1.0.1" --notes "Release v1.0.1"
 ```
-

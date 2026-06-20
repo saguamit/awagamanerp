@@ -103,6 +103,7 @@
       <DependentUpon>ChallanFormWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="Data\AppDatabase.cs" />
+    <Compile Include="Data\BackendSettings.cs" />
     <Compile Include="Data\ChallanRepository.cs" />
     <Compile Include="Data\IChallanRepository.cs" />
     <Compile Include="Data\ILRRepository.cs" />
@@ -116,7 +117,9 @@
     <Compile Include="Data\CBSAccountRepository.cs" />
     <Compile Include="Data\CashBankStatementRepository.cs" />
     <Compile Include="Data\VehicleRepository.cs" />
+    <Compile Include="Data\RemoteApiClient.cs" />
     <Compile Include="Data\BillPrefixSettings.cs" />
+    <Compile Include="Data\AppLogger.cs" />
     <Compile Include="ViewModels\ChallanViewModel.cs" />
     <Compile Include="ViewModels\LRLedgerViewModel.cs" />
     <Compile Include="ViewModels\TrackingViewModel.cs" />
@@ -277,4 +280,8 @@
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Import Project="packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.118.0\build\net46\Stub.System.Data.SQLite.Core.NetFramework.targets" Condition="Exists('packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.118.0\build\net46\Stub.System.Data.SQLite.Core.NetFramework.targets')" />
+  <Target Name="CopyRuntimeAssetFiles" AfterTargets="Build">
+    <Copy SourceFiles="logo.png" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('logo.png')" />
+    <Copy SourceFiles="logo.ico" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('logo.ico')" />
+  </Target>
 </Project>

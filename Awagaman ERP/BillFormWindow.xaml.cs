@@ -64,7 +64,10 @@ namespace Awagaman_ERP
                 if (hasManualValues) return;
                 PopulateFromLRNumbers(Result.LRNo);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(nameof(BillFormWindow_Loaded), ex);
+            }
         }
 
         private void ApplyCreateModeLayout()
@@ -174,49 +177,9 @@ namespace Awagaman_ERP
                 .ToList();
             if (list.Count == 0) return;
 
-            var matched = new List<LREntry>();
-            using (var c = new System.Data.SQLite.SQLiteConnection(Data.AppDatabase.ConnectionString))
-            {
-                c.Open();
-                using (var cmd = c.CreateCommand())
-                {
-                    var pNames = new List<string>();
-                    for (int i = 0; i < list.Count; i++)
-                    {
-                        var p = "@p" + i;
-                        pNames.Add(p);
-                        cmd.Parameters.AddWithValue(p, list[i]);
-                    }
-                    cmd.CommandText = $@"SELECT LRNo, Date, ConsignorName, BillParty, FromLocation, ToLocation, VehicleType,
-                        TotalFreight, Hamali, Detention, Others, StCharge, NEFT, CASH, TDS, Ded
-                        FROM LREntries WHERE LRNo IN ({string.Join(",", pNames)});";
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        while (r.Read())
-                        {
-                            matched.Add(new LREntry
-                            {
-                                LRNo = r["LRNo"] as string,
-                                Date = DateTime.TryParse(r["Date"] as string, out var dt) ? dt : DateTime.Today,
-                                ConsignorName = r["ConsignorName"] as string,
-                                BillParty = r["BillParty"] as string,
-                                From = r["FromLocation"] as string,
-                                To = r["ToLocation"] as string,
-                                VehicleType = r["VehicleType"] as string,
-                                TotalFreight = Convert.ToDecimal(r["TotalFreight"]),
-                                Hamali = Convert.ToDecimal(r["Hamali"]),
-                                Detention = Convert.ToDecimal(r["Detention"]),
-                                Others = Convert.ToDecimal(r["Others"]),
-                                StCharge = Convert.ToDecimal(r["StCharge"]),
-                                NEFT = Convert.ToDecimal(r["NEFT"]),
-                                CASH = Convert.ToDecimal(r["CASH"]),
-                                TDS = Convert.ToDecimal(r["TDS"]),
-                                Ded = Convert.ToDecimal(r["Ded"])
-                            });
-                        }
-                    }
-                }
-            }
+            var matched = new LRRepository().GetAll()
+                .Where(x => list.Any(lr => string.Equals((x.LRNo ?? string.Empty).Trim(), lr, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
 
             if (matched.Count == 0) return;
             var first = matched[0];
@@ -250,52 +213,11 @@ namespace Awagaman_ERP
                 var filterParty = !string.IsNullOrWhiteSpace(existingParty)
                     ? existingParty
                     : (hasSelectedLrs ? existingParty : string.Empty);
-                var unbilled = new List<LREntry>();
-                using (var c = new System.Data.SQLite.SQLiteConnection(Data.AppDatabase.ConnectionString))
-                {
-                    c.Open();
-                    using (var cmd = c.CreateCommand())
-                    {
-                        cmd.CommandText = @"SELECT lr.Id, lr.LRNo, lr.BillNo, lr.ConsignorName, lr.BillParty, lr.FromLocation, lr.ToLocation, lr.VehicleNo, lr.VehicleType, lr.Date,
-                            lr.TotalFreight, lr.Hamali, lr.Detention, lr.Others, lr.StCharge, lr.NEFT, lr.CASH, lr.TDS, lr.Ded
-                            FROM LREntries lr
-                            WHERE (lr.BillNo IS NULL OR TRIM(lr.BillNo) = '')
-                            ORDER BY lr.LRNo;";
-                        using (var r = cmd.ExecuteReader())
-                        {
-                            while (r.Read())
-                            {
-                                var consignorName = (r["ConsignorName"] as string) ?? string.Empty;
-                                var billParty = (r["BillParty"] as string) ?? string.Empty;
-                                var effectiveParty = (billParty ?? string.Empty).Trim();
-                                if (!string.IsNullOrWhiteSpace(filterParty) && !IsSameParty(effectiveParty, filterParty))
-                                    continue;
-
-                                unbilled.Add(new LREntry
-                                {
-                                    Id = Convert.ToInt32(r["Id"]),
-                                    LRNo = r["LRNo"] as string,
-                                    Date = DateTime.TryParse(r["Date"] as string, out var dt) ? dt : DateTime.Today,
-                                    From = r["FromLocation"] as string,
-                                    To = r["ToLocation"] as string,
-                                    VehicleType = r["VehicleType"] as string,
-                                    ConsignorName = consignorName,
-                                    BillParty = billParty,
-                                    TotalFreight = Convert.ToDecimal(r["TotalFreight"]),
-                                    Hamali = Convert.ToDecimal(r["Hamali"]),
-                                    Detention = Convert.ToDecimal(r["Detention"]),
-                                    Others = Convert.ToDecimal(r["Others"]),
-                                    StCharge = Convert.ToDecimal(r["StCharge"]),
-                                    NEFT = Convert.ToDecimal(r["NEFT"]),
-                                    CASH = Convert.ToDecimal(r["CASH"]),
-                                    TDS = Convert.ToDecimal(r["TDS"]),
-                                    Ded = Convert.ToDecimal(r["Ded"]),
-                                    BillNo = r["BillNo"] as string,
-                                });
-                            }
-                        }
-                    }
-                }
+                var unbilled = new LRRepository().GetAll()
+                    .Where(lr => string.IsNullOrWhiteSpace(lr.BillNo))
+                    .Where(lr => string.IsNullOrWhiteSpace(filterParty) || IsSameParty((lr.BillParty ?? string.Empty).Trim(), filterParty))
+                    .OrderBy(lr => lr.LRNo)
+                    .ToList();
 
                 if (unbilled.Count == 0)
                 {
@@ -414,6 +336,7 @@ namespace Awagaman_ERP
             }
             catch (Exception ex)
             {
+                AppLogger.LogException(nameof(SelectLRs_Click), ex);
                 MessageBox.Show("Error: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -446,7 +369,10 @@ namespace Awagaman_ERP
                 if (string.IsNullOrWhiteSpace(Result?.LRNo)) return;
                 PopulateFromLRNumbers(Result.LRNo);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(nameof(LRNoBox_LostFocus), ex);
+            }
         }
 
         private void Save_Click(object sender, RoutedEventArgs e)
@@ -474,21 +400,30 @@ namespace Awagaman_ERP
             }
 
             WasSaved = true;
-            if (System.Windows.Interop.ComponentDispatcher.IsThreadModal)
-            {
-                DialogResult = true;
-            }
+            TrySetDialogResult(true);
             Close();
         }
 
         private void Cancel_Click(object sender, RoutedEventArgs e)
         {
             WasSaved = false;
-            if (System.Windows.Interop.ComponentDispatcher.IsThreadModal)
-            {
-                DialogResult = false;
-            }
+            TrySetDialogResult(false);
             Close();
+        }
+
+        private void TrySetDialogResult(bool? result)
+        {
+            try
+            {
+                if (IsLoaded && System.Windows.Interop.ComponentDispatcher.IsThreadModal)
+                {
+                    DialogResult = result;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // The window was opened with Show(), not ShowDialog().
+            }
         }
 
         private void BillNoBox_LostFocus(object sender, RoutedEventArgs e)
@@ -513,7 +448,10 @@ namespace Awagaman_ERP
                     Result.BillNo = $"{raw}/{next}";
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(nameof(BillNoBox_LostFocus), ex);
+            }
         }
 
         private static int GetNextBillSequence(string prefix)
@@ -522,26 +460,15 @@ namespace Awagaman_ERP
             if (string.IsNullOrWhiteSpace(pfx)) pfx = BillPrefixSettings.GetPrefix();
 
             var max = 0;
-            using (var c = new System.Data.SQLite.SQLiteConnection(Data.AppDatabase.ConnectionString))
+            foreach (var bill in new BillRepository().GetAll())
             {
-                c.Open();
-                using (var cmd = c.CreateCommand())
+                var billNo = (bill.BillNo ?? string.Empty).Trim();
+                if (!billNo.StartsWith(pfx + "/", StringComparison.OrdinalIgnoreCase)) continue;
+                var idx = billNo.LastIndexOf('/');
+                if (idx < 0 || idx == billNo.Length - 1) continue;
+                if (int.TryParse(billNo.Substring(idx + 1).Trim(), out var n) && n > max)
                 {
-                    cmd.CommandText = "SELECT BillNo FROM Bills WHERE BillNo LIKE @pfx";
-                    cmd.Parameters.AddWithValue("@pfx", pfx + "/%");
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        while (r.Read())
-                        {
-                            var billNo = (r["BillNo"] as string) ?? string.Empty;
-                            var idx = billNo.LastIndexOf('/');
-                            if (idx < 0 || idx == billNo.Length - 1) continue;
-                            if (int.TryParse(billNo.Substring(idx + 1).Trim(), out var n) && n > max)
-                            {
-                                max = n;
-                            }
-                        }
-                    }
+                    max = n;
                 }
             }
 

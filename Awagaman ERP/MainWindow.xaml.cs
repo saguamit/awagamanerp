@@ -15,6 +15,7 @@ using System.Text;
 using MahApps.Metro.Controls;
 using System.Reflection;
 using System.Windows.Media;
+using System.Windows.Automation;
 
 namespace Awagaman_ERP
 {
@@ -97,6 +98,13 @@ namespace Awagaman_ERP
             public bool WasReactivated;
         }
         private readonly Stack<CbsAccountUndoAction> _cbsAccountUndoStack = new Stack<CbsAccountUndoAction>();
+        private readonly ChallanRepository _challanRepo = new ChallanRepository();
+        private readonly LRRepository _lrRepo = new LRRepository();
+        private readonly BillRepository _billRepo = new BillRepository();
+        private readonly BillReceiptRepository _billReceiptRepo = new BillReceiptRepository();
+        private readonly TrackingRepository _trackingRepo = new TrackingRepository();
+        private readonly PartyRepository _partyRepo = new PartyRepository();
+        private readonly VehicleRepository _vehicleRepo = new VehicleRepository();
         public MainWindow()
         {
             InitializeComponent();
@@ -108,7 +116,8 @@ namespace Awagaman_ERP
                     AppVersionText.Text = $"v {ver.Major}.{ver.Minor}.{ver.Build}";
                 }
             }
-            catch { }
+            catch (Exception ex) { LogException(nameof(MainWindow), ex); }
+            ValidateRuntimeAssets();
             DataContext = new ChallanViewModel();
             LRVM = new LRLedgerViewModel();
             TrackingVM = new TrackingViewModel();
@@ -165,6 +174,43 @@ namespace Awagaman_ERP
             };
         }
 
+        private void ValidateRuntimeAssets()
+        {
+            try
+            {
+                var baseDir = AppDomain.CurrentDomain.BaseDirectory ?? string.Empty;
+                var required = new[]
+                {
+                    "logo.png",
+                    "logo.ico",
+                    "LR format.png",
+                    "LR consginor.png",
+                    "Lorry Lr.png",
+                    "bill format.png"
+                };
+
+                foreach (var file in required)
+                {
+                    try
+                    {
+                        var path = System.IO.Path.Combine(baseDir, file);
+                        if (!System.IO.File.Exists(path))
+                        {
+                            LogException("AssetMissing", new System.IO.FileNotFoundException($"Missing asset: {file}", path));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogException("ValidateRuntimeAssets", ex);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogException(nameof(ValidateRuntimeAssets), ex);
+            }
+        }
+
         private void VM_PropertyChanged(object sender, PropertyChangedEventArgs e)
         {
             if (e.PropertyName != null && e.PropertyName.StartsWith("Show"))
@@ -176,72 +222,29 @@ namespace Awagaman_ERP
 
         private void RefreshDashboard()
         {
-            // Query database directly for dashboard stats (Entries collection may be empty)
-            string connStr = Awagaman_ERP.Data.AppDatabase.ConnectionString;
-            long totalChallans = 0, dueChallans = 0, newBookings = 0, inTransit = 0, delivered = 0;
-            decimal totalDue = 0;
-
-            using (var conn = new System.Data.SQLite.SQLiteConnection(connStr))
+            var challans = _challanRepo.GetAll();
+            var bills = _billRepo.GetAll();
+            var cbsEntries = _cbsRepo.GetAll();
+            long totalChallans = challans.Count;
+            long dueChallans = 0;
+            long inTransit = 0;
+            long delivered = 0;
+            decimal totalDue = 0m;
+            foreach (var ch in challans)
             {
-                conn.Open();
-
-                // Total Challans and Due
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = "SELECT COUNT(*), COALESCE(SUM(LorryHire - LessTDS + Detention + Hamali - Deduction - AdvanceAmount - BalancePaidNEFT - BalancePaidCash), 0) FROM Challans;";
-                    using (var r = cmd.ExecuteReader()) { if (r.Read()) { totalChallans = (long)r[0]; totalDue = Convert.ToDecimal(r[1]); } }
-                }
-
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = "SELECT COUNT(*) FROM Challans WHERE (LorryHire - LessTDS + Detention + Hamali - Deduction - AdvanceAmount - BalancePaidNEFT - BalancePaidCash) > 0;";
-                    dueChallans = Convert.ToInt64(cmd.ExecuteScalar());
-                }
-
-                // New Bookings count is derived below using combined conditions.
-
-                // Tracking stats
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = "SELECT COUNT(*) FROM TrackingEntries WHERE DispatchDate IS NOT NULL AND DeliveredDate IS NULL;";
-                    inTransit = (long)cmd.ExecuteScalar();
-                }
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = "SELECT COUNT(*) FROM TrackingEntries WHERE DeliveredDate IS NOT NULL;";
-                    delivered = (long)cmd.ExecuteScalar();
-                }
+                var due = ch.LorryHire - ch.LessTDS + ch.Detention + ch.Hamali - ch.Deduction - ch.AdvanceAmount - ch.BalancePaidNEFT - ch.BalancePaidCash;
+                totalDue += due;
+                if (due > 0m) dueChallans++;
             }
-
-            // Bill total outstanding
-            decimal billTotalDue = 0;
-            decimal cbsBankNet = 0;
-            decimal cbsCashNet = 0;
-            using (var conn = new System.Data.SQLite.SQLiteConnection(connStr))
+            foreach (var tracking in new TrackingRepository().GetAll())
             {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = "SELECT COALESCE(SUM(Freight + Detention + HML + OTHR + StCharge - RCVD - TDS - DED), 0) FROM Bills;";
-                    billTotalDue = Convert.ToDecimal(cmd.ExecuteScalar());
-                }
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = @"
-SELECT
-    COALESCE(SUM(COALESCE(BankDr,0) - COALESCE(BankCr,0)), 0),
-    COALESCE(SUM(COALESCE(CashDr,0) - COALESCE(CashCr,0)), 0)
-FROM CashBankStatements;";
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        if (r.Read())
-                        {
-                            cbsBankNet = Convert.ToDecimal(r[0]);
-                            cbsCashNet = Convert.ToDecimal(r[1]);
-                        }
-                    }
-                }
+                if (tracking.DispatchDate != null && tracking.DeliveredDate == null) inTransit++;
+                if (tracking.DeliveredDate != null) delivered++;
             }
+            decimal billTotalDue = bills.Sum(b => b.Freight + b.Detention + b.HML + b.OTHR + b.StCharge - b.RCVD - b.TDS - b.DED);
+            decimal cbsBankNet = cbsEntries.Sum(x => x.BankDr - x.BankCr);
+            decimal cbsCashNet = cbsEntries.Sum(x => x.CashDr - x.CashCr);
+            long newBookings = 0;
 
             if (DashboardTotalDue != null) DashboardTotalDue.Text = $"₹ {totalDue:N2}";
             if (DashboardTotalChallans != null) DashboardTotalChallans.Text = $"{dueChallans} Due Challans";
@@ -249,130 +252,12 @@ FROM CashBankStatements;";
             if (DashboardCBSBankNet != null) DashboardCBSBankNet.Text = $"₹ {cbsBankNet:N2}";
             if (DashboardCBSCashNet != null) DashboardCBSCashNet.Text = $"₹ {cbsCashNet:N2}";
 
-            // New Bookings grid
-            {
-                var allLrNos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var allChallans = new List<ChallanEntry>();
-                using (var conn = new System.Data.SQLite.SQLiteConnection(connStr))
-                {
-                    conn.Open();
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = "SELECT LRNo FROM LREntries WHERE LRNo IS NOT NULL AND TRIM(LRNo) <> '';";
-                        using (var r = cmd.ExecuteReader())
-                        {
-                            while (r.Read())
-                            {
-                                var lrNo = (r["LRNo"] as string ?? string.Empty).Trim();
-                                if (!string.IsNullOrWhiteSpace(lrNo)) allLrNos.Add(lrNo);
-                            }
-                        }
-                    }
+            var newBookingItems = LoadPendingBookingItems(50);
+            newBookings = newBookingItems.Count;
+            if (DashboardNewBookings != null) DashboardNewBookings.Text = newBookings.ToString();
 
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = "SELECT Id, ChallanNumber, LRNumber, FromLocation, ToLocation, VehicleNumber, BrokerName, LorryHire FROM Challans ORDER BY Date DESC;";
-                        using (var r = cmd.ExecuteReader())
-                        {
-                            while (r.Read())
-                            {
-                                allChallans.Add(new ChallanEntry
-                                {
-                                    Id = Convert.ToInt32(r["Id"]),
-                                    ChallanNumber = r["ChallanNumber"] as string,
-                                    LRNumber = r["LRNumber"] as string,
-                                    From = r["FromLocation"] as string,
-                                    To = r["ToLocation"] as string,
-                                    VehicleNumber = r["VehicleNumber"] as string,
-                                    BrokerName = r["BrokerName"] as string,
-                                    LorryHire = Convert.ToDecimal(r["LorryHire"]),
-                                });
-                            }
-                        }
-                    }
-                }
-
-                List<string> GetMissingLrNos(string raw)
-                {
-                    raw = (raw ?? string.Empty).Trim();
-                    if (string.IsNullOrWhiteSpace(raw)) return new List<string>();
-
-                    var lrParts = raw.Split(new[] { ',', ';', ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries)
-                                     .Select(x => x.Trim())
-                                     .Where(x => !string.IsNullOrWhiteSpace(x))
-                                     .Distinct(StringComparer.OrdinalIgnoreCase)
-                                     .ToList();
-                    if (lrParts.Count == 0) return new List<string>();
-
-                    return lrParts.Where(lr => !allLrNos.Contains(lr)).ToList();
-                }
-
-                var expandedPending = new List<ChallanEntry>();
-                foreach (var ch in allChallans)
-                {
-                    var raw = (ch.LRNumber ?? string.Empty).Trim();
-                    if (string.IsNullOrWhiteSpace(raw))
-                    {
-                        expandedPending.Add(ch);
-                        continue;
-                    }
-
-                    var missing = GetMissingLrNos(raw);
-                    if (missing.Count == 0) continue;
-                    foreach (var miss in missing)
-                    {
-                        expandedPending.Add(new ChallanEntry
-                        {
-                            Id = ch.Id,
-                            ChallanNumber = ch.ChallanNumber,
-                            LRNumber = miss,
-                            From = ch.From,
-                            To = ch.To,
-                            VehicleNumber = ch.VehicleNumber,
-                            BrokerName = ch.BrokerName
-                            ,
-                            LorryHire = ch.LorryHire
-                        });
-                    }
-                }
-
-                var newBookingItems = expandedPending.Take(50).ToList();
-                newBookings = newBookingItems.Count;
-                if (DashboardNewBookings != null) DashboardNewBookings.Text = newBookings.ToString();
-                if (NewBookingGrid != null) NewBookingGrid.ItemsSource = newBookingItems;
-            }
-
-            // Pending Bill list
-            if (DashboardPendingBillGrid != null)
-            {
-                var itemsList = new List<LREntry>();
-                using (var conn = new System.Data.SQLite.SQLiteConnection(connStr))
-                {
-                    conn.Open();
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = @"SELECT lr.Id, lr.LRNo, lr.ConsignorName, lr.BillParty, lr.FromLocation, lr.ToLocation, lr.VehicleNo
-                            FROM LREntries lr
-                            WHERE (lr.BillNo IS NULL OR lr.BillNo = '')
-                            ORDER BY lr.Id DESC LIMIT 30;";
-                        using (var r = cmd.ExecuteReader())
-                        {
-                            while (r.Read())
-                                itemsList.Add(new LREntry
-                                {
-                                    Id = Convert.ToInt32(r["Id"]),
-                                    LRNo = r["LRNo"] as string,
-                                    BillParty = r["BillParty"] as string,
-                                    ConsignorName = string.IsNullOrWhiteSpace(r["BillParty"] as string) ? (r["ConsignorName"] as string) : (r["BillParty"] as string),
-                                    From = r["FromLocation"] as string,
-                                    To = r["ToLocation"] as string,
-                                    VehicleNo = r["VehicleNo"] as string,
-                                });
-                        }
-                    }
-                }
-                DashboardPendingBillGrid.ItemsSource = itemsList;
-            }
+            var pendingBills = LoadPendingBillItems(30);
+            if (DashboardBillsCard != null) DashboardBillsCard.ToolTip = $"Open pending bills window ({pendingBills.Count})";
         }
 
         private void DataGrid_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -691,6 +576,471 @@ FROM CashBankStatements;";
             e.Handled = true;
         }
 
+        private void DashboardBookingsCard_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            ShowPendingBookingsWindow();
+            e.Handled = true;
+        }
+
+        private void DashboardBillsCard_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            ShowPendingBillsWindow();
+            e.Handled = true;
+        }
+
+        private List<ChallanEntry> LoadPendingBookingItems(int limit = 50)
+        {
+            var allLrNos = new HashSet<string>(
+                _lrRepo.GetAll()
+                    .Select(x => (x.LRNo ?? string.Empty).Trim())
+                    .Where(x => !string.IsNullOrWhiteSpace(x)),
+                StringComparer.OrdinalIgnoreCase);
+            var allChallans = _challanRepo.GetAll();
+
+            List<string> GetMissingLrNos(string raw)
+            {
+                raw = (raw ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(raw)) return new List<string>();
+
+                var lrParts = raw.Split(new[] { ',', ';', ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries)
+                                 .Select(x => x.Trim())
+                                 .Where(x => !string.IsNullOrWhiteSpace(x))
+                                 .Distinct(StringComparer.OrdinalIgnoreCase)
+                                 .ToList();
+                if (lrParts.Count == 0) return new List<string>();
+
+                return lrParts.Where(lr => !allLrNos.Contains(lr)).ToList();
+            }
+
+            var expandedPending = new List<ChallanEntry>();
+            foreach (var ch in allChallans)
+            {
+                var raw = (ch.LRNumber ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    expandedPending.Add(ch);
+                    continue;
+                }
+
+                var missing = GetMissingLrNos(raw);
+                if (missing.Count == 0) continue;
+                foreach (var miss in missing)
+                {
+                    expandedPending.Add(new ChallanEntry
+                    {
+                        Id = ch.Id,
+                        ChallanNumber = ch.ChallanNumber,
+                        LRNumber = miss,
+                        From = ch.From,
+                        To = ch.To,
+                        VehicleNumber = ch.VehicleNumber,
+                        BrokerName = ch.BrokerName,
+                        LorryHire = ch.LorryHire
+                    });
+                }
+            }
+
+            return expandedPending.Take(limit).ToList();
+        }
+
+        private void ShowPendingBookingsWindow()
+        {
+            var items = LoadPendingBookingItems(200);
+            if (items.Count == 0)
+            {
+                MessageBox.Show("No pending LR challans found.", "New Bookings", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var win = new Window
+            {
+                Title = "Pending LR to Create",
+                Width = 1050,
+                Height = 620,
+                Owner = this,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = Brushes.White,
+                ResizeMode = ResizeMode.CanResize
+            };
+
+            var root = new Grid { Margin = new Thickness(16) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var header = new Grid { Margin = new Thickness(0, 0, 0, 12) };
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var titleBlock = new StackPanel();
+            titleBlock.Children.Add(new TextBlock
+            {
+                Text = "Pending LR to Create",
+                FontSize = 20,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#153B63"))
+            });
+            titleBlock.Children.Add(new TextBlock
+            {
+                Text = "Select a challan row below, then create the LR.",
+                FontSize = 11,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#64748B")),
+                Margin = new Thickness(0, 4, 0, 0)
+            });
+            header.Children.Add(titleBlock);
+
+            var countBadge = new Border
+            {
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F3E8FF")),
+                CornerRadius = new CornerRadius(999),
+                Padding = new Thickness(12, 6, 12, 6),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            countBadge.Child = new TextBlock
+            {
+                Text = $"{items.Count} Pending",
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#6D28D9")),
+                FontSize = 11,
+                FontWeight = FontWeights.Bold
+            };
+            Grid.SetColumn(countBadge, 1);
+            header.Children.Add(countBadge);
+            Grid.SetRow(header, 0);
+            root.Children.Add(header);
+
+            var grid = new DataGrid
+            {
+                ItemsSource = items,
+                AutoGenerateColumns = false,
+                CanUserAddRows = false,
+                IsReadOnly = true,
+                SelectionMode = DataGridSelectionMode.Single,
+                SelectionUnit = DataGridSelectionUnit.FullRow,
+                HeadersVisibility = DataGridHeadersVisibility.Column,
+                GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
+                RowHeight = 32,
+                Margin = new Thickness(0),
+                Background = Brushes.White,
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#DDE6F4")),
+                BorderThickness = new Thickness(1)
+            };
+            grid.Columns.Add(new DataGridTemplateColumn
+            {
+                Header = string.Empty,
+                Width = new DataGridLength(110),
+                CellTemplate = BuildCreateLrButtonTemplate()
+            });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Challan No", Binding = new Binding("ChallanNumber"), Width = 120, FontWeight = FontWeights.SemiBold });
+            grid.Columns.Add(new DataGridTextColumn { Header = "LR No", Binding = new Binding("LRNumber"), Width = 110 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "From", Binding = new Binding("From"), Width = 110 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "To", Binding = new Binding("To"), Width = 110 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Vehicle No", Binding = new Binding("VehicleNumber"), Width = 120 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Broker", Binding = new Binding("BrokerName"), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+
+            Grid.SetRow(grid, 1);
+            root.Children.Add(grid);
+
+            var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+            var openBtn = new Button
+            {
+                Content = "Create LR",
+                Width = 110,
+                Height = 30,
+                Margin = new Thickness(0, 0, 8, 0),
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#6D28D9")),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0)
+            };
+            var closeBtn = new Button { Content = "Close", Width = 90, Height = 30, IsCancel = true };
+            footer.Children.Add(openBtn);
+            footer.Children.Add(closeBtn);
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            openBtn.Click += (openSender, openArgs) =>
+            {
+                if (!(grid.SelectedItem is ChallanEntry entry))
+                {
+                    MessageBox.Show(win, "Select a pending challan row first.", "New Bookings", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                win.Close();
+                var form = new LRFormWindow(VM.Entries, LRVM.Entries, prefillFrom: entry);
+                if (!string.IsNullOrWhiteSpace(entry.LRNumber)) form.CurrentEntry.LRNo = entry.LRNumber.Trim();
+                form.Owner = this;
+                form.Closed += (closedSender, closedArgs) =>
+                {
+                    if (!form.WasSaved) return;
+                    var lrEntry = form.Result;
+                    if (lrEntry == null) return;
+                    try
+                    {
+                        int maxSr = 0;
+                        foreach (var lrItem in LRVM.Entries) { if (lrItem.Sr > maxSr) maxSr = lrItem.Sr; }
+                        lrEntry.Sr = maxSr + 1;
+                        LRVM.Entries.Add(lrEntry);
+                        UpdateChallanLRNumbers(entry.Id, lrEntry.LRNo);
+                        LRVM.RefreshAfterDelete();
+                        VM.RefreshAfterDelete();
+                        RefreshDashboard();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Unable to save LR entry: " + ex.Message, "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                };
+                form.Show();
+            };
+
+            grid.MouseDoubleClick += (mouseSender, mouseArgs) =>
+            {
+                if (grid.SelectedItem is ChallanEntry)
+                {
+                    openBtn.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                }
+            };
+
+            win.Content = root;
+            win.ShowDialog();
+        }
+
+        private List<LREntry> LoadPendingBillItems(int limit = 50)
+        {
+            var billedLrSet = GetBilledLrNumbers();
+            return _lrRepo.GetAll()
+                .Where(lr => string.IsNullOrWhiteSpace(lr.BillNo))
+                .Where(lr => !IsLrBilled((lr.LRNo ?? string.Empty).Trim(), billedLrSet))
+                .OrderByDescending(lr => lr.Id)
+                .Select(lr => new LREntry
+                {
+                    Id = lr.Id,
+                    LRNo = lr.LRNo,
+                    BillParty = lr.BillParty,
+                    ConsignorName = string.IsNullOrWhiteSpace(lr.BillParty) ? lr.ConsignorName : lr.BillParty,
+                    From = lr.From,
+                    To = lr.To,
+                    VehicleNo = lr.VehicleNo
+                })
+                .Take(limit)
+                .ToList();
+        }
+
+        private void ShowPendingBillsWindow()
+        {
+            var items = LoadPendingBillItems(200);
+            if (items.Count == 0)
+            {
+                MessageBox.Show("No pending LR entries found for billing.", "Pending Bills", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var win = new Window
+            {
+                Title = "Pending Bills",
+                Width = 1050,
+                Height = 620,
+                Owner = this,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = Brushes.White,
+                ResizeMode = ResizeMode.CanResize
+            };
+
+            var root = new Grid { Margin = new Thickness(16) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var header = new Grid { Margin = new Thickness(0, 0, 0, 12) };
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var titleBlock = new StackPanel();
+            titleBlock.Children.Add(new TextBlock
+            {
+                Text = "Pending Bills",
+                FontSize = 20,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#153B63"))
+            });
+            titleBlock.Children.Add(new TextBlock
+            {
+                Text = "Select an LR row below, then create the bill.",
+                FontSize = 11,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#64748B")),
+                Margin = new Thickness(0, 4, 0, 0)
+            });
+            header.Children.Add(titleBlock);
+
+            var countBadge = new Border
+            {
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFEDD5")),
+                CornerRadius = new CornerRadius(999),
+                Padding = new Thickness(12, 6, 12, 6),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            countBadge.Child = new TextBlock
+            {
+                Text = $"{items.Count} Pending",
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#B45309")),
+                FontSize = 11,
+                FontWeight = FontWeights.Bold
+            };
+            Grid.SetColumn(countBadge, 1);
+            header.Children.Add(countBadge);
+            Grid.SetRow(header, 0);
+            root.Children.Add(header);
+
+            var grid = new DataGrid
+            {
+                ItemsSource = items,
+                AutoGenerateColumns = false,
+                CanUserAddRows = false,
+                IsReadOnly = true,
+                SelectionMode = DataGridSelectionMode.Single,
+                SelectionUnit = DataGridSelectionUnit.FullRow,
+                HeadersVisibility = DataGridHeadersVisibility.Column,
+                GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
+                RowHeight = 32,
+                Margin = new Thickness(0),
+                Background = Brushes.White,
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#DDE6F4")),
+                BorderThickness = new Thickness(1)
+            };
+            grid.Columns.Add(new DataGridTemplateColumn
+            {
+                Header = string.Empty,
+                Width = new DataGridLength(112),
+                CellTemplate = BuildCreateBillButtonTemplate()
+            });
+            grid.Columns.Add(new DataGridTextColumn { Header = "LR No", Binding = new Binding("LRNo"), Width = 120, FontWeight = FontWeights.SemiBold });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Party", Binding = new Binding("ConsignorName"), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+            grid.Columns.Add(new DataGridTextColumn { Header = "From", Binding = new Binding("From"), Width = 110 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "To", Binding = new Binding("To"), Width = 110 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Vehicle No", Binding = new Binding("VehicleNo"), Width = 120 });
+            Grid.SetRow(grid, 1);
+            root.Children.Add(grid);
+
+            var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+            var createBtn = new Button
+            {
+                Content = "Create Bill",
+                Width = 110,
+                Height = 30,
+                Margin = new Thickness(0, 0, 8, 0),
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D97706")),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0)
+            };
+            var closeBtn = new Button { Content = "Close", Width = 90, Height = 30, IsCancel = true };
+            footer.Children.Add(createBtn);
+            footer.Children.Add(closeBtn);
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            createBtn.Click += (createSender, createArgs) =>
+            {
+                if (!(grid.SelectedItem is LREntry lr))
+                {
+                    MessageBox.Show(win, "Select a pending LR row first.", "Pending Bills", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                win.Close();
+                var form = new BillFormWindow();
+                form.Result.Party = (lr.BillParty ?? string.Empty).Trim();
+                form.Result.LRNo = lr.LRNo;
+                form.Result.LRDate = lr.Date;
+                form.Result.From = lr.From;
+                form.Result.To = lr.To;
+                form.Result.VehicleType = lr.VehicleType;
+                form.Result.Freight = lr.TotalFreight;
+                form.Result.HML = lr.Hamali;
+                form.Result.Detention = lr.Detention;
+                form.Result.OTHR = lr.Others;
+                form.Result.StCharge = lr.StCharge;
+                form.Result.RCVD = lr.NEFT + lr.CASH;
+                form.Result.TDS = lr.TDS;
+                form.Result.DED = lr.Ded;
+                form.DataContext = form.Result;
+                form.Owner = this;
+                form.Closed += (closedSender, closedArgs) =>
+                {
+                    if (!form.WasSaved) return;
+                    var entry = form.Result;
+                    try
+                    {
+                        SaveBillRowsFromFormEntry(entry);
+                        UpdateLRBillNo(lr.Id, entry.BillNo);
+                        BillVM.RefreshAfterDelete();
+                        LRVM.RefreshAfterDelete();
+                        BillUpdatePageUI();
+                        LRUpdatePageUI();
+                        RefreshDashboard();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Save error: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                };
+                form.Show();
+            };
+
+            grid.MouseDoubleClick += (gridSender, gridArgs) =>
+            {
+                if (grid.SelectedItem is LREntry)
+                {
+                    createBtn.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                }
+            };
+
+            win.Content = root;
+            win.ShowDialog();
+        }
+
+        private DataTemplate BuildCreateBillButtonTemplate()
+        {
+            var factory = new FrameworkElementFactory(typeof(Button));
+            factory.SetValue(Button.ContentProperty, "Create Bill");
+            factory.SetValue(Button.ToolTipProperty, "Create Bill for this LR");
+            factory.SetValue(Button.CursorProperty, Cursors.Hand);
+            factory.SetValue(Button.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            factory.SetValue(Button.MarginProperty, new Thickness(0));
+            factory.SetValue(Button.BackgroundProperty, new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D97706")));
+            factory.SetValue(Button.ForegroundProperty, Brushes.White);
+            factory.SetValue(Button.BorderThicknessProperty, new Thickness(0));
+            factory.SetValue(Button.PaddingProperty, new Thickness(12, 0, 12, 0));
+            factory.SetValue(Button.HeightProperty, 28.0);
+            factory.SetValue(Button.MinWidthProperty, 86.0);
+            factory.SetBinding(Button.TagProperty, new Binding("."));
+            factory.AddHandler(Button.ClickEvent, new RoutedEventHandler(DashboardMakeBill_Click));
+
+            var template = new DataTemplate();
+            template.VisualTree = factory;
+            return template;
+        }
+
+        private DataTemplate BuildCreateLrButtonTemplate()
+        {
+            var factory = new FrameworkElementFactory(typeof(Button));
+            factory.SetValue(Button.ContentProperty, "Create LR");
+            factory.SetValue(Button.ToolTipProperty, "Create LR for this challan");
+            factory.SetValue(Button.CursorProperty, Cursors.Hand);
+            factory.SetValue(Button.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            factory.SetValue(Button.MarginProperty, new Thickness(0));
+            factory.SetValue(Button.BackgroundProperty, new SolidColorBrush((Color)ColorConverter.ConvertFromString("#6D28D9")));
+            factory.SetValue(Button.ForegroundProperty, Brushes.White);
+            factory.SetValue(Button.BorderThicknessProperty, new Thickness(0));
+            factory.SetValue(Button.PaddingProperty, new Thickness(12, 0, 12, 0));
+            factory.SetValue(Button.HeightProperty, 28.0);
+            factory.SetValue(Button.MinWidthProperty, 84.0);
+            factory.SetBinding(Button.TagProperty, new Binding("."));
+            factory.AddHandler(Button.ClickEvent, new RoutedEventHandler(DashboardMakeLR_Click));
+
+            var template = new DataTemplate();
+            template.VisualTree = factory;
+            return template;
+        }
+
         private void LRDeleteSelected_Click(object sender, RoutedEventArgs e)
         {
             if (LRLedgerGrid == null) return;
@@ -699,11 +1049,7 @@ FROM CashBankStatements;";
             if (MessageBox.Show($"Delete {selected.Count} LR entr{(selected.Count == 1 ? "y" : "ies")}?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
             foreach (var item in selected)
             {
-                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-                {
-                    conn.Open();
-                    using (var cmd = conn.CreateCommand()) { cmd.CommandText = "DELETE FROM LREntries WHERE Id = @id"; cmd.Parameters.AddWithValue("@id", item.Id); cmd.ExecuteNonQuery(); }
-                }
+                try { _lrRepo.Delete(item); } catch { }
             }
             LRVM.RefreshAfterDelete();
             SyncAllChallanBillingFromLR();
@@ -851,7 +1197,8 @@ FROM CashBankStatements;";
             if (LRLedgerGrid == null) return;
             var selected = LRLedgerGrid.SelectedItems.Cast<LREntry>().ToList();
             if (selected.Count == 0) { MessageBox.Show("Select LR entries to create a bill.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information); return; }
-            var unbilled = selected.Where(lr => string.IsNullOrEmpty(lr.BillNo)).ToList();
+            var billedLrSet = GetBilledLrNumbers();
+            var unbilled = selected.Where(lr => !IsLrBilled(lr?.LRNo, billedLrSet) && string.IsNullOrWhiteSpace(lr?.BillNo)).ToList();
             if (unbilled.Count == 0) { MessageBox.Show("All selected LRs already have a bill.", "Already Billed", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
             if (unbilled.Count < selected.Count)
             {
@@ -929,49 +1276,11 @@ FROM CashBankStatements;";
             }
 
             var lrMap = new Dictionary<string, LREntry>(StringComparer.OrdinalIgnoreCase);
-            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+            foreach (var lr in _lrRepo.GetAll().Where(x => lrNos.Any(n => string.Equals((x.LRNo ?? string.Empty).Trim(), n, StringComparison.OrdinalIgnoreCase))))
             {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
-                {
-                    var pNames = new List<string>();
-                    for (int i = 0; i < lrNos.Count; i++)
-                    {
-                        var p = "@lr" + i;
-                        pNames.Add(p);
-                        cmd.Parameters.AddWithValue(p, lrNos[i]);
-                    }
-                    cmd.CommandText = $@"SELECT LRNo, Date, ConsignorName, BillParty, FromLocation, ToLocation, VehicleType,
-                        TotalFreight, Hamali, Detention, Others, NEFT, CASH, TDS, Ded
-                        FROM LREntries
-                        WHERE LRNo IN ({string.Join(",", pNames)});";
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        while (r.Read())
-                        {
-                            var lrNo = (r["LRNo"] as string ?? string.Empty).Trim();
-                            if (string.IsNullOrWhiteSpace(lrNo)) continue;
-                            lrMap[lrNo] = new LREntry
-                            {
-                                LRNo = lrNo,
-                                Date = DateTime.TryParse(r["Date"] as string, out var dt) ? dt : DateTime.Today,
-                                ConsignorName = r["ConsignorName"] as string,
-                                BillParty = r["BillParty"] as string,
-                                From = r["FromLocation"] as string,
-                                To = r["ToLocation"] as string,
-                                VehicleType = r["VehicleType"] as string,
-                                TotalFreight = Convert.ToDecimal(r["TotalFreight"]),
-                                Hamali = Convert.ToDecimal(r["Hamali"]),
-                                Detention = Convert.ToDecimal(r["Detention"]),
-                                Others = Convert.ToDecimal(r["Others"]),
-                                NEFT = Convert.ToDecimal(r["NEFT"]),
-                                CASH = Convert.ToDecimal(r["CASH"]),
-                                TDS = Convert.ToDecimal(r["TDS"]),
-                                Ded = Convert.ToDecimal(r["Ded"])
-                            };
-                        }
-                    }
-                }
+                var lrNo = (lr.LRNo ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(lrNo)) continue;
+                lrMap[lrNo] = lr;
             }
 
             foreach (var lrNo in lrNos)
@@ -1009,101 +1318,44 @@ FROM CashBankStatements;";
 
         private int GetNextBillSr()
         {
-            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-            {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = "SELECT COALESCE(MAX(Sr), 0) FROM Bills;";
-                    return Convert.ToInt32(cmd.ExecuteScalar()) + 1;
-                }
-            }
+            return _billRepo.GetMaxSr() + 1;
         }
         private void UpdateLRBillNoByLRNo(string lrNo, string billNo)
         {
             if (string.IsNullOrWhiteSpace(lrNo)) return;
-            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-            {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = "UPDATE LREntries SET BillNo = @billNo WHERE LRNo = @lrNo;";
-                    cmd.Parameters.AddWithValue("@billNo", (object)billNo ?? DBNull.Value);
-                    cmd.Parameters.AddWithValue("@lrNo", lrNo.Trim());
-                    cmd.ExecuteNonQuery();
-                }
-            }
+            var lr = _lrRepo.GetAll().FirstOrDefault(x => string.Equals((x.LRNo ?? string.Empty).Trim(), lrNo.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (lr == null) return;
+            lr.BillNo = billNo;
+            _lrRepo.Upsert(lr);
         }
 
         private void UpdateLRBillNo(int lrId, string billNo)
         {
             if (lrId <= 0) return;
-            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-            {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = "UPDATE LREntries SET BillNo = @billNo WHERE Id = @id;";
-                    cmd.Parameters.AddWithValue("@billNo", (object)billNo ?? DBNull.Value);
-                    cmd.Parameters.AddWithValue("@id", lrId);
-                    cmd.ExecuteNonQuery();
-                }
-            }
+            var lr = _lrRepo.GetAll().FirstOrDefault(x => x.Id == lrId);
+            if (lr == null) return;
+            lr.BillNo = billNo;
+            _lrRepo.Upsert(lr);
         }
 
         private void SyncLREntriesFromBillNo(string billNo)
         {
             billNo = (billNo ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(billNo)) return;
+            var linked = _billRepo.GetAll()
+                .Where(x => string.Equals((x.BillNo ?? string.Empty).Trim(), billNo, StringComparison.OrdinalIgnoreCase))
+                .Where(x => !string.IsNullOrWhiteSpace((x.LRNo ?? string.Empty).Trim()))
+                .Select(x => new { LRNo = (x.LRNo ?? string.Empty).Trim(), BillDate = x.BillDate, Party = (x.Party ?? string.Empty).Trim() })
+                .ToList();
 
-            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+            foreach (var item in linked)
             {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = @"
-SELECT DISTINCT
-    TRIM(COALESCE(LRNo,'')) AS LRNo,
-    BillDate,
-    Party
-FROM Bills
-WHERE TRIM(COALESCE(BillNo,'')) = @billNo
-  AND TRIM(COALESCE(LRNo,'')) <> '';";
-                    cmd.Parameters.AddWithValue("@billNo", billNo);
-                    var linked = new List<(string LRNo, DateTime? BillDate, string Party)>();
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        while (r.Read())
-                        {
-                            DateTime? billDate = null;
-                            var rawDate = r["BillDate"] as string;
-                            if (DateTime.TryParse(rawDate, out var parsedDate)) billDate = parsedDate;
-                            linked.Add(((r["LRNo"] as string ?? string.Empty).Trim(), billDate, (r["Party"] as string ?? string.Empty).Trim()));
-                        }
-                    }
-
-                    foreach (var item in linked)
-                    {
-                        if (string.IsNullOrWhiteSpace(item.LRNo)) continue;
-                        using (var upd = conn.CreateCommand())
-                        {
-                            upd.CommandText = @"
-UPDATE LREntries
-SET BillNo = @BillNo,
-    BillDate = COALESCE(@BillDate, BillDate),
-    BillParty = CASE
-                    WHEN TRIM(COALESCE(@BillParty,'')) = '' THEN BillParty
-                    ELSE @BillParty
-                END
-WHERE TRIM(COALESCE(LRNo,'')) = @LRNo;";
-                            upd.Parameters.AddWithValue("@BillNo", billNo);
-                            upd.Parameters.AddWithValue("@BillDate", item.BillDate.HasValue ? (object)item.BillDate.Value.ToString("o") : DBNull.Value);
-                            upd.Parameters.AddWithValue("@BillParty", (object)item.Party ?? DBNull.Value);
-                            upd.Parameters.AddWithValue("@LRNo", item.LRNo);
-                            upd.ExecuteNonQuery();
-                        }
-                    }
-                }
+                var lr = _lrRepo.GetAll().FirstOrDefault(x => string.Equals((x.LRNo ?? string.Empty).Trim(), item.LRNo, StringComparison.OrdinalIgnoreCase));
+                if (lr == null) continue;
+                lr.BillNo = billNo;
+                lr.BillDate = item.BillDate;
+                if (!string.IsNullOrWhiteSpace(item.Party)) lr.BillParty = item.Party;
+                _lrRepo.Upsert(lr);
             }
         }
 
@@ -1149,32 +1401,15 @@ WHERE TRIM(COALESCE(LRNo,'')) = @LRNo;";
                     var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     try
                     {
-                        using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                        foreach (var lr in _lrRepo.GetAll())
                         {
-                            conn.Open();
-                            using (var cmd = conn.CreateCommand())
+                            if (!string.IsNullOrWhiteSpace(lr.ConsignorName) && names.Add(lr.ConsignorName))
                             {
-                                cmd.CommandText = "SELECT DISTINCT ConsignorName, ConsignorAddress, ConsignorGST FROM LREntries WHERE ConsignorName IS NOT NULL AND ConsignorName != ''";
-                                using (var r = cmd.ExecuteReader())
-                                    while (r.Read())
-                                    {
-                                        var n = r["ConsignorName"] as string;
-                                        if (string.IsNullOrWhiteSpace(n) || names.Contains(n)) continue;
-                                        names.Add(n);
-                                        toAdd.Add(new PartyEntry { PartyName = n.Trim(), Address = (r["ConsignorAddress"] as string)?.Trim() ?? "", GSTNo = (r["ConsignorGST"] as string)?.Trim() ?? "" });
-                                    }
+                                toAdd.Add(new PartyEntry { PartyName = lr.ConsignorName.Trim(), Address = (lr.ConsignorAddress ?? string.Empty).Trim(), GSTNo = (lr.ConsignorGST ?? string.Empty).Trim() });
                             }
-                            using (var cmd = conn.CreateCommand())
+                            if (!string.IsNullOrWhiteSpace(lr.ConsigneeName) && names.Add(lr.ConsigneeName))
                             {
-                                cmd.CommandText = "SELECT DISTINCT ConsigneeName, ConsigneeAddress, ConsigneeGST FROM LREntries WHERE ConsigneeName IS NOT NULL AND ConsigneeName != ''";
-                                using (var r = cmd.ExecuteReader())
-                                    while (r.Read())
-                                    {
-                                        var n = r["ConsigneeName"] as string;
-                                        if (string.IsNullOrWhiteSpace(n) || names.Contains(n)) continue;
-                                        names.Add(n);
-                                        toAdd.Add(new PartyEntry { PartyName = n.Trim(), Address = (r["ConsigneeAddress"] as string)?.Trim() ?? "", GSTNo = (r["ConsigneeGST"] as string)?.Trim() ?? "" });
-                                    }
+                                toAdd.Add(new PartyEntry { PartyName = lr.ConsigneeName.Trim(), Address = (lr.ConsigneeAddress ?? string.Empty).Trim(), GSTNo = (lr.ConsigneeGST ?? string.Empty).Trim() });
                             }
                         }
                         int sr = 1;
@@ -1315,6 +1550,7 @@ WHERE TRIM(COALESCE(LRNo,'')) = @LRNo;";
             }
             catch (Exception ex)
             {
+                AppLogger.LogException(nameof(ImportParty_Click), ex);
                 MessageBox.Show("Party import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -1338,19 +1574,10 @@ WHERE TRIM(COALESCE(LRNo,'')) = @LRNo;";
                     MessageBoxImage.Warning);
                 if (confirm != MessageBoxResult.Yes) return;
 
-                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                foreach (var row in selected)
                 {
-                    conn.Open();
-                    foreach (var row in selected)
-                    {
-                        if (row.Id <= 0) continue;
-                        using (var cmd = conn.CreateCommand())
-                        {
-                            cmd.CommandText = "DELETE FROM Parties WHERE Id = @id;";
-                            cmd.Parameters.AddWithValue("@id", row.Id);
-                            cmd.ExecuteNonQuery();
-                        }
-                    }
+                    if (row.Id <= 0) continue;
+                    try { _partyRepo.Delete(row); } catch { }
                 }
 
                 RefreshPartyGrid();
@@ -1497,7 +1724,7 @@ WHERE TRIM(COALESCE(LRNo,'')) = @LRNo;";
                     }
                 }
 
-                CBSGrid?.Items.Refresh();
+                RefreshDataGridItemsSafely(CBSGrid);
             }
             catch { }
         }
@@ -1698,6 +1925,7 @@ WHERE TRIM(COALESCE(LRNo,'')) = @LRNo;";
                 Height = 30,
                 Padding = new Thickness(6, 2, 6, 2)
             };
+            AutomationProperties.SetAutomationId(box, "CBSAccountNameBox");
             var hint = new TextBlock
             {
                 Text = "Type account name and press Enter or click Save.",
@@ -1949,22 +2177,29 @@ WHERE TRIM(COALESCE(LRNo,'')) = @LRNo;";
                     IsTextSearchEnabled = true,
                     ItemsSource = CBSAccountNames
                 };
+                AutomationProperties.SetAutomationId(accountBox, "CBSAddEntryAccountBox");
                 if (!string.IsNullOrWhiteSpace(preselectedAccount))
                 {
                     accountBox.Text = preselectedAccount.Trim();
                 }
                 var partLabel = mkLabel("Particulars");
                 var partBox = mkText();
+                AutomationProperties.SetAutomationId(partBox, "CBSAddEntryParticularsBox");
                 var remarksLabel = mkLabel("Remarks");
                 var remarksBox = mkText();
+                AutomationProperties.SetAutomationId(remarksBox, "CBSAddEntryRemarksBox");
                 var bankDrLabel = mkLabel("Bank Dr");
                 var bankDrBox = mkText();
+                AutomationProperties.SetAutomationId(bankDrBox, "CBSAddEntryBankDrBox");
                 var bankCrLabel = mkLabel("Bank Cr");
                 var bankCrBox = mkText();
+                AutomationProperties.SetAutomationId(bankCrBox, "CBSAddEntryBankCrBox");
                 var cashDrLabel = mkLabel("Cash Dr");
                 var cashDrBox = mkText();
+                AutomationProperties.SetAutomationId(cashDrBox, "CBSAddEntryCashDrBox");
                 var cashCrLabel = mkLabel("Cash Cr");
                 var cashCrBox = mkText();
+                AutomationProperties.SetAutomationId(cashCrBox, "CBSAddEntryCashCrBox");
 
                 Grid.SetRow(accountLabel, 0); Grid.SetColumn(accountLabel, 0);
                 Grid.SetRow(accountBox, 0); Grid.SetColumn(accountBox, 1);
@@ -2158,6 +2393,97 @@ WHERE TRIM(COALESCE(LRNo,'')) = @LRNo;";
 
             message = null;
             return true;
+        }
+
+        private static string SafeLogPath
+        {
+            get
+            {
+                var dir = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Awagaman ERP",
+                    "logs");
+                if (!System.IO.Directory.Exists(dir))
+                {
+                    try { System.IO.Directory.CreateDirectory(dir); } catch { }
+                }
+                return System.IO.Path.Combine(dir, "app.log");
+            }
+        }
+
+        private static void LogException(string context, Exception ex)
+        {
+            try
+            {
+                var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{context}] {ex?.GetType().Name}: {ex?.Message}{Environment.NewLine}{ex?.StackTrace}{Environment.NewLine}";
+                System.IO.File.AppendAllText(SafeLogPath, line);
+                System.Diagnostics.Debug.WriteLine(line);
+            }
+            catch
+            {
+                // logging must never crash the app
+            }
+        }
+
+        private void DeferUi(Action action, System.Windows.Threading.DispatcherPriority priority = System.Windows.Threading.DispatcherPriority.Background)
+        {
+            if (action == null) return;
+            try
+            {
+                var dispatcher = Dispatcher ?? Application.Current?.Dispatcher;
+                if (dispatcher == null)
+                {
+                    action();
+                    return;
+                }
+                dispatcher.BeginInvoke(action, priority);
+            }
+            catch (Exception ex)
+            {
+                LogException(nameof(DeferUi), ex);
+            }
+        }
+
+        private void RefreshCollectionViewSafely(ICollectionView view)
+        {
+            if (view == null) return;
+            DeferUi(() =>
+            {
+                try { view.Refresh(); } catch (Exception ex) { LogException(nameof(RefreshCollectionViewSafely), ex); }
+            });
+        }
+
+        private void RefreshDataGridItemsSafely(DataGrid grid)
+        {
+            if (grid == null) return;
+            DeferUi(() =>
+            {
+                try { grid.Items.Refresh(); } catch (Exception ex) { LogException(nameof(RefreshDataGridItemsSafely), ex); }
+            });
+        }
+
+        private void SelectDataGridCellSafely(DataGrid grid, DataGridCellInfo cellInfo)
+        {
+            if (grid == null || cellInfo.Item == null || cellInfo.Column == null) return;
+            try
+            {
+                if (grid.SelectionUnit == DataGridSelectionUnit.FullRow)
+                {
+                    grid.SelectedItem = cellInfo.Item;
+                    grid.CurrentCell = cellInfo;
+                    grid.ScrollIntoView(cellInfo.Item, cellInfo.Column);
+                    return;
+                }
+
+                if (!grid.SelectedCells.Contains(cellInfo))
+                {
+                    grid.SelectedCells.Add(cellInfo);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogException(nameof(SelectDataGridCellSafely), ex);
+            }
         }
 
         private static bool IsResultingDecimalText(TextBox textBox, string input)
@@ -2359,6 +2685,7 @@ WHERE TRIM(COALESCE(LRNo,'')) = @LRNo;";
                     Margin = new Thickness(0, 0, 10, 0),
                     FontSize = 15
                 };
+                AutomationProperties.SetAutomationId(accountList, "CBSAccountList");
                 Grid.SetColumn(accountList, 0);
                 Grid.SetRow(accountList, 0);
                 root.Children.Add(accountList);
@@ -2392,6 +2719,7 @@ WHERE TRIM(COALESCE(LRNo,'')) = @LRNo;";
                 var periodBtn = new Button { Content = "Period ▼", Height = 26, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(10, 0, 10, 0) };
                 var clearRangeBtn = new Button { Content = "Clear", Height = 26, Padding = new Thickness(10, 0, 10, 0) };
                 var addEntryBtn = new Button { Content = "+ Entry", Height = 26, Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(10, 0, 10, 0), Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#00B08B")), Foreground = Brushes.White, BorderThickness = new Thickness(0) };
+                AutomationProperties.SetAutomationId(addEntryBtn, "CBSSummaryAddEntryButton");
                 rangeBar.Children.Add(periodBtn);
                 rangeBar.Children.Add(clearRangeBtn);
                 rangeBar.Children.Add(addEntryBtn);
@@ -2552,7 +2880,7 @@ WHERE TRIM(COALESCE(LRNo,'')) = @LRNo;";
                         if (cv == null) return;
                         cv.SortDescriptions.Clear();
                         cv.SortDescriptions.Add(new SortDescription(propName, asc ? ListSortDirection.Ascending : ListSortDirection.Descending));
-                        cv.Refresh();
+                        RefreshCollectionViewSafely(cv);
                         foreach (var col in grid.Columns) col.SortDirection = null;
                         colHeader.Column.SortDirection = asc ? ListSortDirection.Ascending : ListSortDirection.Descending;
                         var currentAccount = (accountList.SelectedItem as string ?? string.Empty).Trim();
@@ -2570,7 +2898,7 @@ WHERE TRIM(COALESCE(LRNo,'')) = @LRNo;";
                         var cv = CollectionViewSource.GetDefaultView(grid.ItemsSource);
                         if (cv == null) return;
                         cv.SortDescriptions.Clear();
-                        cv.Refresh();
+                        RefreshCollectionViewSafely(cv);
                         foreach (var col in grid.Columns) col.SortDirection = null;
                         var currentAccount = (accountList.SelectedItem as string ?? string.Empty).Trim();
                         if (currentAccount.Length > 0 && summarySortByAccount.ContainsKey(currentAccount))
@@ -2654,7 +2982,7 @@ WHERE TRIM(COALESCE(LRNo,'')) = @LRNo;";
                     {
                         if (item == CollectionView.NewItemPlaceholder) continue;
                         var info = new DataGridCellInfo(item, targetCol);
-                        if (!grid.SelectedCells.Contains(info)) grid.SelectedCells.Add(info);
+                        SelectDataGridCellSafely(grid, info);
                     }
                 };
 
@@ -2807,51 +3135,29 @@ WHERE TRIM(COALESCE(LRNo,'')) = @LRNo;";
                             };
                         }).ToList();
 
-                        using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                        foreach (var bill in _billRepo.GetAll()
+                                     .Where(x => !string.IsNullOrWhiteSpace((x.BillNo ?? string.Empty).Trim()))
+                                     .GroupBy(x => (x.BillNo ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+                                     .Select(g => g.OrderByDescending(x => x.BillDate).First()))
                         {
-                            conn.Open();
-                            using (var cmd = conn.CreateCommand())
+                            var billNo = (bill.BillNo ?? string.Empty).Trim();
+                            if (billNo.Length == 0 || byReceiptBill.Contains(billNo)) continue;
+                            var receiptDate = bill.Date;
+                            var billDate = bill.BillDate;
+                            var mop = (bill.MOP ?? string.Empty).Trim();
+                            var isCash = string.Equals(mop, "CASH", StringComparison.OrdinalIgnoreCase);
+                            if (bill.RCVD <= 0m) continue;
+                            bfrsRows.Add(new BfrsSummaryRow
                             {
-                                cmd.CommandText = @"
-SELECT
-    BillNo,
-    MAX(BillDate) AS BillDate,
-    MAX(Party) AS Party,
-    MAX(Date) AS ReceiptDate,
-    MAX(MOP) AS MOP,
-    COALESCE(SUM(Freight + Detention + HML + OTHR + StCharge), 0) AS BillTotal,
-    COALESCE(SUM(RCVD), 0) AS RCVD
-FROM Bills
-WHERE TRIM(COALESCE(BillNo,'')) <> ''
-GROUP BY BillNo
-HAVING COALESCE(SUM(RCVD), 0) > 0;";
-                                using (var r = cmd.ExecuteReader())
-                                {
-                                    while (r.Read())
-                                    {
-                                        var billNo = (r["BillNo"] as string ?? string.Empty).Trim();
-                                        if (billNo.Length == 0 || byReceiptBill.Contains(billNo)) continue;
-                                        DateTime receiptDate;
-                                        DateTime billDate;
-                                        if (!DateTime.TryParse(r["ReceiptDate"] as string, out receiptDate)) receiptDate = DateTime.Today;
-                                        if (!DateTime.TryParse(r["BillDate"] as string, out billDate)) billDate = receiptDate;
-                                        var mop = (r["MOP"] as string ?? string.Empty).Trim();
-                                        var isCash = string.Equals(mop, "CASH", StringComparison.OrdinalIgnoreCase);
-                                        var rcvd = Convert.ToDecimal(r["RCVD"]);
-                                        bfrsRows.Add(new BfrsSummaryRow
-                                        {
-                                            Date = receiptDate,
-                                            PartyName = (r["Party"] as string ?? string.Empty).Trim(),
-                                            BillNo = billNo,
-                                            BillDate = billDate,
-                                            BankDr = isCash ? 0m : rcvd,
-                                            BankCr = 0m,
-                                            CashDr = isCash ? rcvd : 0m,
-                                            CashCr = 0m
-                                        });
-                                    }
-                                }
-                            }
+                                Date = receiptDate,
+                                PartyName = (bill.Party ?? string.Empty).Trim(),
+                                BillNo = billNo,
+                                BillDate = billDate,
+                                BankDr = isCash ? 0m : bill.RCVD,
+                                BankCr = 0m,
+                                CashDr = isCash ? bill.RCVD : 0m,
+                                CashCr = 0m
+                            });
                         }
 
                         currentBfrsEntries = bfrsRows;
@@ -2913,7 +3219,7 @@ HAVING COALESCE(SUM(RCVD), 0) > 0;";
                         {
                             cv.SortDescriptions.Clear();
                             cv.SortDescriptions.Add(new SortDescription(sortProp, sortDir));
-                            cv.Refresh();
+                            RefreshCollectionViewSafely(cv);
                         }
                         foreach (var c in grid.Columns) c.SortDirection = null;
                         var target = grid.Columns.FirstOrDefault(c =>
@@ -3192,15 +3498,19 @@ HAVING COALESCE(SUM(RCVD), 0) > 0;";
                         if (text.Length > 0) row.AccountName = text;
                     }
                 }
-
-                row.CBS = row.Date.ToString("MMM-yy");
-                _cbsRepo.Upsert(row);
-                RefreshCBSGrid();
             }
             catch (Exception ex)
             {
                 MessageBox.Show("Unable to save CBS entry: " + ex.Message, "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
             }
+
+            RunAfterEditCommit(() =>
+            {
+                row.CBS = row.Date.ToString("MMM-yy");
+                _cbsRepo.Upsert(row);
+                RefreshCBSGrid();
+            }, nameof(CBSGrid_CellEditEnding));
         }
 
         private void CBSGrid_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -3341,7 +3651,7 @@ HAVING COALESCE(SUM(RCVD), 0) > 0;";
                 foreach (var col in cols)
                 {
                     var info = new DataGridCellInfo(item, col);
-                    if (!CBSGrid.SelectedCells.Contains(info)) CBSGrid.SelectedCells.Add(info);
+                    SelectDataGridCellSafely(CBSGrid, info);
                 }
             }
         }
@@ -3563,7 +3873,7 @@ HAVING COALESCE(SUM(RCVD), 0) > 0;";
             {
                 cv.SortDescriptions.Clear();
                 cv.SortDescriptions.Add(new SortDescription(propName, ascending ? ListSortDirection.Ascending : ListSortDirection.Descending));
-                cv.Refresh();
+                RefreshCollectionViewSafely(cv);
             }
             SaveGridSettings();
         }
@@ -3582,7 +3892,7 @@ HAVING COALESCE(SUM(RCVD), 0) > 0;";
             if (cv != null)
             {
                 cv.SortDescriptions.Clear();
-                cv.Refresh();
+                RefreshCollectionViewSafely(cv);
             }
             SaveGridSettings();
         }
@@ -3640,7 +3950,7 @@ HAVING COALESCE(SUM(RCVD), 0) > 0;";
                 cv.Filter = null;
             }
 
-            cv.Refresh();
+            RefreshCollectionViewSafely(cv);
             ApplyCBSHeaderFilterIndicators();
             UpdateCBSFooter();
         }
@@ -3682,7 +3992,7 @@ HAVING COALESCE(SUM(RCVD), 0) > 0;";
             ApplyCBSHeaderFilter();
             if (_cbsHeaderFilters.Count == 0)
             {
-                cv.Refresh();
+                RefreshCollectionViewSafely(cv);
                 ApplyCBSHeaderFilterIndicators();
                 UpdateCBSFooter();
             }
@@ -3717,25 +4027,13 @@ HAVING COALESCE(SUM(RCVD), 0) > 0;";
 
         private List<string> LoadDueBrokers()
         {
-            var list = new List<string>();
-            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-            {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = @"
-SELECT DISTINCT TRIM(COALESCE(BrokerName, '')) AS Broker
-FROM Challans
-WHERE (COALESCE(LorryHire,0) - COALESCE(LessTDS,0) - COALESCE(AdvanceAmount,0)
-      + COALESCE(Detention,0) + COALESCE(Hamali,0) + COALESCE(Deduction,0)
-      - COALESCE(BalancePaidNEFT,0) - COALESCE(BalancePaidCash,0)) > 0
-  AND TRIM(COALESCE(BrokerName, '')) <> ''
-ORDER BY Broker;";
-                    using (var r = cmd.ExecuteReader())
-                        while (r.Read()) list.Add((r["Broker"] as string ?? string.Empty).Trim());
-                }
-            }
-            return list;
+            return _challanRepo.GetAll()
+                .Where(c => (c.LorryHire - c.LessTDS - c.AdvanceAmount + c.Detention + c.Hamali + c.Deduction - c.BalancePaidNEFT - c.BalancePaidCash) > 0m)
+                .Select(c => (c.BrokerName ?? string.Empty).Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(x => x)
+                .ToList();
         }
 
         private List<DueChallanOption> LoadDueChallansByBroker(string broker)
@@ -3743,43 +4041,21 @@ ORDER BY Broker;";
             var rows = new List<DueChallanOption>();
             var brokerKey = (broker ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(brokerKey)) return rows;
-            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-            {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
+            return _challanRepo.GetAll()
+                .Where(c => string.Equals((c.BrokerName ?? string.Empty).Trim(), brokerKey, StringComparison.OrdinalIgnoreCase))
+                .Where(c => (c.LorryHire - c.LessTDS - c.AdvanceAmount + c.Detention + c.Hamali + c.Deduction - c.BalancePaidNEFT - c.BalancePaidCash) > 0m)
+                .OrderByDescending(c => c.Id)
+                .Select(c => new DueChallanOption
                 {
-                    cmd.CommandText = @"
-SELECT Id,
-       ChallanNumber,
-       BrokerName,
-       COALESCE(LorryHire,0) AS LorryHireAmt,
-       COALESCE(AdvanceAmount,0) AS AdvanceAmt,
-       (COALESCE(BalancePaidNEFT,0) + COALESCE(BalancePaidCash,0)) AS PaidAmt,
-       (COALESCE(LorryHire,0) - COALESCE(LessTDS,0) - COALESCE(AdvanceAmount,0)
-       + COALESCE(Detention,0) + COALESCE(Hamali,0) + COALESCE(Deduction,0)
-       - COALESCE(BalancePaidNEFT,0) - COALESCE(BalancePaidCash,0)) AS DueAmt
-FROM Challans
-WHERE TRIM(COALESCE(BrokerName,'')) = @broker
-  AND (COALESCE(LorryHire,0) - COALESCE(LessTDS,0) - COALESCE(AdvanceAmount,0)
-       + COALESCE(Detention,0) + COALESCE(Hamali,0) + COALESCE(Deduction,0)
-       - COALESCE(BalancePaidNEFT,0) - COALESCE(BalancePaidCash,0)) > 0
-ORDER BY Id DESC;";
-                    cmd.Parameters.AddWithValue("@broker", brokerKey);
-                    using (var r = cmd.ExecuteReader())
-                        while (r.Read())
-                            rows.Add(new DueChallanOption
-                            {
-                                Id = Convert.ToInt32(r["Id"]),
-                                ChallanNo = (r["ChallanNumber"] as string) ?? string.Empty,
-                                Broker = (r["BrokerName"] as string) ?? string.Empty,
-                                LorryHire = Convert.ToDecimal(r["LorryHireAmt"]),
-                                Advance = Convert.ToDecimal(r["AdvanceAmt"]),
-                                BalancePaid = Convert.ToDecimal(r["PaidAmt"]),
-                                Due = Convert.ToDecimal(r["DueAmt"])
-                            });
-                }
-            }
-            return rows;
+                    Id = c.Id,
+                    ChallanNo = c.ChallanNumber ?? string.Empty,
+                    Broker = c.BrokerName ?? string.Empty,
+                    LorryHire = c.LorryHire,
+                    Advance = c.AdvanceAmount,
+                    BalancePaid = c.BalancePaidNEFT + c.BalancePaidCash,
+                    Due = c.LorryHire - c.LessTDS - c.AdvanceAmount + c.Detention + c.Hamali + c.Deduction - c.BalancePaidNEFT - c.BalancePaidCash
+                })
+                .ToList();
         }
 
         private void OpenChallanPay_Click(object sender, RoutedEventArgs e)
@@ -3945,26 +4221,10 @@ ORDER BY Id DESC;";
                     dueText.Text = row != null ? $"₹ {row.Due:N2}" : "₹ 0.00";
                     if (row != null)
                     {
-                        using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                        var challan = _challanRepo.FindById(row.Id);
+                        if (challan != null)
                         {
-                            conn.Open();
-                            using (var cmd = conn.CreateCommand())
-                            {
-                                cmd.CommandText = @"SELECT COALESCE(Detention,0), COALESCE(Hamali,0), COALESCE(Deduction,0), COALESCE(LessTDS,0)
-                                                    FROM Challans WHERE Id = @id;";
-                                cmd.Parameters.AddWithValue("@id", row.Id);
-                                using (var r = cmd.ExecuteReader())
-                                {
-                                    if (r.Read())
-                                    {
-                                        var detention = Convert.ToDecimal(r[0]);
-                                        var hamali = Convert.ToDecimal(r[1]);
-                                        var deduction = Convert.ToDecimal(r[2]);
-                                        var lessTds = Convert.ToDecimal(r[3]);
-                                        detailsText.Text = $"Detention: ₹ {detention:N2}    Hamali: ₹ {hamali:N2}    Deduction: ₹ {deduction:N2}    Less TDS: ₹ {lessTds:N2}";
-                                    }
-                                }
-                            }
+                            detailsText.Text = $"Detention: Rs. {challan.Detention:N2}    Hamali: Rs. {challan.Hamali:N2}    Deduction: Rs. {challan.Deduction:N2}    Less TDS: Rs. {challan.LessTDS:N2}";
                         }
                     }
                     else
@@ -4008,38 +4268,31 @@ ORDER BY Id DESC;";
                         return;
                     }
 
-                    using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                    var challanRepo = _challanRepo;
+                    var current = challanRepo.GetAll().FirstOrDefault(x => x.Id == selected.Id);
+                    if (current == null)
                     {
-                        conn.Open();
-                        using (var cmd = conn.CreateCommand())
-                        {
-                            cmd.CommandText = @"
-UPDATE Challans
-SET AdvanceAmount = COALESCE(AdvanceAmount,0) + @adv,
-    AdvanceNEFT = COALESCE(AdvanceNEFT,0) + @advNeft,
-    AdvanceCash = COALESCE(AdvanceCash,0) + @advCash,
-    BalancePaidNEFT = COALESCE(BalancePaidNEFT,0) + @neft,
-    BalancePaidCash = COALESCE(BalancePaidCash,0) + @cash,
-    BalancePaidDate = @paidDate,
-    PaidTo = CASE WHEN TRIM(COALESCE(@paidTo,'')) = '' THEN PaidTo ELSE @paidTo END,
-    Remarks = CASE
-                WHEN TRIM(COALESCE(@remarks,'')) = '' THEN Remarks
-                WHEN TRIM(COALESCE(Remarks,'')) = '' THEN @remarks
-                ELSE Remarks || ' | ' || @remarks
-              END
-WHERE Id = @id;";
-                            cmd.Parameters.AddWithValue("@adv", advance);
-                            cmd.Parameters.AddWithValue("@advNeft", advanceNeft);
-                            cmd.Parameters.AddWithValue("@advCash", advanceCash);
-                            cmd.Parameters.AddWithValue("@neft", neft);
-                            cmd.Parameters.AddWithValue("@cash", cash);
-                            cmd.Parameters.AddWithValue("@paidDate", DateTime.Today.ToString("yyyy-MM-dd"));
-                            cmd.Parameters.AddWithValue("@paidTo", (paidToBox.Text ?? string.Empty).Trim());
-                            cmd.Parameters.AddWithValue("@remarks", (remarksBox.Text ?? string.Empty).Trim());
-                            cmd.Parameters.AddWithValue("@id", selected.Id);
-                            cmd.ExecuteNonQuery();
-                        }
+                        MessageBox.Show("Unable to locate the selected challan.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                        return;
                     }
+
+                    current.AdvanceAmount += advance;
+                    current.AdvanceNEFT += advanceNeft;
+                    current.AdvanceCash += advanceCash;
+                    current.BalancePaidNEFT += neft;
+                    current.BalancePaidCash += cash;
+                    current.BalancePaidDate = DateTime.Today;
+                    if (!string.IsNullOrWhiteSpace(paidToBox.Text))
+                    {
+                        current.PaidTo = paidToBox.Text.Trim();
+                    }
+                    if (!string.IsNullOrWhiteSpace(remarksBox.Text))
+                    {
+                        current.Remarks = string.IsNullOrWhiteSpace(current.Remarks)
+                            ? remarksBox.Text.Trim()
+                            : current.Remarks + " | " + remarksBox.Text.Trim();
+                    }
+                    challanRepo.Upsert(current);
 
                     VM?.RefreshAfterDelete();
                     SyncAllChallanBillingFromLR(true);
@@ -4108,43 +4361,64 @@ WHERE Id = @id;";
             public decimal Due { get; set; }
         }
 
+        private class PartyPaymentReportRow
+        {
+            public string Party { get; set; }
+            public int Bills { get; set; }
+            public decimal TotalBilled { get; set; }
+            public decimal TotalReceived { get; set; }
+            public decimal PendingAmount { get; set; }
+            public decimal AvgDaysToPay { get; set; }
+            public int OnTimeBills { get; set; }
+            public int LateBills { get; set; }
+            public int OldestPendingDays { get; set; }
+        }
+
+        private class MonthlyExpenseReportRow
+        {
+            public string AccountName { get; set; }
+            public decimal BankDr { get; set; }
+            public decimal BankCr { get; set; }
+            public decimal CashDr { get; set; }
+            public decimal CashCr { get; set; }
+            public decimal Net => (BankDr + CashDr) - (BankCr + CashCr);
+        }
+
+        private class OutstandingBillReportRow
+        {
+            public string Party { get; set; }
+            public string BillNo { get; set; }
+            public DateTime BillDate { get; set; }
+            public decimal Total { get; set; }
+            public decimal Received { get; set; }
+            public decimal Due { get; set; }
+            public int AgeDays { get; set; }
+            public string Status { get; set; }
+        }
+
         private List<BillDueRow> LoadBillDueRows()
         {
-            var rows = new List<BillDueRow>();
-            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-            {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
+            var lrByNo = _lrRepo.GetAll()
+                .Where(x => !string.IsNullOrWhiteSpace(x.LRNo))
+                .GroupBy(x => (x.LRNo ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            return _billRepo.GetAll()
+                .Where(b => !string.IsNullOrWhiteSpace(b.BillNo))
+                .Select(b =>
                 {
-                    cmd.CommandText = @"
-SELECT
-    COALESCE(NULLIF(TRIM(b.Party), ''), NULLIF(TRIM(lr.BillParty), ''), NULLIF(TRIM(lr.ConsignorName), ''), '') AS PartyName,
-    COALESCE(TRIM(b.BillNo), '') AS BillNo,
-    COALESCE(TRIM(b.LRNo), '') AS LRNo,
-    COALESCE(NULLIF(TRIM(b.FromLoc), ''), NULLIF(TRIM(lr.FromLocation), ''), '') AS FromLoc,
-    COALESCE(NULLIF(TRIM(b.ToLoc), ''), NULLIF(TRIM(lr.ToLocation), ''), '') AS ToLoc,
-    COALESCE((b.Freight + b.Detention + b.HML + b.OTHR + b.StCharge) - (b.RCVD + b.TDS + b.DED), 0) AS DueAmt
-FROM Bills b
-LEFT JOIN LREntries lr ON lr.LRNo = b.LRNo
-WHERE b.BillNo IS NOT NULL AND TRIM(b.BillNo) <> '';";
-                    using (var r = cmd.ExecuteReader())
+                    lrByNo.TryGetValue((b.LRNo ?? string.Empty).Trim(), out var lr);
+                    return new BillDueRow
                     {
-                        while (r.Read())
-                        {
-                            rows.Add(new BillDueRow
-                            {
-                                Party = (r["PartyName"] as string ?? string.Empty).Trim(),
-                                BillNo = (r["BillNo"] as string ?? string.Empty).Trim(),
-                                LRNo = (r["LRNo"] as string ?? string.Empty).Trim(),
-                                From = (r["FromLoc"] as string ?? string.Empty).Trim(),
-                                To = (r["ToLoc"] as string ?? string.Empty).Trim(),
-                                Due = Convert.ToDecimal(r["DueAmt"])
-                            });
-                        }
-                    }
-                }
-            }
-            return rows;
+                        Party = (b.Party ?? lr?.BillParty ?? lr?.ConsignorName ?? string.Empty).Trim(),
+                        BillNo = (b.BillNo ?? string.Empty).Trim(),
+                        LRNo = (b.LRNo ?? string.Empty).Trim(),
+                        From = (b.From ?? lr?.From ?? string.Empty).Trim(),
+                        To = (b.To ?? lr?.To ?? string.Empty).Trim(),
+                        Due = b.Due
+                    };
+                })
+                .ToList();
         }
 
         private List<PartyDueSummaryOption> LoadPartyDueSummaryOptions()
@@ -4183,93 +4457,44 @@ WHERE b.BillNo IS NOT NULL AND TRIM(b.BillNo) <> '';";
 
         private List<PendingBillOption> LoadPendingBillOptions(string partyFilter = "", string billNoFilter = "")
         {
-            var list = new List<PendingBillOption>();
-            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-            {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
+            var lrByNo = _lrRepo.GetAll()
+                .Where(x => !string.IsNullOrWhiteSpace(x.LRNo))
+                .GroupBy(x => (x.LRNo ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            return _billRepo.GetAll()
+                .Where(b => !string.IsNullOrWhiteSpace(b.BillNo))
+                .GroupBy(b => (b.BillNo ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(g =>
                 {
-                    cmd.CommandText = @"
-SELECT b.BillNo,
-       COALESCE(GROUP_CONCAT(DISTINCT b.LRNo), '') AS LRNos,
-       COALESCE(
-           NULLIF(TRIM(MAX(b.Party)), ''),
-           NULLIF(TRIM(MAX(lr.BillParty)), ''),
-           NULLIF(TRIM(MAX(lr.ConsignorName)), ''),
-           ''
-       ) AS Party,
-       COALESCE(SUM(b.Freight + b.Detention + b.HML + b.OTHR + b.StCharge), 0) AS TotalAmt,
-       COALESCE(SUM(b.RCVD), 0) AS RCVDAmt,
-       COALESCE(SUM(b.TDS), 0) AS TDSAmt,
-       COALESCE(SUM(b.DED), 0) AS DEDAmt
-FROM Bills b
-LEFT JOIN LREntries lr ON lr.LRNo = b.LRNo
-WHERE b.BillNo IS NOT NULL AND TRIM(b.BillNo) <> ''
-GROUP BY b.BillNo
-HAVING COALESCE(SUM((b.Freight + b.Detention + b.HML + b.OTHR + b.StCharge) - (b.RCVD + b.TDS + b.DED)), 0) > 0
-ORDER BY b.BillNo DESC;";
-                    using (var r = cmd.ExecuteReader())
+                    var first = g.FirstOrDefault();
+                    lrByNo.TryGetValue((first?.LRNo ?? string.Empty).Trim(), out var lr);
+                    return new PendingBillOption
                     {
-                        while (r.Read())
-                        {
-                            var item = new PendingBillOption
-                            {
-                                BillNo = r["BillNo"] as string,
-                                LRNos = r["LRNos"] as string,
-                                Party = r["Party"] as string,
-                                Total = Convert.ToDecimal(r["TotalAmt"]),
-                                RCVD = Convert.ToDecimal(r["RCVDAmt"]),
-                                TDS = Convert.ToDecimal(r["TDSAmt"]),
-                                DED = Convert.ToDecimal(r["DEDAmt"])
-                            };
-                            if (!string.IsNullOrWhiteSpace(partyFilter) && (item.Party ?? "").IndexOf(partyFilter, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                            if (!string.IsNullOrWhiteSpace(billNoFilter) && (item.BillNo ?? "").IndexOf(billNoFilter, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                            list.Add(item);
-                        }
-                    }
-                }
-            }
-            return list;
+                        BillNo = g.Key,
+                        LRNos = string.Join(", ", g.Select(x => (x.LRNo ?? string.Empty).Trim()).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)),
+                        Party = (g.Select(x => x.Party).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? lr?.BillParty ?? lr?.ConsignorName ?? string.Empty).Trim(),
+                        Total = g.Sum(x => x.Total),
+                        RCVD = g.Sum(x => x.RCVD),
+                        TDS = g.Sum(x => x.TDS),
+                        DED = g.Sum(x => x.DED)
+                    };
+                })
+                .Where(item => item.Due > 0m)
+                .Where(item => string.IsNullOrWhiteSpace(partyFilter) || (item.Party ?? string.Empty).IndexOf(partyFilter, StringComparison.OrdinalIgnoreCase) >= 0)
+                .Where(item => string.IsNullOrWhiteSpace(billNoFilter) || (item.BillNo ?? string.Empty).IndexOf(billNoFilter, StringComparison.OrdinalIgnoreCase) >= 0)
+                .OrderByDescending(x => x.BillNo, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         private List<string> LoadPendingBillParties(string partyFilter = "")
         {
-            var list = new List<string>();
-            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-            {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = @"
-SELECT
-    COALESCE(
-        NULLIF(TRIM(MAX(b.Party)), ''),
-        NULLIF(TRIM(MAX(lr.BillParty)), ''),
-        NULLIF(TRIM(MAX(lr.ConsignorName)), ''),
-        ''
-    ) AS PartyName,
-    COALESCE(SUM((b.Freight + b.Detention + b.HML + b.OTHR + b.StCharge) - (b.RCVD + b.TDS + b.DED)), 0) AS DueAmt
-FROM Bills b
-LEFT JOIN LREntries lr ON lr.LRNo = b.LRNo
-WHERE b.BillNo IS NOT NULL AND TRIM(b.BillNo) <> ''
-GROUP BY b.BillNo
-HAVING DueAmt > 0;";
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        while (r.Read())
-                        {
-                            var p = (r["PartyName"] as string ?? string.Empty).Trim();
-                            if (string.IsNullOrWhiteSpace(p)) continue;
-                            if (!string.IsNullOrWhiteSpace(partyFilter) && p.IndexOf(partyFilter, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                            if (!list.Any(x => string.Equals(x, p, StringComparison.OrdinalIgnoreCase)))
-                            {
-                                list.Add(p);
-                            }
-                        }
-                    }
-                }
-            }
-            return list.OrderBy(x => x).ToList();
+            return LoadPendingBillOptions(partyFilter)
+                .Select(x => (x.Party ?? string.Empty).Trim())
+                .Where(x => x.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(x => x)
+                .ToList();
         }
 
         private void OpenReceiveBillAmount_Click(object sender, RoutedEventArgs e)
@@ -4579,16 +4804,9 @@ HAVING DueAmt > 0;";
             decimal dueAfter = receipts.Count > 0 ? receipts.Last().DueAfter : 0m;
             if (receipts.Count == 0)
             {
-                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-                using (var cmd = conn.CreateCommand())
-                {
-                    conn.Open();
-                    cmd.CommandText = @"SELECT COALESCE(SUM(Freight + Detention + HML + OTHR + StCharge - RCVD - TDS - DED), 0)
-                                        FROM Bills
-                                        WHERE TRIM(COALESCE(BillNo,'')) = @billNo;";
-                    cmd.Parameters.AddWithValue("@billNo", billNo);
-                    dueAfter = Convert.ToDecimal(cmd.ExecuteScalar());
-                }
+                dueAfter = _billRepo.GetAll()
+                    .Where(x => string.Equals((x.BillNo ?? string.Empty).Trim(), billNo, StringComparison.OrdinalIgnoreCase))
+                    .Sum(x => x.Due);
             }
 
             var dialog = new Window
@@ -4849,164 +5067,751 @@ HAVING DueAmt > 0;";
             }
         }
 
+        private void OpenReports_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                ShowReportsHub();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to open reports: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void ShowReportsHub()
+        {
+            var fromDefault = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+            var toDefault = DateTime.Today;
+
+            var window = new Window
+            {
+                Title = "Reports",
+                Width = 1240,
+                Height = 780,
+                Owner = this,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F5F7FB"))
+            };
+
+            var root = new Grid { Margin = new Thickness(16) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var header = new Border
+            {
+                Background = Brushes.White,
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D8E1EE")),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(16, 14, 16, 14)
+            };
+            var headerGrid = new Grid();
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var titleStack = new StackPanel();
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = "Report Hub",
+                FontSize = 22,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#0F172A"))
+            });
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = "Use this section to check billing party payment speed, current month profit, expense, and overdue bills.",
+                FontSize = 12,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#64748B")),
+                Margin = new Thickness(0, 4, 0, 0),
+                TextWrapping = TextWrapping.Wrap
+            });
+            headerGrid.Children.Add(titleStack);
+            header.Child = headerGrid;
+            Grid.SetRow(header, 0);
+            root.Children.Add(header);
+
+            var filterBar = new Border
+            {
+                Background = Brushes.White,
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D8E1EE")),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(14),
+                Margin = new Thickness(0, 12, 0, 0)
+            };
+            var filterGrid = new Grid();
+            filterGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            filterGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            filterGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            filterGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            filterGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            filterGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            filterGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var fromLabel = new TextBlock { Text = "From", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+            var fromPicker = new DatePicker { SelectedDate = fromDefault, Width = 140, Height = 28, Margin = new Thickness(0, 0, 14, 0) };
+            var toLabel = new TextBlock { Text = "To", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+            var toPicker = new DatePicker { SelectedDate = toDefault, Width = 140, Height = 28, Margin = new Thickness(0, 0, 14, 0) };
+            var refreshBtn = new Button
+            {
+                Content = "Refresh",
+                Width = 96,
+                Height = 30,
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1565C0")),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand
+            };
+            var note = new TextBlock
+            {
+                Text = "Default range is current month. Change dates and refresh to recalculate the reports.",
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#64748B")),
+                Margin = new Thickness(16, 0, 0, 0),
+                TextWrapping = TextWrapping.Wrap
+            };
+            filterGrid.Children.Add(fromLabel);
+            Grid.SetColumn(fromPicker, 1);
+            filterGrid.Children.Add(fromPicker);
+            Grid.SetColumn(toLabel, 2);
+            filterGrid.Children.Add(toLabel);
+            Grid.SetColumn(toPicker, 3);
+            filterGrid.Children.Add(toPicker);
+            Grid.SetColumn(refreshBtn, 4);
+            filterGrid.Children.Add(refreshBtn);
+            Grid.SetColumn(note, 5);
+            filterGrid.Children.Add(note);
+            filterBar.Child = filterGrid;
+            Grid.SetRow(filterBar, 1);
+            root.Children.Add(filterBar);
+
+            var metricsGrid = new Grid { Margin = new Thickness(0, 12, 0, 0) };
+            for (int i = 0; i < 5; i++) metricsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            TextBlock fastestValue = null, slowestValue = null, collectionsValue = null, expenseValue = null, profitValue = null;
+            TextBlock fastestHint = null, slowestHint = null, collectionsHint = null, expenseHint = null, profitHint = null;
+
+            UIElement BuildMetricCard(string label, string accent, ref TextBlock valueText, ref TextBlock hintText)
+            {
+                var card = new Border
+                {
+                    Background = Brushes.White,
+                    BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D8E1EE")),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(10),
+                    Padding = new Thickness(14),
+                    Margin = new Thickness(0, 0, 10, 0)
+                };
+                var stack = new StackPanel();
+                stack.Children.Add(new TextBlock
+                {
+                    Text = label,
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(accent))
+                });
+                valueText = new TextBlock
+                {
+                    Text = "₹ 0.00",
+                    FontSize = 18,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(accent)),
+                    Margin = new Thickness(0, 4, 0, 0)
+                };
+                hintText = new TextBlock
+                {
+                    Text = "",
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#64748B")),
+                    Margin = new Thickness(0, 4, 0, 0),
+                    TextWrapping = TextWrapping.Wrap
+                };
+                stack.Children.Add(valueText);
+                stack.Children.Add(hintText);
+                card.Child = stack;
+                return card;
+            }
+
+            metricsGrid.Children.Add(BuildMetricCard("Fastest Paying Party", "#16A34A", ref fastestValue, ref fastestHint));
+            Grid.SetColumn(metricsGrid.Children[0], 0);
+            metricsGrid.Children.Add(BuildMetricCard("Slowest Paying Party", "#DC2626", ref slowestValue, ref slowestHint));
+            Grid.SetColumn(metricsGrid.Children[1], 1);
+            metricsGrid.Children.Add(BuildMetricCard("Current Month Collections", "#1D4ED8", ref collectionsValue, ref collectionsHint));
+            Grid.SetColumn(metricsGrid.Children[2], 2);
+            metricsGrid.Children.Add(BuildMetricCard("Current Month Expense", "#B45309", ref expenseValue, ref expenseHint));
+            Grid.SetColumn(metricsGrid.Children[3], 3);
+            metricsGrid.Children.Add(BuildMetricCard("Current Month Profit", "#7C3AED", ref profitValue, ref profitHint));
+            Grid.SetColumn(metricsGrid.Children[4], 4);
+            Grid.SetRow(metricsGrid, 2);
+            root.Children.Add(metricsGrid);
+
+            var actions = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+            Button MakeActionButton(string text, string colorHex)
+            {
+                return new Button
+                {
+                    Content = text,
+                    Height = 34,
+                    MinWidth = 170,
+                    Margin = new Thickness(0, 0, 10, 8),
+                    Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(colorHex)),
+                    Foreground = Brushes.White,
+                    BorderThickness = new Thickness(0),
+                    Cursor = Cursors.Hand,
+                    Padding = new Thickness(14, 0, 14, 0)
+                };
+            }
+
+            var btnParty = MakeActionButton("Billing Party Payment", "#16A34A");
+            var btnProfit = MakeActionButton("Current Month Profit", "#7C3AED");
+            var btnExpense = MakeActionButton("Current Month Expense", "#B45309");
+            var btnDue = MakeActionButton("Outstanding / Due", "#DC2626");
+            var btnSummary = MakeActionButton("Party Wise Statement", "#1565C0");
+            actions.Children.Add(btnParty);
+            actions.Children.Add(btnProfit);
+            actions.Children.Add(btnExpense);
+            actions.Children.Add(btnDue);
+            actions.Children.Add(btnSummary);
+            Grid.SetRow(actions, 3);
+            root.Children.Add(actions);
+
+            var previewGrid = new DataGrid
+            {
+                AutoGenerateColumns = false,
+                CanUserAddRows = false,
+                IsReadOnly = true,
+                Background = Brushes.White,
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D8E1EE")),
+                BorderThickness = new Thickness(1),
+                RowHeight = 30,
+                SelectionMode = DataGridSelectionMode.Single,
+                SelectionUnit = DataGridSelectionUnit.FullRow,
+                Margin = new Thickness(0, 12, 0, 0)
+            };
+            previewGrid.Columns.Add(new DataGridTextColumn { Header = "Party", Binding = new Binding("Party"), Width = new DataGridLength(2, DataGridLengthUnitType.Star) });
+            previewGrid.Columns.Add(new DataGridTextColumn { Header = "Bills", Binding = new Binding("Bills"), Width = 80 });
+            previewGrid.Columns.Add(new DataGridTextColumn { Header = "Billed", Binding = new Binding("TotalBilled") { StringFormat = "N2" }, Width = 110 });
+            previewGrid.Columns.Add(new DataGridTextColumn { Header = "Received", Binding = new Binding("TotalReceived") { StringFormat = "N2" }, Width = 110 });
+            previewGrid.Columns.Add(new DataGridTextColumn { Header = "Pending", Binding = new Binding("PendingAmount") { StringFormat = "N2" }, Width = 110 });
+            previewGrid.Columns.Add(new DataGridTextColumn { Header = "Avg Days", Binding = new Binding("AvgDaysToPay") { StringFormat = "N1" }, Width = 90 });
+            previewGrid.Columns.Add(new DataGridTextColumn { Header = "On Time", Binding = new Binding("OnTimeBills"), Width = 80 });
+            previewGrid.Columns.Add(new DataGridTextColumn { Header = "Late", Binding = new Binding("LateBills"), Width = 70 });
+            Grid.SetRow(previewGrid, 4);
+            root.Children.Add(previewGrid);
+
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 12, 0, 0)
+            };
+            var closeBtn = new Button
+            {
+                Content = "Close",
+                Width = 92,
+                Height = 30,
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#334155")),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand
+            };
+            closeBtn.Click += (_, __) => window.Close();
+            footer.Children.Add(closeBtn);
+            Grid.SetRow(footer, 5);
+            root.Children.Add(footer);
+
+            void RefreshReport()
+            {
+                var fromDate = fromPicker.SelectedDate ?? fromDefault;
+                var toDate = toPicker.SelectedDate ?? toDefault;
+                if (fromDate > toDate)
+                {
+                    var temp = fromDate;
+                    fromDate = toDate;
+                    toDate = temp;
+                }
+
+                var paymentRows = LoadBillingPartyPaymentReportRows(fromDate, toDate);
+                var expenseRows = LoadMonthlyExpenseReportRows(fromDate, toDate);
+                var dueRows = LoadOutstandingBillReportRows(fromDate, toDate);
+                var profit = CalculateProfitSnapshot(fromDate, toDate);
+
+                previewGrid.ItemsSource = paymentRows.Take(12).ToList();
+                if (paymentRows.Count > 0)
+                {
+                    var fastest = paymentRows.OrderBy(x => x.AvgDaysToPay).FirstOrDefault(x => x.Bills > 0);
+                    var slowest = paymentRows.OrderByDescending(x => x.AvgDaysToPay).FirstOrDefault(x => x.Bills > 0);
+
+                    fastestValue.Text = fastest == null ? "₹ 0.00" : fastest.Party;
+                    fastestHint.Text = fastest == null ? "No paid bills in selected range" : $"Avg days: {fastest.AvgDaysToPay:N1}";
+                    slowestValue.Text = slowest == null ? "₹ 0.00" : slowest.Party;
+                    slowestHint.Text = slowest == null ? "No paid bills in selected range" : $"Avg days: {slowest.AvgDaysToPay:N1}";
+                }
+                else
+                {
+                    fastestValue.Text = "₹ 0.00";
+                    fastestHint.Text = "No data";
+                    slowestValue.Text = "₹ 0.00";
+                    slowestHint.Text = "No data";
+                }
+
+                collectionsValue.Text = $"₹ {profit.Collections:N2}";
+                collectionsHint.Text = $"{profit.CollectionCount} receipt(s)";
+                expenseValue.Text = $"₹ {profit.Expenses:N2}";
+                expenseHint.Text = $"{expenseRows.Count} expense account(s)";
+                profitValue.Text = $"₹ {profit.Profit:N2}";
+                profitHint.Text = $"{dueRows.Count} overdue bill(s) in range";
+            }
+
+            refreshBtn.Click += (_, __) => RefreshReport();
+            btnParty.Click += (_, __) => ShowBillingPartyPaymentReportWindow(fromPicker.SelectedDate ?? fromDefault, toPicker.SelectedDate ?? toDefault);
+            btnProfit.Click += (_, __) => ShowCurrentMonthProfitWindow(fromPicker.SelectedDate ?? fromDefault, toPicker.SelectedDate ?? toDefault);
+            btnExpense.Click += (_, __) => ShowMonthlyExpenseReportWindow(fromPicker.SelectedDate ?? fromDefault, toPicker.SelectedDate ?? toDefault);
+            btnDue.Click += (_, __) => ShowOutstandingBillsReportWindow(fromPicker.SelectedDate ?? fromDefault, toPicker.SelectedDate ?? toDefault);
+            btnSummary.Click += (_, __) => OpenPartyBillSummary_Click(this, new RoutedEventArgs());
+
+            RefreshReport();
+            window.Content = root;
+            window.Show();
+        }
+
+        private class ProfitSnapshot
+        {
+            public decimal Collections { get; set; }
+            public int CollectionCount { get; set; }
+            public decimal Expenses { get; set; }
+            public int ExpenseCount { get; set; }
+            public decimal Profit => Collections - Expenses;
+        }
+
+        private ProfitSnapshot CalculateProfitSnapshot(DateTime fromDate, DateTime toDate)
+        {
+            if (fromDate > toDate)
+            {
+                var temp = fromDate;
+                fromDate = toDate;
+                toDate = temp;
+            }
+
+            var receipts = new BillReceiptRepository().GetAll()
+                .Where(x => x.ReceiptDate.Date >= fromDate.Date && x.ReceiptDate.Date <= toDate.Date)
+                .ToList();
+            var cbs = new CashBankStatementRepository().GetAll()
+                .Where(x => x.Date.Date >= fromDate.Date && x.Date.Date <= toDate.Date)
+                .Where(x => !string.Equals((x.AccountName ?? string.Empty).Trim(), "LHS", StringComparison.OrdinalIgnoreCase))
+                .Where(x => !string.Equals((x.AccountName ?? string.Empty).Trim(), "BFRS", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            return new ProfitSnapshot
+            {
+                Collections = receipts.Sum(x => x.RCVD),
+                CollectionCount = receipts.Count,
+                Expenses = cbs.Sum(x => x.BankDr + x.CashDr),
+                ExpenseCount = cbs.Count
+            };
+        }
+
+        private List<PartyPaymentReportRow> LoadBillingPartyPaymentReportRows(DateTime fromDate, DateTime toDate)
+        {
+            if (fromDate > toDate)
+            {
+                var tmp = fromDate;
+                fromDate = toDate;
+                toDate = tmp;
+            }
+
+            var bills = new BillRepository().GetAll()
+                .Where(x => x.BillDate.Date >= fromDate.Date && x.BillDate.Date <= toDate.Date)
+                .ToList();
+            var receipts = new BillReceiptRepository().GetAll().ToList();
+            var receiptLookup = receipts
+                .GroupBy(x => (x.BillNo ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.OrderBy(x => x.ReceiptDate).ToList(), StringComparer.OrdinalIgnoreCase);
+
+            return bills
+                .Where(x => !string.IsNullOrWhiteSpace(x.Party))
+                .GroupBy(x => x.Party.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(g =>
+                {
+                    decimal billed = 0m;
+                    decimal received = 0m;
+                    decimal pending = 0m;
+                    var daysToFirstReceipt = new List<double>();
+                    int onTime = 0;
+                    int late = 0;
+                    int oldestPendingDays = 0;
+                    int billedCount = 0;
+
+                    foreach (var bill in g)
+                    {
+                        billedCount++;
+                        billed += bill.Total;
+                        pending += bill.Due;
+                        if (bill.Due > 0m)
+                        {
+                            var age = (DateTime.Today.Date - bill.BillDate.Date).Days;
+                            if (age > oldestPendingDays) oldestPendingDays = age;
+                            if (age > 30) late++;
+                        }
+
+                        List<BillReceiptEntry> billReceipts;
+                        if (receiptLookup.TryGetValue((bill.BillNo ?? string.Empty).Trim(), out billReceipts) && billReceipts.Count > 0)
+                        {
+                            received += billReceipts.Sum(x => x.RCVD);
+                            var firstReceipt = billReceipts[0];
+                            var days = (firstReceipt.ReceiptDate.Date - bill.BillDate.Date).TotalDays;
+                            daysToFirstReceipt.Add(days);
+                            if (days <= 30) onTime++;
+                            else late++;
+                        }
+                    }
+
+                    return new PartyPaymentReportRow
+                    {
+                        Party = g.Key,
+                        Bills = billedCount,
+                        TotalBilled = billed,
+                        TotalReceived = received,
+                        PendingAmount = pending,
+                        AvgDaysToPay = daysToFirstReceipt.Count > 0 ? (decimal)daysToFirstReceipt.Average() : 0m,
+                        OnTimeBills = onTime,
+                        LateBills = late,
+                        OldestPendingDays = oldestPendingDays
+                    };
+                })
+                .OrderByDescending(x => x.PendingAmount)
+                .ThenBy(x => x.Party)
+                .ToList();
+        }
+
+        private List<MonthlyExpenseReportRow> LoadMonthlyExpenseReportRows(DateTime fromDate, DateTime toDate)
+        {
+            if (fromDate > toDate)
+            {
+                var tmp = fromDate;
+                fromDate = toDate;
+                toDate = tmp;
+            }
+
+            return new CashBankStatementRepository().GetAll()
+                .Where(x => x.Date.Date >= fromDate.Date && x.Date.Date <= toDate.Date)
+                .Where(x => !string.IsNullOrWhiteSpace(x.AccountName))
+                .Where(x => !string.Equals((x.AccountName ?? string.Empty).Trim(), "LHS", StringComparison.OrdinalIgnoreCase))
+                .Where(x => !string.Equals((x.AccountName ?? string.Empty).Trim(), "BFRS", StringComparison.OrdinalIgnoreCase))
+                .GroupBy(x => x.AccountName.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(g => new MonthlyExpenseReportRow
+                {
+                    AccountName = g.Key,
+                    BankDr = g.Sum(x => x.BankDr),
+                    BankCr = g.Sum(x => x.BankCr),
+                    CashDr = g.Sum(x => x.CashDr),
+                    CashCr = g.Sum(x => x.CashCr)
+                })
+                .OrderByDescending(x => x.Net)
+                .ThenBy(x => x.AccountName)
+                .ToList();
+        }
+
+        private List<OutstandingBillReportRow> LoadOutstandingBillReportRows(DateTime fromDate, DateTime toDate)
+        {
+            if (fromDate > toDate)
+            {
+                var tmp = fromDate;
+                fromDate = toDate;
+                toDate = tmp;
+            }
+
+            var allBills = new BillRepository().GetAll();
+            var billLookup = allBills
+                .Where(x => !string.IsNullOrWhiteSpace(x.BillNo))
+                .GroupBy(x => (x.BillNo ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            return LoadBillDueRows()
+                .Where(x => x.Due > 0m)
+                .Select(x =>
+                {
+                    DateTime billDate = DateTime.Today;
+                    BillEntry bill;
+                    billLookup.TryGetValue((x.BillNo ?? string.Empty).Trim(), out bill);
+                    if (bill != null) billDate = bill.BillDate;
+                    return new OutstandingBillReportRow
+                    {
+                        Party = x.Party,
+                        BillNo = x.BillNo,
+                        BillDate = billDate,
+                        Total = bill != null ? bill.Total : 0m,
+                        Received = bill != null ? bill.RCVD : 0m,
+                        Due = x.Due,
+                        AgeDays = (DateTime.Today.Date - billDate.Date).Days,
+                        Status = ((DateTime.Today.Date - billDate.Date).Days > 30) ? "Overdue" : "Due"
+                    };
+                })
+                .Where(x => x.BillDate.Date >= fromDate.Date && x.BillDate.Date <= toDate.Date)
+                .OrderByDescending(x => x.AgeDays)
+                .ThenByDescending(x => x.Due)
+                .ToList();
+        }
+
+        private void ShowBillingPartyPaymentReportWindow(DateTime fromDate, DateTime toDate)
+        {
+            var rows = LoadBillingPartyPaymentReportRows(fromDate, toDate);
+            ShowReportGridWindow(
+                $"Billing Party Payment Report ({fromDate:dd-MMM-yyyy} to {toDate:dd-MMM-yyyy})",
+                "Shows which billing parties pay early and which pay late.",
+                rows,
+                grid =>
+                {
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Party", Binding = new Binding("Party"), Width = new DataGridLength(2, DataGridLengthUnitType.Star) });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Bills", Binding = new Binding("Bills"), Width = 80 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Total Billed", Binding = new Binding("TotalBilled") { StringFormat = "₹ {0:N2}" }, Width = 120 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Received", Binding = new Binding("TotalReceived") { StringFormat = "₹ {0:N2}" }, Width = 120 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Pending", Binding = new Binding("PendingAmount") { StringFormat = "₹ {0:N2}" }, Width = 120 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Avg Days", Binding = new Binding("AvgDaysToPay") { StringFormat = "N1" }, Width = 90 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "On Time", Binding = new Binding("OnTimeBills"), Width = 80 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Late", Binding = new Binding("LateBills"), Width = 80 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Oldest Pending", Binding = new Binding("OldestPendingDays"), Width = 110 });
+                });
+        }
+
+        private void ShowMonthlyExpenseReportWindow(DateTime fromDate, DateTime toDate)
+        {
+            var rows = LoadMonthlyExpenseReportRows(fromDate, toDate);
+            ShowReportGridWindow(
+                $"Current Month Expense Report ({fromDate:dd-MMM-yyyy} to {toDate:dd-MMM-yyyy})",
+                "Account-wise CBS debit/credit summary excluding system accounts.",
+                rows,
+                grid =>
+                {
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Account", Binding = new Binding("AccountName"), Width = new DataGridLength(2, DataGridLengthUnitType.Star) });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Bank Dr", Binding = new Binding("BankDr") { StringFormat = "₹ {0:N2}" }, Width = 110 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Bank Cr", Binding = new Binding("BankCr") { StringFormat = "₹ {0:N2}" }, Width = 110 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Cash Dr", Binding = new Binding("CashDr") { StringFormat = "₹ {0:N2}" }, Width = 110 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Cash Cr", Binding = new Binding("CashCr") { StringFormat = "₹ {0:N2}" }, Width = 110 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Net", Binding = new Binding("Net") { StringFormat = "₹ {0:N2}" }, Width = 120 });
+                });
+        }
+
+        private void ShowOutstandingBillsReportWindow(DateTime fromDate, DateTime toDate)
+        {
+            var rows = LoadOutstandingBillReportRows(fromDate, toDate);
+            ShowReportGridWindow(
+                $"Outstanding / Due Bills ({fromDate:dd-MMM-yyyy} to {toDate:dd-MMM-yyyy})",
+                "Bills that still have pending due amount.",
+                rows,
+                grid =>
+                {
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Party", Binding = new Binding("Party"), Width = new DataGridLength(2, DataGridLengthUnitType.Star) });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Bill No.", Binding = new Binding("BillNo"), Width = 130 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Bill Date", Binding = new Binding("BillDate") { StringFormat = "dd-MMM-yyyy" }, Width = 120 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Total", Binding = new Binding("Total") { StringFormat = "₹ {0:N2}" }, Width = 120 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Received", Binding = new Binding("Received") { StringFormat = "₹ {0:N2}" }, Width = 120 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Due", Binding = new Binding("Due") { StringFormat = "₹ {0:N2}" }, Width = 120 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Age (Days)", Binding = new Binding("AgeDays"), Width = 90 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Status", Binding = new Binding("Status"), Width = 100 });
+                });
+        }
+
+        private void ShowCurrentMonthProfitWindow(DateTime fromDate, DateTime toDate)
+        {
+            var profit = CalculateProfitSnapshot(fromDate, toDate);
+            var items = new[]
+            {
+                new { Metric = "Collections", Amount = profit.Collections, Notes = $"{profit.CollectionCount} receipt(s) in selected range" },
+                new { Metric = "Expense", Amount = profit.Expenses, Notes = $"{profit.ExpenseCount} CBS expense row(s) in selected range" },
+                new { Metric = "Profit", Amount = profit.Profit, Notes = "Collections minus expense" }
+            };
+
+            ShowReportGridWindow(
+                $"Current Month Profit ({fromDate:dd-MMM-yyyy} to {toDate:dd-MMM-yyyy})",
+                "Operational snapshot based on bill collections and CBS expense entries.",
+                items,
+                grid =>
+                {
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Metric", Binding = new Binding("Metric"), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Amount", Binding = new Binding("Amount") { StringFormat = "₹ {0:N2}" }, Width = 160 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Notes", Binding = new Binding("Notes"), Width = new DataGridLength(2, DataGridLengthUnitType.Star) });
+                });
+        }
+
+        private void ShowReportGridWindow<T>(string title, string subtitle, IEnumerable<T> rows, Action<DataGrid> configureGrid)
+        {
+            var dialog = new Window
+            {
+                Title = title,
+                Width = 1180,
+                Height = 720,
+                Owner = this,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F5F7FB"))
+            };
+
+            var root = new Grid { Margin = new Thickness(14) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var header = new Border
+            {
+                Background = Brushes.White,
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D8E1EE")),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(14)
+            };
+            var headerStack = new StackPanel();
+            headerStack.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = 20,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#0F172A"))
+            });
+            headerStack.Children.Add(new TextBlock
+            {
+                Text = subtitle,
+                FontSize = 12,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#64748B")),
+                Margin = new Thickness(0, 4, 0, 0),
+                TextWrapping = TextWrapping.Wrap
+            });
+            header.Child = headerStack;
+            Grid.SetRow(header, 0);
+            root.Children.Add(header);
+
+            var grid = new DataGrid
+            {
+                AutoGenerateColumns = false,
+                IsReadOnly = true,
+                CanUserAddRows = false,
+                Background = Brushes.White,
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D8E1EE")),
+                BorderThickness = new Thickness(1),
+                RowHeight = 30,
+                SelectionMode = DataGridSelectionMode.Single,
+                SelectionUnit = DataGridSelectionUnit.FullRow,
+                Margin = new Thickness(0, 12, 0, 0)
+            };
+            configureGrid(grid);
+            grid.ItemsSource = (rows ?? Enumerable.Empty<T>()).ToList();
+            Grid.SetRow(grid, 2);
+            root.Children.Add(grid);
+
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 12, 0, 0)
+            };
+            var closeBtn = new Button
+            {
+                Content = "Close",
+                Width = 92,
+                Height = 30,
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#334155")),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand
+            };
+            closeBtn.Click += (_, __) => dialog.Close();
+            footer.Children.Add(closeBtn);
+            Grid.SetRow(footer, 3);
+            root.Children.Add(footer);
+
+            dialog.Content = root;
+            dialog.Show();
+        }
+
         private void ApplyReceiveOnBill(string billNo, decimal rcvd, decimal tds, decimal ded, string mop, string mr, DateTime receivedDate, string otherRemarks)
         {
-            if (string.IsNullOrWhiteSpace(billNo)) return;
-            var rows = new List<(int Id, decimal Total)>();
-            decimal billTotal = 0m;
-            decimal currentRcvd = 0m;
-            decimal currentTds = 0m;
-            decimal currentDed = 0m;
-            string party = string.Empty;
-            DateTime billDate = receivedDate;
-            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+            billNo = (billNo ?? string.Empty).Trim();
+            if (billNo.Length == 0) return;
+
+            var rows = _billRepo.GetAll()
+                .Where(x => string.Equals((x.BillNo ?? string.Empty).Trim(), billNo, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(x => x.Id)
+                .ToList();
+            if (rows.Count == 0) return;
+
+            var billTotal = rows.Sum(x => x.Total);
+            var currentRcvd = rows.Sum(x => x.RCVD);
+            var currentTds = rows.Sum(x => x.TDS);
+            var currentDed = rows.Sum(x => x.DED);
+            var party = rows.Select(x => (x.Party ?? string.Empty).Trim()).FirstOrDefault(x => x.Length > 0) ?? string.Empty;
+            var billDate = rows.First().BillDate;
+
+            var totalBase = rows.Sum(x => x.Total);
+            if (totalBase <= 0) totalBase = rows.Count;
+
+            var dueAfter = billTotal - (currentRcvd + rcvd) - (currentTds + tds) - (currentDed + ded);
+
+            decimal remR = rcvd, remT = tds, remD = ded;
+            for (int i = 0; i < rows.Count; i++)
             {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
+                var row = rows[i];
+                decimal partR, partT, partD;
+                if (i == rows.Count - 1)
                 {
-                    cmd.CommandText = @"SELECT Id,
-                                               COALESCE(Freight + Detention + HML + OTHR + StCharge,0) AS TotalAmt,
-                                               COALESCE(Party, '') AS PartyName,
-                                               BillDate
-                                        FROM Bills
-                                        WHERE BillNo = @billNo
-                                        ORDER BY Id;";
-                    cmd.Parameters.AddWithValue("@billNo", billNo);
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        while (r.Read())
-                        {
-                            rows.Add((Convert.ToInt32(r["Id"]), Convert.ToDecimal(r["TotalAmt"])));
-                            if (string.IsNullOrWhiteSpace(party)) party = (r["PartyName"] as string ?? string.Empty).Trim();
-                            if (DateTime.TryParse(r["BillDate"] as string, out var parsedBillDate))
-                            {
-                                billDate = parsedBillDate;
-                            }
-                        }
-                    }
+                    partR = remR;
+                    partT = remT;
+                    partD = remD;
                 }
-                if (rows.Count == 0) return;
-
-                using (var cmd = conn.CreateCommand())
+                else
                 {
-                    cmd.CommandText = @"SELECT
-                                            COALESCE(SUM(Freight + Detention + HML + OTHR + StCharge), 0),
-                                            COALESCE(SUM(RCVD), 0),
-                                            COALESCE(SUM(TDS), 0),
-                                            COALESCE(SUM(DED), 0)
-                                        FROM Bills
-                                        WHERE BillNo = @billNo;";
-                    cmd.Parameters.AddWithValue("@billNo", billNo);
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        if (r.Read())
-                        {
-                            billTotal = Convert.ToDecimal(r[0]);
-                            currentRcvd = Convert.ToDecimal(r[1]);
-                            currentTds = Convert.ToDecimal(r[2]);
-                            currentDed = Convert.ToDecimal(r[3]);
-                        }
-                    }
+                    var ratio = rows.Count == 1 ? 1m : (row.Total <= 0 ? (1m / rows.Count) : (row.Total / totalBase));
+                    partR = Math.Round(rcvd * ratio, 2, MidpointRounding.AwayFromZero);
+                    partT = Math.Round(tds * ratio, 2, MidpointRounding.AwayFromZero);
+                    partD = Math.Round(ded * ratio, 2, MidpointRounding.AwayFromZero);
+                    remR -= partR;
+                    remT -= partT;
+                    remD -= partD;
                 }
 
-                var totalBase = rows.Sum(x => x.Total);
-                if (totalBase <= 0) totalBase = rows.Count;
-                var dueAfter = billTotal - (currentRcvd + rcvd) - (currentTds + tds) - (currentDed + ded);
-                using (var tx = conn.BeginTransaction())
-                {
-                    decimal remR = rcvd, remT = tds, remD = ded;
-                    for (int i = 0; i < rows.Count; i++)
-                    {
-                        var row = rows[i];
-                        decimal partR, partT, partD;
-                        if (i == rows.Count - 1)
-                        {
-                            partR = remR; partT = remT; partD = remD;
-                        }
-                        else
-                        {
-                            var ratio = (rows.Count == 1) ? 1m : (row.Total <= 0 ? (1m / rows.Count) : (row.Total / totalBase));
-                            partR = Math.Round(rcvd * ratio, 2, MidpointRounding.AwayFromZero);
-                            partT = Math.Round(tds * ratio, 2, MidpointRounding.AwayFromZero);
-                            partD = Math.Round(ded * ratio, 2, MidpointRounding.AwayFromZero);
-                            remR -= partR; remT -= partT; remD -= partD;
-                        }
-
-                        using (var upd = conn.CreateCommand())
-                        {
-                            upd.Transaction = tx;
-                            upd.CommandText = @"UPDATE Bills
-                                                SET RCVD = COALESCE(RCVD, 0) + @rcvd,
-                                                    TDS = COALESCE(TDS, 0) + @tds,
-                                                    DED = COALESCE(DED, 0) + @ded,
-                                                    MOP = @mop,
-                                                    MR = @mr,
-                                                    Remarks = CASE
-                                                                WHEN TRIM(COALESCE(@remarks,'')) = '' THEN Remarks
-                                                                WHEN TRIM(COALESCE(Remarks,'')) = '' THEN @remarks
-                                                                ELSE Remarks || ' | ' || @remarks
-                                                              END,
-                                                    Date = @dt
-                                                WHERE Id = @id;";
-                            upd.Parameters.AddWithValue("@rcvd", partR);
-                            upd.Parameters.AddWithValue("@tds", partT);
-                            upd.Parameters.AddWithValue("@ded", partD);
-                            upd.Parameters.AddWithValue("@mop", (object)mop ?? DBNull.Value);
-                            upd.Parameters.AddWithValue("@mr", (object)mr ?? DBNull.Value);
-                            upd.Parameters.AddWithValue("@remarks", (otherRemarks ?? string.Empty).Trim());
-                            upd.Parameters.AddWithValue("@dt", receivedDate.ToString("o"));
-                            upd.Parameters.AddWithValue("@id", row.Id);
-                            upd.ExecuteNonQuery();
-                        }
-                    }
-
-                    using (var hist = conn.CreateCommand())
-                    {
-                        hist.Transaction = tx;
-                        hist.CommandText = @"
-INSERT INTO BillReceipts
-(BillNo, Party, BillTotal, BillDate, ReceiptDate, RCVD, TDS, DED, MOP, MR, Remarks, DueAfter, CreatedAt)
-VALUES
-(@BillNo, @Party, @BillTotal, @BillDate, @ReceiptDate, @RCVD, @TDS, @DED, @MOP, @MR, @Remarks, @DueAfter, @CreatedAt);";
-                        hist.Parameters.AddWithValue("@BillNo", billNo);
-                        hist.Parameters.AddWithValue("@Party", (object)party ?? DBNull.Value);
-                        hist.Parameters.AddWithValue("@BillTotal", billTotal);
-                        hist.Parameters.AddWithValue("@BillDate", billDate.ToString("o"));
-                        hist.Parameters.AddWithValue("@ReceiptDate", receivedDate.ToString("o"));
-                        hist.Parameters.AddWithValue("@RCVD", rcvd);
-                        hist.Parameters.AddWithValue("@TDS", tds);
-                        hist.Parameters.AddWithValue("@DED", ded);
-                        hist.Parameters.AddWithValue("@MOP", (object)mop ?? DBNull.Value);
-                        hist.Parameters.AddWithValue("@MR", (object)mr ?? DBNull.Value);
-                        hist.Parameters.AddWithValue("@Remarks", (otherRemarks ?? string.Empty).Trim());
-                        hist.Parameters.AddWithValue("@DueAfter", dueAfter);
-                        hist.Parameters.AddWithValue("@CreatedAt", DateTime.Now.ToString("o"));
-                        hist.ExecuteNonQuery();
-                    }
-
-                    using (var cbs = conn.CreateCommand())
-                    {
-                        cbs.Transaction = tx;
-                        cbs.CommandText = @"
-INSERT INTO CashBankStatements
-(Sr, CBS, Date, AccountName, Particulars, Remarks, BankDr, BankCr, CashDr, CashCr)
-VALUES
-(@Sr, @CBS, @Date, @AccountName, @Particulars, @Remarks, @BankDr, @BankCr, @CashDr, @CashCr);";
-                        cbs.Parameters.AddWithValue("@Sr", _cbsRepo.GetMaxSr() + 1);
-                        cbs.Parameters.AddWithValue("@CBS", receivedDate.ToString("MMM-yy"));
-                        cbs.Parameters.AddWithValue("@Date", receivedDate.ToString("o"));
-                        cbs.Parameters.AddWithValue("@AccountName", "BFRS");
-                        cbs.Parameters.AddWithValue("@Particulars", $"Bill {billNo} - Received");
-                        cbs.Parameters.AddWithValue("@Remarks", string.IsNullOrWhiteSpace(otherRemarks) ? (object)$"MOP: {mop}, MR: {mr}" : $"{otherRemarks.Trim()} | MOP: {mop}, MR: {mr}");
-                        cbs.Parameters.AddWithValue("@BankDr", string.Equals((mop ?? string.Empty).Trim(), "CASH", StringComparison.OrdinalIgnoreCase) ? 0m : rcvd);
-                        cbs.Parameters.AddWithValue("@BankCr", 0m);
-                        cbs.Parameters.AddWithValue("@CashDr", string.Equals((mop ?? string.Empty).Trim(), "CASH", StringComparison.OrdinalIgnoreCase) ? rcvd : 0m);
-                        cbs.Parameters.AddWithValue("@CashCr", 0m);
-                        cbs.ExecuteNonQuery();
-                    }
-                    tx.Commit();
-                }
+                row.RCVD += partR;
+                row.TDS += partT;
+                row.DED += partD;
+                row.MOP = mop;
+                row.MR = mr;
+                row.Remarks = string.IsNullOrWhiteSpace(row.Remarks)
+                    ? (otherRemarks ?? string.Empty).Trim()
+                    : (string.IsNullOrWhiteSpace(otherRemarks) ? row.Remarks : row.Remarks + " | " + otherRemarks.Trim());
+                row.Date = receivedDate;
+                _billRepo.Upsert(row);
             }
+
+            _billReceiptRepo.Add(new BillReceiptEntry
+            {
+                BillNo = billNo,
+                Party = party,
+                BillTotal = billTotal,
+                BillDate = billDate,
+                ReceiptDate = receivedDate,
+                RCVD = rcvd,
+                TDS = tds,
+                DED = ded,
+                MOP = mop,
+                MR = mr,
+                Remarks = (otherRemarks ?? string.Empty).Trim(),
+                DueAfter = dueAfter,
+                CreatedAt = DateTime.Now
+            });
+
+            _cbsRepo.Upsert(new CashBankStatementEntry
+            {
+                Sr = _cbsRepo.GetMaxSr() + 1,
+                Date = receivedDate,
+                AccountName = "BFRS",
+                Particulars = $"Bill {billNo} - Received",
+                Remarks = string.IsNullOrWhiteSpace(otherRemarks) ? $"MOP: {mop}, MR: {mr}" : $"{otherRemarks.Trim()} | MOP: {mop}, MR: {mr}",
+                BankDr = string.Equals((mop ?? string.Empty).Trim(), "CASH", StringComparison.OrdinalIgnoreCase) ? 0m : rcvd,
+                BankCr = 0m,
+                CashDr = string.Equals((mop ?? string.Empty).Trim(), "CASH", StringComparison.OrdinalIgnoreCase) ? rcvd : 0m,
+                CashCr = 0m
+            });
         }
 
         private static decimal ParseDec(string text)
@@ -5101,7 +5906,7 @@ VALUES
             }
             else cv.Filter = null;
 
-            cv.Refresh();
+            RefreshCollectionViewSafely(cv);
             ApplyBillHeaderFilterIndicators();
             UpdateBillVisibleSummaryFromView(cv);
         }
@@ -5224,7 +6029,7 @@ VALUES
                 foreach (var col in cols)
                 {
                     var info = new DataGridCellInfo(item, col);
-                    if (!BillLedgerGrid.SelectedCells.Contains(info)) BillLedgerGrid.SelectedCells.Add(info);
+                    SelectDataGridCellSafely(BillLedgerGrid, info);
                 }
             }
         }
@@ -5454,13 +6259,21 @@ VALUES
             try
             {
                 if (e.EditingElement is TextBox tb) { tb.GetBindingExpression(TextBox.TextProperty)?.UpdateSource(); }
+            }
+            catch (Exception ex)
+            {
+                LogException(nameof(BillLedgerGrid_CellEditEnding) + ".UpdateSource", ex);
+                return;
+            }
+
+            RunAfterEditCommit(() =>
+            {
                 new BillRepository().Upsert(entry);
                 SyncBillToLinkedLRs(entry);
                 LRVM?.RefreshAfterDelete();
                 LRUpdatePageUI();
                 BillUpdatePageUI();
-            }
-            catch { }
+            }, nameof(BillLedgerGrid_CellEditEnding));
         }
 
         private void BillLedgerGrid_BeginningEdit(object sender, DataGridBeginningEditEventArgs e)
@@ -5494,154 +6307,93 @@ VALUES
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             if (lrNos.Count == 0) return;
+            var linked = _lrRepo.GetAll()
+                .Where(x => lrNos.Any(n => string.Equals((x.LRNo ?? string.Empty).Trim(), n, StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(x => x.Id)
+                .ToList();
+            if (linked.Count == 0) return;
 
-            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+            var currentFreight = linked.Sum(x => x.TotalFreight);
+            var currentHamali = linked.Sum(x => x.Hamali);
+            var currentDetention = linked.Sum(x => x.Detention);
+            var currentOthers = linked.Sum(x => x.Others);
+            var currentStCharge = linked.Sum(x => x.StCharge);
+            var currentRcvd = linked.Sum(x => x.NEFT + x.CASH);
+            var currentTds = linked.Sum(x => x.TDS);
+            var currentDed = linked.Sum(x => x.Ded);
+
+            bool amountsChanged =
+                bill.Freight != currentFreight ||
+                bill.HML != currentHamali ||
+                bill.Detention != currentDetention ||
+                bill.OTHR != currentOthers ||
+                bill.StCharge != currentStCharge ||
+                bill.RCVD != currentRcvd ||
+                bill.TDS != currentTds ||
+                bill.DED != currentDed;
+
+            for (int i = 0; i < linked.Count; i++)
             {
-                conn.Open();
-                var linked = new List<(int Id, string LRNo, decimal TotalFreight, decimal Hamali, decimal Detention, decimal Others, decimal StCharge, decimal NEFT, decimal CASH, decimal TDS, decimal Ded)>();
-                using (var readCmd = conn.CreateCommand())
+                var row = linked[i];
+                var newFreight = row.TotalFreight;
+                var newHamali = row.Hamali;
+                var newDetention = row.Detention;
+                var newOthers = row.Others;
+                var newStCharge = row.StCharge;
+                var newNeft = row.NEFT;
+                var newCash = row.CASH;
+                var newTds = row.TDS;
+                var newDed = row.Ded;
+
+                if (amountsChanged)
                 {
-                    var pNames = new List<string>();
-                    for (int i = 0; i < lrNos.Count; i++)
+                    int count = linked.Count;
+                    decimal baseFreight = count == 1 ? bill.Freight : Math.Round(bill.Freight / count, 2, MidpointRounding.AwayFromZero);
+                    decimal baseHamali = count == 1 ? bill.HML : Math.Round(bill.HML / count, 2, MidpointRounding.AwayFromZero);
+                    decimal baseDetention = count == 1 ? bill.Detention : Math.Round(bill.Detention / count, 2, MidpointRounding.AwayFromZero);
+                    decimal baseOthers = count == 1 ? bill.OTHR : Math.Round(bill.OTHR / count, 2, MidpointRounding.AwayFromZero);
+                    decimal baseStCharge = count == 1 ? bill.StCharge : Math.Round(bill.StCharge / count, 2, MidpointRounding.AwayFromZero);
+                    decimal baseRcvd = count == 1 ? bill.RCVD : Math.Round(bill.RCVD / count, 2, MidpointRounding.AwayFromZero);
+                    decimal baseTds = count == 1 ? bill.TDS : Math.Round(bill.TDS / count, 2, MidpointRounding.AwayFromZero);
+                    decimal baseDed = count == 1 ? bill.DED : Math.Round(bill.DED / count, 2, MidpointRounding.AwayFromZero);
+
+                    newFreight = baseFreight;
+                    newHamali = baseHamali;
+                    newDetention = baseDetention;
+                    newOthers = baseOthers;
+                    newStCharge = baseStCharge;
+                    newNeft = baseRcvd;
+                    newCash = 0m;
+                    newTds = baseTds;
+                    newDed = baseDed;
+
+                    if (i == linked.Count - 1 && linked.Count > 1)
                     {
-                        var p = "@lr" + i;
-                        pNames.Add(p);
-                        readCmd.Parameters.AddWithValue(p, lrNos[i]);
-                    }
-                    readCmd.CommandText = $@"SELECT Id, LRNo, TotalFreight, Hamali, Detention, Others, StCharge, NEFT, CASH, TDS, Ded
-                                             FROM LREntries
-                                             WHERE LRNo IN ({string.Join(",", pNames)});";
-                    using (var r = readCmd.ExecuteReader())
-                    {
-                        while (r.Read())
-                        {
-                            linked.Add((
-                                Convert.ToInt32(r["Id"]),
-                                r["LRNo"] as string ?? string.Empty,
-                                Convert.ToDecimal(r["TotalFreight"]),
-                                Convert.ToDecimal(r["Hamali"]),
-                                Convert.ToDecimal(r["Detention"]),
-                                Convert.ToDecimal(r["Others"]),
-                                Convert.ToDecimal(r["StCharge"]),
-                                Convert.ToDecimal(r["NEFT"]),
-                                Convert.ToDecimal(r["CASH"]),
-                                Convert.ToDecimal(r["TDS"]),
-                                Convert.ToDecimal(r["Ded"])
-                            ));
-                        }
+                        newFreight = bill.Freight - linked.Take(linked.Count - 1).Sum(_ => baseFreight);
+                        newHamali = bill.HML - linked.Take(linked.Count - 1).Sum(_ => baseHamali);
+                        newDetention = bill.Detention - linked.Take(linked.Count - 1).Sum(_ => baseDetention);
+                        newOthers = bill.OTHR - linked.Take(linked.Count - 1).Sum(_ => baseOthers);
+                        newStCharge = bill.StCharge - linked.Take(linked.Count - 1).Sum(_ => baseStCharge);
+                        newNeft = bill.RCVD - linked.Take(linked.Count - 1).Sum(_ => baseRcvd);
+                        newTds = bill.TDS - linked.Take(linked.Count - 1).Sum(_ => baseTds);
+                        newDed = bill.DED - linked.Take(linked.Count - 1).Sum(_ => baseDed);
                     }
                 }
-                if (linked.Count == 0) return;
 
-                var currentFreight = linked.Sum(x => x.TotalFreight);
-                var currentHamali = linked.Sum(x => x.Hamali);
-                var currentDetention = linked.Sum(x => x.Detention);
-                var currentOthers = linked.Sum(x => x.Others);
-                var currentStCharge = linked.Sum(x => x.StCharge);
-                var currentRcvd = linked.Sum(x => x.NEFT + x.CASH);
-                var currentTds = linked.Sum(x => x.TDS);
-                var currentDed = linked.Sum(x => x.Ded);
-
-                // If bill values were manually edited, distribute those values across linked LR rows.
-                // If bill values already match LR aggregate, keep LR amount rows unchanged.
-                bool amountsChanged =
-                    bill.Freight != currentFreight ||
-                    bill.HML != currentHamali ||
-                    bill.Detention != currentDetention ||
-                    bill.OTHR != currentOthers ||
-                    bill.StCharge != currentStCharge ||
-                    bill.RCVD != currentRcvd ||
-                    bill.TDS != currentTds ||
-                    bill.DED != currentDed;
-
-                using (var tx = conn.BeginTransaction())
-                {
-                    for (int i = 0; i < linked.Count; i++)
-                    {
-                        var row = linked[i];
-                        var newFreight = row.TotalFreight;
-                        var newHamali = row.Hamali;
-                        var newDetention = row.Detention;
-                        var newOthers = row.Others;
-                        var newStCharge = row.StCharge;
-                        var newNeft = row.NEFT;
-                        var newCash = row.CASH;
-                        var newTds = row.TDS;
-                        var newDed = row.Ded;
-
-                        if (amountsChanged)
-                        {
-                            int count = linked.Count;
-                            decimal baseFreight = count == 1 ? bill.Freight : Math.Round(bill.Freight / count, 2, MidpointRounding.AwayFromZero);
-                            decimal baseHamali = count == 1 ? bill.HML : Math.Round(bill.HML / count, 2, MidpointRounding.AwayFromZero);
-                            decimal baseDetention = count == 1 ? bill.Detention : Math.Round(bill.Detention / count, 2, MidpointRounding.AwayFromZero);
-                            decimal baseOthers = count == 1 ? bill.OTHR : Math.Round(bill.OTHR / count, 2, MidpointRounding.AwayFromZero);
-                            decimal baseStCharge = count == 1 ? bill.StCharge : Math.Round(bill.StCharge / count, 2, MidpointRounding.AwayFromZero);
-                            decimal baseRcvd = count == 1 ? bill.RCVD : Math.Round(bill.RCVD / count, 2, MidpointRounding.AwayFromZero);
-                            decimal baseTds = count == 1 ? bill.TDS : Math.Round(bill.TDS / count, 2, MidpointRounding.AwayFromZero);
-                            decimal baseDed = count == 1 ? bill.DED : Math.Round(bill.DED / count, 2, MidpointRounding.AwayFromZero);
-
-                            newFreight = baseFreight;
-                            newHamali = baseHamali;
-                            newDetention = baseDetention;
-                            newOthers = baseOthers;
-                            newStCharge = baseStCharge;
-                            newNeft = baseRcvd;
-                            newCash = 0m;
-                            newTds = baseTds;
-                            newDed = baseDed;
-
-                            if (i == linked.Count - 1 && linked.Count > 1)
-                            {
-                                newFreight = bill.Freight - linked.Take(linked.Count - 1).Sum(_ => baseFreight);
-                                newHamali = bill.HML - linked.Take(linked.Count - 1).Sum(_ => baseHamali);
-                                newDetention = bill.Detention - linked.Take(linked.Count - 1).Sum(_ => baseDetention);
-                                newOthers = bill.OTHR - linked.Take(linked.Count - 1).Sum(_ => baseOthers);
-                                newStCharge = bill.StCharge - linked.Take(linked.Count - 1).Sum(_ => baseStCharge);
-                                newNeft = bill.RCVD - linked.Take(linked.Count - 1).Sum(_ => baseRcvd);
-                                newTds = bill.TDS - linked.Take(linked.Count - 1).Sum(_ => baseTds);
-                                newDed = bill.DED - linked.Take(linked.Count - 1).Sum(_ => baseDed);
-                            }
-                        }
-
-                        using (var cmd = conn.CreateCommand())
-                        {
-                            cmd.Transaction = tx;
-                            cmd.CommandText = @"
-UPDATE LREntries SET
-    TotalFreight = @freight,
-    Hamali = @hamali,
-    Detention = @detention,
-    Others = @others,
-    StCharge = @stCharge,
-    NEFT = @neft,
-    CASH = @cash,
-    TDS = @tds,
-    Ded = @ded,
-    BillNo = @billNo,
-    BillDate = @billDate,
-    BILL = @billAmount,
-    BillParty = @billParty
-WHERE Id = @id;";
-                            cmd.Parameters.AddWithValue("@freight", newFreight);
-                            cmd.Parameters.AddWithValue("@hamali", newHamali);
-                            cmd.Parameters.AddWithValue("@detention", newDetention);
-                            cmd.Parameters.AddWithValue("@others", newOthers);
-                            cmd.Parameters.AddWithValue("@stCharge", newStCharge);
-                            cmd.Parameters.AddWithValue("@neft", newNeft);
-                            cmd.Parameters.AddWithValue("@cash", newCash);
-                            cmd.Parameters.AddWithValue("@tds", newTds);
-                            cmd.Parameters.AddWithValue("@ded", newDed);
-                            cmd.Parameters.AddWithValue("@billNo", (object)bill.BillNo ?? DBNull.Value);
-                            cmd.Parameters.AddWithValue("@billDate", bill.BillDate.ToString("o"));
-                            cmd.Parameters.AddWithValue("@billAmount", bill.Total);
-                            cmd.Parameters.AddWithValue("@billParty", (object)bill.Party ?? DBNull.Value);
-                            cmd.Parameters.AddWithValue("@id", row.Id);
-                            cmd.ExecuteNonQuery();
-                        }
-                    }
-                    tx.Commit();
-                }
+                row.TotalFreight = newFreight;
+                row.Hamali = newHamali;
+                row.Detention = newDetention;
+                row.Others = newOthers;
+                row.StCharge = newStCharge;
+                row.NEFT = newNeft;
+                row.CASH = newCash;
+                row.TDS = newTds;
+                row.Ded = newDed;
+                row.BillNo = bill.BillNo;
+                row.BillDate = bill.BillDate;
+                row.BILL = bill.Total;
+                row.BillParty = bill.Party;
+                _lrRepo.Upsert(row);
             }
         }
 
@@ -5771,7 +6523,7 @@ WHERE Id = @id;";
                         repo.Upsert(entry);
                         imported++;
                     }
-                    catch { errors++; }
+                    catch (Exception ex) { AppLogger.LogException(nameof(ImportBill_Click), ex); errors++; }
                     if (progress != null) progress.Value = i;
                 }
                 if (progress != null) progress.Visibility = Visibility.Collapsed;
@@ -5780,7 +6532,7 @@ WHERE Id = @id;";
                 BillUpdatePageUI();
                 MessageBox.Show($"Import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
             }
-            catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); }
+            catch (Exception ex) { AppLogger.LogException(nameof(ImportBill_Click), ex); MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); }
         }
 
         private static DateTime? ParseNullableDateCSV(string value)
@@ -5941,7 +6693,7 @@ WHERE Id = @id;";
                 };
             }
             else cv.Filter = null;
-            cv.Refresh();
+            RefreshCollectionViewSafely(cv);
             ApplyChallanHeaderFilterIndicators();
             RefreshFilteredSummary();
             if (RecordCountText != null) RecordCountText.Text = $"Records: {VM?.FilteredEntriesCount ?? 0}";
@@ -6007,7 +6759,7 @@ WHERE Id = @id;";
                 foreach (var col in cols)
                 {
                     var info = new DataGridCellInfo(item, col);
-                    if (!LedgerGrid.SelectedCells.Contains(info)) LedgerGrid.SelectedCells.Add(info);
+                    SelectDataGridCellSafely(LedgerGrid, info);
                 }
             }
         }
@@ -6501,6 +7253,21 @@ WHERE Id = @id;";
                    a.BillAmount == b.BillAmount && a.Margin == b.Margin && a.HasComments == b.HasComments;
         }
 
+        private void RunAfterEditCommit(Action action, string context)
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    action?.Invoke();
+                }
+                catch (Exception ex)
+                {
+                    LogException(context, ex);
+                }
+            }), System.Windows.Threading.DispatcherPriority.Background);
+        }
+
         private bool UndoChallanEdit()
         {
             if (_challanUndoStack.Count == 0) return false;
@@ -6518,7 +7285,7 @@ WHERE Id = @id;";
             }
             finally { _suppressChallanHistory = false; }
             _challanRedoStack.Push(new ChallanEditAction { EntryId = action.EntryId, Before = current, After = CloneChallanEntry(entry) });
-            LedgerGrid?.Items.Refresh();
+            RefreshDataGridItemsSafely(LedgerGrid);
             return true;
         }
 
@@ -6539,7 +7306,7 @@ WHERE Id = @id;";
             }
             finally { _suppressChallanHistory = false; }
             _challanUndoStack.Push(new ChallanEditAction { EntryId = action.EntryId, Before = current, After = CloneChallanEntry(entry) });
-            LedgerGrid?.Items.Refresh();
+            RefreshDataGridItemsSafely(LedgerGrid);
             return true;
         }
 
@@ -6714,7 +7481,7 @@ WHERE Id = @id;";
                 _suppressLrHistory = false;
             }
 
-            LRLedgerGrid?.Items.Refresh();
+            RefreshDataGridItemsSafely(LRLedgerGrid);
             return true;
         }
 
@@ -6737,33 +7504,29 @@ WHERE Id = @id;";
             _challanEditBeforeSnapshot = null;
             _challanEditEntryId = -1;
 
-            Dispatcher.BeginInvoke(new Action(() =>
+            RunAfterEditCommit(() =>
             {
-                try
-                {
-                    VM?.GetRepository().Upsert(entry);
-                    SyncLinkedLREntriesFromChallan(entry);
-                    SyncAllChallanBillingFromLR();
+                VM?.GetRepository().Upsert(entry);
+                SyncLinkedLREntriesFromChallan(entry);
+                SyncAllChallanBillingFromLR();
 
-                    if (!_suppressChallanHistory &&
-                        beforeSnapshot != null &&
-                        beforeEntryId == entry.Id)
+                if (!_suppressChallanHistory &&
+                    beforeSnapshot != null &&
+                    beforeEntryId == entry.Id)
+                {
+                    var after = CloneChallanEntry(entry);
+                    if (!AreChallanSnapshotsEqual(beforeSnapshot, after))
                     {
-                        var after = CloneChallanEntry(entry);
-                        if (!AreChallanSnapshotsEqual(beforeSnapshot, after))
+                        _challanUndoStack.Push(new ChallanEditAction
                         {
-                            _challanUndoStack.Push(new ChallanEditAction
-                            {
-                                EntryId = entry.Id,
-                                Before = beforeSnapshot,
-                                After = after
-                            });
-                            _challanRedoStack.Clear();
-                        }
+                            EntryId = entry.Id,
+                            Before = beforeSnapshot,
+                            After = after
+                        });
+                        _challanRedoStack.Clear();
                     }
                 }
-                catch { }
-            }), System.Windows.Threading.DispatcherPriority.Background);
+            }, nameof(LedgerGrid_CellEditEnding));
         }
         private void LedgerGrid_Sorting(object sender, DataGridSortingEventArgs e) { e.Handled = true; var col = e.Column; string propName = (col as DataGridTextColumn)?.Binding is System.Windows.Data.Binding b ? b.Path?.Path : (col as DataGridTemplateColumn)?.SortMemberPath; if (string.IsNullOrEmpty(propName) || col.CanUserSort == false) return; bool sameColumn = VM?.GetSortColumn() == propName; bool ascending = !sameColumn || !(VM?.IsCurrentSortAscending ?? true); foreach (var c in LedgerGrid.Columns) { string h = (c.Header?.ToString() ?? "").Replace(" ▲", "").Replace(" ▼", ""); c.Header = h; c.SortDirection = null; } col.SortDirection = ascending ? System.ComponentModel.ListSortDirection.Ascending : System.ComponentModel.ListSortDirection.Descending; col.Header = col.Header?.ToString() + (ascending ? " ▲" : " ▼"); VM?.SetSort(propName, ascending); }
         private void LRLedgerGrid_SelectedCellsChanged(object sender, SelectedCellsChangedEventArgs e) { if (LRLedgerGrid.SelectedCells.Count < 2) { LRSelectedSumTextBlock.Visibility = Visibility.Collapsed; return; } decimal totalSum = 0; bool hasNumbers = false; var cache = new Dictionary<string, System.Reflection.PropertyInfo>(); foreach (var cellInfo in LRLedgerGrid.SelectedCells) { var item = cellInfo.Item; var column = cellInfo.Column as DataGridBoundColumn; if (column?.Binding is System.Windows.Data.Binding binding) { var path = binding.Path.Path; if (!cache.TryGetValue(path, out var prop)) { prop = item.GetType().GetProperty(path); cache[path] = prop; } if (prop != null) { var val = prop.GetValue(item); if (val is decimal || val is int || val is long || val is double) { totalSum += Convert.ToDecimal(val); hasNumbers = true; } } } } if (hasNumbers) { LRSelectedSumTextBlock.Text = $"Selected: ₹ {totalSum:N2}"; LRSelectedSumTextBlock.Visibility = Visibility.Visible; } else LRSelectedSumTextBlock.Visibility = Visibility.Collapsed; }
@@ -6788,39 +7551,35 @@ WHERE Id = @id;";
             _lrEditBeforeSnapshot = null;
             _lrEditEntryId = -1;
 
-            Dispatcher.BeginInvoke(new Action(() =>
+            RunAfterEditCommit(() =>
             {
-                try
+                // Keep GST values normalized in uppercase.
+                entry.ConsignorGST = (entry.ConsignorGST ?? string.Empty).Trim().ToUpperInvariant();
+                entry.ConsigneeGST = (entry.ConsigneeGST ?? string.Empty).Trim().ToUpperInvariant();
+
+                if (LRVM != null)
                 {
-                    // Keep GST values normalized in uppercase.
-                    entry.ConsignorGST = (entry.ConsignorGST ?? string.Empty).Trim().ToUpperInvariant();
-                    entry.ConsigneeGST = (entry.ConsigneeGST ?? string.Empty).Trim().ToUpperInvariant();
+                    new LRRepository().Upsert(entry);
+                    SyncLinkedBillsFromLREntry(entry);
+                    SyncAllChallanBillingFromLR();
+                }
 
-                    if (LRVM != null)
+                if (!_suppressLrHistory &&
+                    beforeSnapshot != null &&
+                    beforeEntryId == entry.Id)
+                {
+                    var after = CloneLREntry(entry);
+                    if (!AreLRSnapshotsEqual(beforeSnapshot, after))
                     {
-                        new LRRepository().Upsert(entry);
-                        SyncLinkedBillsFromLREntry(entry);
-                        SyncAllChallanBillingFromLR();
-                    }
-
-                    if (!_suppressLrHistory &&
-                        beforeSnapshot != null &&
-                        beforeEntryId == entry.Id)
-                    {
-                        var after = CloneLREntry(entry);
-                        if (!AreLRSnapshotsEqual(beforeSnapshot, after))
+                        _lrUndoStack.Push(new LREditAction
                         {
-                            _lrUndoStack.Push(new LREditAction
-                            {
-                                EntryId = entry.Id,
-                                Before = beforeSnapshot,
-                                After = after
-                            });
-                        }
+                            EntryId = entry.Id,
+                            Before = beforeSnapshot,
+                            After = after
+                        });
                     }
                 }
-                catch { }
-            }), System.Windows.Threading.DispatcherPriority.Background);
+            }, nameof(LRLedgerGrid_CellEditEnding));
         }
 
         private void LRLedgerGrid_PreparingCellForEdit(object sender, DataGridPreparingCellForEditEventArgs e)
@@ -6935,100 +7694,28 @@ WHERE Id = @id;";
         private void SyncLinkedBillsFromLREntry(LREntry entry)
         {
             if (entry == null || string.IsNullOrWhiteSpace(entry.LRNo)) return;
-
-            var candidateBills = new List<(int Id, string LRNoList)>();
-            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+            var bills = _billRepo.GetAll();
+            foreach (var bill in bills.Where(b =>
+                         string.Equals((b.BillNo ?? string.Empty).Trim(), (entry.BillNo ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase) ||
+                         SplitLrNumbers(b.LRNo).Any(lr => string.Equals(lr, entry.LRNo, StringComparison.OrdinalIgnoreCase))))
             {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = @"SELECT Id, LRNo FROM Bills
-                                        WHERE (BillNo = @billNo) OR (LRNo LIKE @lrLike);";
-                    cmd.Parameters.AddWithValue("@billNo", (object)entry.BillNo ?? DBNull.Value);
-                    cmd.Parameters.AddWithValue("@lrLike", "%" + entry.LRNo + "%");
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        while (r.Read())
-                        {
-                            candidateBills.Add((Convert.ToInt32(r["Id"]), r["LRNo"] as string ?? string.Empty));
-                        }
-                    }
-                }
+                var lrNos = SplitLrNumbers(bill.LRNo).ToList();
+                if (lrNos.Count == 0 || !lrNos.Contains(entry.LRNo, StringComparer.OrdinalIgnoreCase)) continue;
 
-                foreach (var bill in candidateBills)
-                {
-                    var lrNos = bill.LRNoList
-                        .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(s => s.Trim())
-                        .Where(s => s.Length > 0)
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .ToList();
-                    if (lrNos.Count == 0) continue;
-                    if (!lrNos.Contains(entry.LRNo, StringComparer.OrdinalIgnoreCase)) continue;
+                var matched = _lrRepo.GetAll()
+                    .Where(lr => lrNos.Any(n => string.Equals((lr.LRNo ?? string.Empty).Trim(), n, StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+                if (matched.Count == 0) continue;
 
-                    decimal freight = 0, hamali = 0, detention = 0, others = 0, stCharge = 0, rcvd = 0, tds = 0, ded = 0;
-
-                    using (var sumCmd = conn.CreateCommand())
-                    {
-                        var pNames = new List<string>();
-                        for (int i = 0; i < lrNos.Count; i++)
-                        {
-                            var p = "@lr" + i;
-                            pNames.Add(p);
-                            sumCmd.Parameters.AddWithValue(p, lrNos[i]);
-                        }
-                        sumCmd.CommandText = $@"
-SELECT
-    COALESCE(SUM(TotalFreight),0),
-    COALESCE(SUM(Hamali),0),
-    COALESCE(SUM(Detention),0),
-    COALESCE(SUM(Others),0),
-    COALESCE(SUM(StCharge),0),
-    COALESCE(SUM(NEFT + CASH),0),
-    COALESCE(SUM(TDS),0),
-    COALESCE(SUM(Ded),0)
-FROM LREntries
-WHERE LRNo IN ({string.Join(",", pNames)});";
-                        using (var sr = sumCmd.ExecuteReader())
-                        {
-                            if (sr.Read())
-                            {
-                                freight = Convert.ToDecimal(sr[0]);
-                                hamali = Convert.ToDecimal(sr[1]);
-                                detention = Convert.ToDecimal(sr[2]);
-                                others = Convert.ToDecimal(sr[3]);
-                                stCharge = Convert.ToDecimal(sr[4]);
-                                rcvd = Convert.ToDecimal(sr[5]);
-                                tds = Convert.ToDecimal(sr[6]);
-                                ded = Convert.ToDecimal(sr[7]);
-                            }
-                        }
-                    }
-
-                    using (var upd = conn.CreateCommand())
-                    {
-                        upd.CommandText = @"UPDATE Bills SET
-                                            Freight = @freight,
-                                            HML = @hml,
-                                            Detention = @detention,
-                                            OTHR = @othr,
-                                            StCharge = @stCharge,
-                                            RCVD = @rcvd,
-                                            TDS = @tds,
-                                            DED = @ded
-                                            WHERE Id = @id;";
-                        upd.Parameters.AddWithValue("@freight", freight);
-                        upd.Parameters.AddWithValue("@hml", hamali);
-                        upd.Parameters.AddWithValue("@detention", detention);
-                        upd.Parameters.AddWithValue("@othr", others);
-                        upd.Parameters.AddWithValue("@stCharge", stCharge);
-                        upd.Parameters.AddWithValue("@rcvd", rcvd);
-                        upd.Parameters.AddWithValue("@tds", tds);
-                        upd.Parameters.AddWithValue("@ded", ded);
-                        upd.Parameters.AddWithValue("@id", bill.Id);
-                        upd.ExecuteNonQuery();
-                    }
-                }
+                bill.Freight = matched.Sum(x => x.TotalFreight);
+                bill.HML = matched.Sum(x => x.Hamali);
+                bill.Detention = matched.Sum(x => x.Detention);
+                bill.OTHR = matched.Sum(x => x.Others);
+                bill.StCharge = matched.Sum(x => x.StCharge);
+                bill.RCVD = matched.Sum(x => x.NEFT + x.CASH);
+                bill.TDS = matched.Sum(x => x.TDS);
+                bill.DED = matched.Sum(x => x.Ded);
+                _billRepo.Upsert(bill);
             }
 
             BillVM?.RefreshAfterDelete();
@@ -7042,108 +7729,45 @@ WHERE LRNo IN ({string.Join(",", pNames)});";
             try
             {
                 _challanBillingSyncInProgress = true;
-                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                var challans = _challanRepo.GetAll();
+                var lrRows = _lrRepo.GetAll();
+                var lrByNo = lrRows
+                    .Where(x => !string.IsNullOrWhiteSpace(x.LRNo))
+                    .ToDictionary(x => (x.LRNo ?? string.Empty).Trim(),
+                        x => x.TotalFreight + x.Hamali + x.Detention + x.Others,
+                        StringComparer.OrdinalIgnoreCase);
+                var lrByChNo = lrRows
+                    .Where(x => !string.IsNullOrWhiteSpace(x.CHNo) && !string.IsNullOrWhiteSpace(x.LRNo))
+                    .GroupBy(x => (x.CHNo ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.Select(x => (x.LRNo ?? string.Empty).Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), StringComparer.OrdinalIgnoreCase);
+
+                foreach (var ch in challans)
                 {
-                    conn.Open();
-
-                    var challans = new List<(int Id, string ChallanNo, string LRNumber, decimal LorryHire, decimal Detention, decimal Hamali)>();
-                    using (var cmd = conn.CreateCommand())
+                    var lrSet = new HashSet<string>(SplitLrNumbers(ch.LRNumber), StringComparer.OrdinalIgnoreCase);
+                    if (!string.IsNullOrWhiteSpace(ch.ChallanNumber) && lrByChNo.TryGetValue((ch.ChallanNumber ?? string.Empty).Trim(), out var listFromChNo))
                     {
-                        cmd.CommandText = @"SELECT Id,
-                                                   COALESCE(ChallanNumber, '') AS ChallanNumber,
-                                                   COALESCE(LRNumber, '') AS LRNumber,
-                                                   COALESCE(LorryHire, 0) AS LorryHire,
-                                                   COALESCE(Detention, 0) AS Detention,
-                                                   COALESCE(Hamali, 0) AS Hamali
-                                            FROM Challans;";
-                        using (var r = cmd.ExecuteReader())
-                        {
-                            while (r.Read())
-                            {
-                                challans.Add((
-                                    Convert.ToInt32(r["Id"]),
-                                    (r["ChallanNumber"] as string ?? string.Empty).Trim(),
-                                    (r["LRNumber"] as string ?? string.Empty),
-                                    Convert.ToDecimal(r["LorryHire"]),
-                                    Convert.ToDecimal(r["Detention"]),
-                                    Convert.ToDecimal(r["Hamali"])
-                                ));
-                            }
-                        }
+                        foreach (var lrNo in listFromChNo) lrSet.Add(lrNo);
                     }
 
-                    var lrRows = new List<(string LRNo, string CHNo, decimal TotalBill)>();
-                    using (var cmd = conn.CreateCommand())
+                    decimal billAmount = 0m;
+                    foreach (var lrNo in lrSet)
                     {
-                        cmd.CommandText = @"SELECT LRNo, CHNo, (COALESCE(TotalFreight,0) + COALESCE(Hamali,0) + COALESCE(Detention,0) + COALESCE(Others,0)) AS TotalBill
-                                            FROM LREntries;";
-                        using (var r = cmd.ExecuteReader())
-                        {
-                            while (r.Read())
-                            {
-                                lrRows.Add((
-                                    (r["LRNo"] as string ?? string.Empty).Trim(),
-                                    (r["CHNo"] as string ?? string.Empty).Trim(),
-                                    Convert.ToDecimal(r["TotalBill"])
-                                ));
-                            }
-                        }
+                        if (lrByNo.TryGetValue(lrNo, out var total)) billAmount += total;
                     }
+                    var margin = billAmount != 0m ? (billAmount - ch.LorryHire + ch.Detention + ch.Hamali) : 0m;
+                    ch.BillAmount = billAmount;
+                    ch.Margin = margin;
+                    _challanRepo.Upsert(ch);
 
-                    var lrByNo = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var lr in lrRows)
+                    var vmEntry = VM?.PagedEntries?.FirstOrDefault(x => x.Id == ch.Id);
+                    if (vmEntry != null)
                     {
-                        if (string.IsNullOrWhiteSpace(lr.LRNo)) continue;
-                        lrByNo[lr.LRNo] = lr.TotalBill;
-                    }
-
-                    var lrByChNo = lrRows
-                        .Where(x => !string.IsNullOrWhiteSpace(x.CHNo) && !string.IsNullOrWhiteSpace(x.LRNo))
-                        .GroupBy(x => x.CHNo, StringComparer.OrdinalIgnoreCase)
-                        .ToDictionary(g => g.Key, g => g.Select(x => x.LRNo).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), StringComparer.OrdinalIgnoreCase);
-
-                    using (var tx = conn.BeginTransaction())
-                    {
-                        foreach (var ch in challans)
-                        {
-                            var lrSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                            foreach (var token in SplitLrNumbers(ch.LRNumber)) lrSet.Add(token);
-                            if (!string.IsNullOrWhiteSpace(ch.ChallanNo) && lrByChNo.TryGetValue(ch.ChallanNo, out var listFromChNo))
-                            {
-                                foreach (var lrNo in listFromChNo) lrSet.Add(lrNo);
-                            }
-
-                            decimal billAmount = 0m;
-                            foreach (var lrNo in lrSet)
-                            {
-                                if (lrByNo.TryGetValue(lrNo, out var total)) billAmount += total;
-                            }
-                            var margin = billAmount != 0m
-                                ? (billAmount - ch.LorryHire + ch.Detention + ch.Hamali)
-                                : 0m;
-
-                            using (var upd = conn.CreateCommand())
-                            {
-                                upd.Transaction = tx;
-                                upd.CommandText = "UPDATE Challans SET BillAmount = @billAmount, Margin = @margin WHERE Id = @id;";
-                                upd.Parameters.AddWithValue("@billAmount", billAmount);
-                                upd.Parameters.AddWithValue("@margin", margin);
-                                upd.Parameters.AddWithValue("@id", ch.Id);
-                                upd.ExecuteNonQuery();
-                            }
-
-                            var vmEntry = VM?.PagedEntries?.FirstOrDefault(x => x.Id == ch.Id);
-                            if (vmEntry != null)
-                            {
-                                vmEntry.BillAmount = billAmount;
-                                vmEntry.Margin = margin;
-                            }
-                        }
-                        tx.Commit();
+                        vmEntry.BillAmount = billAmount;
+                        vmEntry.Margin = margin;
                     }
                 }
                 _lastChallanBillingSyncUtc = DateTime.UtcNow;
-                if (LedgerGrid != null) LedgerGrid.Items.Refresh();
+                RefreshDataGridItemsSafely(LedgerGrid);
                 RefreshFilteredSummary();
                 RefreshDashboard();
             }
@@ -7163,6 +7787,33 @@ WHERE LRNo IN ({string.Join(",", pNames)});";
                 .Distinct(StringComparer.OrdinalIgnoreCase);
         }
         private void LRLedgerGrid_Sorting(object sender, DataGridSortingEventArgs e) { e.Handled = true; var col = e.Column; string propName = (col as DataGridTextColumn)?.Binding is System.Windows.Data.Binding b ? b.Path?.Path : (col as DataGridTemplateColumn)?.SortMemberPath; if (string.IsNullOrEmpty(propName) || col.CanUserSort == false) return; bool sameColumn = LRVM?.GetSortColumn() == propName; bool ascending = !sameColumn || !(LRVM?.IsCurrentSortAscending ?? true); foreach (var c in LRLedgerGrid.Columns) { string h = (c.Header?.ToString() ?? "").Replace(" ▲", "").Replace(" ▼", ""); c.Header = h; c.SortDirection = null; } col.SortDirection = ascending ? System.ComponentModel.ListSortDirection.Ascending : System.ComponentModel.ListSortDirection.Descending; col.Header = col.Header?.ToString() + (ascending ? " ▲" : " ▼"); LRVM?.SetSort(propName, ascending); SaveLRColumnSettings(); }
+        private static string NormalizeLrKey(string value)
+        {
+            return new string((value ?? string.Empty).Where(c => !char.IsWhiteSpace(c)).ToArray()).Trim();
+        }
+
+        private HashSet<string> GetBilledLrNumbers()
+        {
+            var billed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var bill in _billRepo.GetAll())
+            {
+                var raw = (bill.LRNo ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                foreach (var token in SplitLrNumbers(raw))
+                {
+                    var key = NormalizeLrKey(token);
+                    if (key.Length > 0) billed.Add(key);
+                }
+            }
+            return billed;
+        }
+
+        private static bool IsLrBilled(string lrNo, HashSet<string> billedSet)
+        {
+            var key = NormalizeLrKey(lrNo);
+            return key.Length > 0 && billedSet != null && billedSet.Contains(key);
+        }
+
         private void LRLedgerGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (IsInColumnHeaderResizeGripper(e.OriginalSource as DependencyObject)) return;
@@ -7233,7 +7884,7 @@ WHERE LRNo IN ({string.Join(",", pNames)});";
                 foreach (var col in cols)
                 {
                     var info = new DataGridCellInfo(item, col);
-                    if (!LRLedgerGrid.SelectedCells.Contains(info)) LRLedgerGrid.SelectedCells.Add(info);
+                    SelectDataGridCellSafely(LRLedgerGrid, info);
                 }
             }
         }
@@ -7614,7 +8265,7 @@ WHERE LRNo IN ({string.Join(",", pNames)});";
             }
             else cv.Filter = null;
 
-            cv.Refresh();
+            RefreshCollectionViewSafely(cv);
             ApplyLRHeaderFilterIndicators();
             UpdateLRVisibleSummaryFromView(cv);
         }
@@ -7688,32 +8339,14 @@ WHERE LRNo IN ({string.Join(",", pNames)});";
 
             try
             {
-                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-                {
-                    conn.Open();
-                    using (var tx = conn.BeginTransaction())
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.Transaction = tx;
-                        cmd.CommandText = @"
-DELETE FROM ReportingTracks;
-DELETE FROM TrackingEntries;
-DELETE FROM Challans;
-DELETE FROM LREntries;
-DELETE FROM Bills;
-DELETE FROM CashBankStatements;
-DELETE FROM CBSAccounts;
-DELETE FROM VehicleLedger;
-DELETE FROM Parties;
-DELETE FROM ChallanComments;
-DELETE FROM LRComments;
-DELETE FROM BillComments;
-DELETE FROM BillReceipts;
-DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','Challans','LREntries','Bills','CashBankStatements','CBSAccounts','VehicleLedger','Parties','ChallanComments','LRComments','BillComments','BillReceipts');";
-                        cmd.ExecuteNonQuery();
-                        tx.Commit();
-                    }
-                }
+                foreach (var entry in _billRepo.GetAll()) _billRepo.Delete(entry);
+                foreach (var entry in _lrRepo.GetAll()) _lrRepo.Delete(entry);
+                foreach (var entry in _challanRepo.GetAll()) _challanRepo.Delete(entry);
+                foreach (var entry in _cbsRepo.GetAll()) _cbsRepo.Delete(entry);
+                foreach (var entry in _partyRepo.GetAll()) _partyRepo.Delete(entry);
+                foreach (var entry in _vehicleRepo.GetAll()) _vehicleRepo.Delete(entry);
+                foreach (var entry in (TrackingVM?.Entries ?? Enumerable.Empty<TrackingEntry>())) _trackingRepo.Delete(entry);
+                foreach (var entry in _billReceiptRepo.GetAll()) _billReceiptRepo.Delete(entry);
 
                 VM?.RefreshAfterDelete();
                 LRVM?.RefreshAfterDelete();
@@ -7754,7 +8387,7 @@ DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','
                 if (cv != null)
                 {
                     cv.Filter = null;
-                    cv.Refresh();
+                    RefreshCollectionViewSafely(cv);
                 }
             }
 
@@ -7866,7 +8499,7 @@ DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','
                         if (editableView.IsAddingNew) editableView.CommitNew();
                     }
                     cv.Filter = null;
-                    cv.Refresh();
+                    RefreshCollectionViewSafely(cv);
                 }
 
                 LRLedgerGrid.UnselectAllCells();
@@ -7875,12 +8508,12 @@ DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','
             ApplyLRHeaderFilterIndicators();
             LRRefreshFilteredSummary();
         }
-        private void ImportLR_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select LR Import File" }; if (dialog.ShowDialog() != true) return; try { var lines = System.IO.File.ReadAllLines(dialog.FileName); if (lines.Length < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = SplitCsvLine(lines[0]); var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new LRRepository(); int imported = 0, errors = 0; var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = lines.Length - 1; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; for (int i = 1; i < lines.Length; i++) { try {                         var parts = SplitCsvLine(lines[i]); var entry = new LREntry(); entry.LRNo = GetCol(parts, colMap, "LRNo") ?? GetCol(parts, colMap, "LRNO") ?? GetCol(parts, colMap, "LR"); entry.Date = ParseDate(GetCol(parts, colMap, "Date") ?? GetCol(parts, colMap, "DATE")); entry.ConsignorName = GetCol(parts, colMap, "ConsignorName") ?? GetCol(parts, colMap, "Consignor"); entry.ConsignorAddress = GetCol(parts, colMap, "ConsignorAddress"); entry.ConsignorGST = GetCol(parts, colMap, "ConsignorGST"); entry.ConsigneeName = GetCol(parts, colMap, "ConsigneeName") ?? GetCol(parts, colMap, "Consignee"); entry.ConsigneeAddress = GetCol(parts, colMap, "ConsigneeAddress"); entry.ConsigneeGST = GetCol(parts, colMap, "ConsigneeGST"); entry.From = GetCol(parts, colMap, "From") ?? GetCol(parts, colMap, "FROM"); entry.To = GetCol(parts, colMap, "To") ?? GetCol(parts, colMap, "TO"); entry.VehicleNo = GetCol(parts, colMap, "VehicleNo") ?? GetCol(parts, colMap, "Vehicle"); entry.VehicleType = GetCol(parts, colMap, "VehicleType") ?? GetCol(parts, colMap, "Type"); entry.SizeL = ParseDecimal(GetCol(parts, colMap, "L") ?? GetCol(parts, colMap, "SizeL")); entry.SizeW = ParseDecimal(GetCol(parts, colMap, "W") ?? GetCol(parts, colMap, "SizeW")); entry.SizeH = ParseDecimal(GetCol(parts, colMap, "H") ?? GetCol(parts, colMap, "SizeH")); entry.ActualWeight = ParseDecimal(GetCol(parts, colMap, "ActualWeight") ?? GetCol(parts, colMap, "Actual Weight")); entry.ChargedWeight = ParseDecimal(GetCol(parts, colMap, "ChargedWeight") ?? GetCol(parts, colMap, "Charged Weight")); int.TryParse(GetCol(parts, colMap, "PKG"), out int pkg); entry.PKG = pkg; entry.PkgType = GetCol(parts, colMap, "PkgType") ?? GetCol(parts, colMap, "PackageType") ?? GetCol(parts, colMap, "Pkg Type"); entry.Description = GetCol(parts, colMap, "Description"); entry.Invoice = GetCol(parts, colMap, "Invoice"); entry.Value = GetCol(parts, colMap, "Value"); entry.CHNo = GetCol(parts, colMap, "CHNo") ?? GetCol(parts, colMap, "CHNO") ?? GetCol(parts, colMap, "ChallanNo"); entry.TotalFreight = ParseDecimal(GetCol(parts, colMap, "TotalFreight") ?? GetCol(parts, colMap, "Freight")); entry.Hamali = ParseDecimal(GetCol(parts, colMap, "Hamali")); entry.Detention = ParseDecimal(GetCol(parts, colMap, "Detention")); entry.Others = ParseDecimal(GetCol(parts, colMap, "Others") ?? GetCol(parts, colMap, "Other") ?? GetCol(parts, colMap, "OTHR")); entry.StCharge = ParseDecimal(GetCol(parts, colMap, "StCharge") ?? GetCol(parts, colMap, "St. Charge") ?? GetCol(parts, colMap, "StChargeAmount")); entry.NEFT = ParseDecimal(GetCol(parts, colMap, "NEFT")); entry.CASH = ParseDecimal(GetCol(parts, colMap, "CASH")); entry.TDS = ParseDecimal(GetCol(parts, colMap, "TDS")); entry.Ded = ParseDecimal(GetCol(parts, colMap, "Ded") ?? GetCol(parts, colMap, "DED")); entry.BillNo = GetCol(parts, colMap, "BillNo") ?? GetCol(parts, colMap, "BILLNO"); entry.BillDate = ParseNullableDate(GetCol(parts, colMap, "BillDate")); entry.BILL = ParseDecimal(GetCol(parts, colMap, "BILL")); entry.BillParty = GetCol(parts, colMap, "BillParty"); entry.Broker = GetCol(parts, colMap, "Broker"); entry.FrtType = GetCol(parts, colMap, "FrtType") ?? GetCol(parts, colMap, "FrtType"); entry.PayType = GetCol(parts, colMap, "PayType") ?? GetCol(parts, colMap, "ToPayToBeBilled") ?? GetCol(parts, colMap, "To Pay/To Be Billed"); entry.Comm = ParseDecimal(GetCol(parts, colMap, "Comm")); entry.Paid = GetCol(parts, colMap, "Paid"); repo.Upsert(entry); imported++; } catch { errors++; } if (progress != null) progress.Value = i; } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) status.Text = $"Imported: {imported}, Errors: {errors}"; LRVM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); LRUpdatePageUI(); MessageBox.Show($"Import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
+        private void ImportLR_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select LR Import File" }; if (dialog.ShowDialog() != true) return; try { var lines = System.IO.File.ReadAllLines(dialog.FileName); if (lines.Length < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = SplitCsvLine(lines[0]); var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new LRRepository(); int imported = 0, errors = 0; var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = lines.Length - 1; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; for (int i = 1; i < lines.Length; i++) { try {                         var parts = SplitCsvLine(lines[i]); var entry = new LREntry(); entry.LRNo = GetCol(parts, colMap, "LRNo") ?? GetCol(parts, colMap, "LRNO") ?? GetCol(parts, colMap, "LR"); entry.Date = ParseDate(GetCol(parts, colMap, "Date") ?? GetCol(parts, colMap, "DATE")); entry.ConsignorName = GetCol(parts, colMap, "ConsignorName") ?? GetCol(parts, colMap, "Consignor"); entry.ConsignorAddress = GetCol(parts, colMap, "ConsignorAddress"); entry.ConsignorGST = GetCol(parts, colMap, "ConsignorGST"); entry.ConsigneeName = GetCol(parts, colMap, "ConsigneeName") ?? GetCol(parts, colMap, "Consignee"); entry.ConsigneeAddress = GetCol(parts, colMap, "ConsigneeAddress"); entry.ConsigneeGST = GetCol(parts, colMap, "ConsigneeGST"); entry.From = GetCol(parts, colMap, "From") ?? GetCol(parts, colMap, "FROM"); entry.To = GetCol(parts, colMap, "To") ?? GetCol(parts, colMap, "TO"); entry.VehicleNo = GetCol(parts, colMap, "VehicleNo") ?? GetCol(parts, colMap, "Vehicle"); entry.VehicleType = GetCol(parts, colMap, "VehicleType") ?? GetCol(parts, colMap, "Type"); entry.SizeL = ParseDecimal(GetCol(parts, colMap, "L") ?? GetCol(parts, colMap, "SizeL")); entry.SizeW = ParseDecimal(GetCol(parts, colMap, "W") ?? GetCol(parts, colMap, "SizeW")); entry.SizeH = ParseDecimal(GetCol(parts, colMap, "H") ?? GetCol(parts, colMap, "SizeH")); entry.ActualWeight = ParseDecimal(GetCol(parts, colMap, "ActualWeight") ?? GetCol(parts, colMap, "Actual Weight")); entry.ChargedWeight = ParseDecimal(GetCol(parts, colMap, "ChargedWeight") ?? GetCol(parts, colMap, "Charged Weight")); int.TryParse(GetCol(parts, colMap, "PKG"), out int pkg); entry.PKG = pkg; entry.PkgType = GetCol(parts, colMap, "PkgType") ?? GetCol(parts, colMap, "PackageType") ?? GetCol(parts, colMap, "Pkg Type"); entry.Description = GetCol(parts, colMap, "Description"); entry.Invoice = GetCol(parts, colMap, "Invoice"); entry.Value = GetCol(parts, colMap, "Value"); entry.CHNo = GetCol(parts, colMap, "CHNo") ?? GetCol(parts, colMap, "CHNO") ?? GetCol(parts, colMap, "ChallanNo"); entry.TotalFreight = ParseDecimal(GetCol(parts, colMap, "TotalFreight") ?? GetCol(parts, colMap, "Freight")); entry.Hamali = ParseDecimal(GetCol(parts, colMap, "Hamali")); entry.Detention = ParseDecimal(GetCol(parts, colMap, "Detention")); entry.Others = ParseDecimal(GetCol(parts, colMap, "Others") ?? GetCol(parts, colMap, "Other") ?? GetCol(parts, colMap, "OTHR")); entry.StCharge = ParseDecimal(GetCol(parts, colMap, "StCharge") ?? GetCol(parts, colMap, "St. Charge") ?? GetCol(parts, colMap, "StChargeAmount")); entry.NEFT = ParseDecimal(GetCol(parts, colMap, "NEFT")); entry.CASH = ParseDecimal(GetCol(parts, colMap, "CASH")); entry.TDS = ParseDecimal(GetCol(parts, colMap, "TDS")); entry.Ded = ParseDecimal(GetCol(parts, colMap, "Ded") ?? GetCol(parts, colMap, "DED")); entry.BillNo = GetCol(parts, colMap, "BillNo") ?? GetCol(parts, colMap, "BILLNO"); entry.BillDate = ParseNullableDate(GetCol(parts, colMap, "BillDate")); entry.BILL = ParseDecimal(GetCol(parts, colMap, "BILL")); entry.BillParty = GetCol(parts, colMap, "BillParty"); entry.Broker = GetCol(parts, colMap, "Broker"); entry.FrtType = GetCol(parts, colMap, "FrtType") ?? GetCol(parts, colMap, "FrtType"); entry.PayType = GetCol(parts, colMap, "PayType") ?? GetCol(parts, colMap, "ToPayToBeBilled") ?? GetCol(parts, colMap, "To Pay/To Be Billed"); entry.Comm = ParseDecimal(GetCol(parts, colMap, "Comm")); entry.Paid = GetCol(parts, colMap, "Paid"); repo.Upsert(entry); imported++; } catch (Exception ex) { AppLogger.LogException(nameof(ImportChallan_Click), ex); errors++; } if (progress != null) progress.Value = i; } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) status.Text = $"Imported: {imported}, Errors: {errors}"; LRVM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); LRUpdatePageUI(); MessageBox.Show($"Import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
         private void ShowLRColumnsMenu_Click(object sender, RoutedEventArgs e) { if (!(sender is System.Windows.Controls.Button button)) return; _lrColumnsMenu = BuildLRColumnsMenu(); _lrColumnsMenu.PlacementTarget = button; _lrColumnsMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom; _lrColumnsMenu.IsOpen = true; }
         private static string LRSettingsPath => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Awagaman ERP", "lr_column_settings.json");
         private void SaveLRColumnSettings() { try { var lines = new List<string>(); lines.Add($"_SortColumn:{LRVM?.GetSortColumn() ?? ""}"); lines.Add($"_SortAscending:{LRVM?.IsCurrentSortAscending}"); foreach (var col in LRLedgerGrid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" ▲", "").Replace(" ▼", "").Trim(); if (!string.IsNullOrEmpty(h)) lines.Add(col.Visibility == Visibility.Visible ? $"1:{h}:{(int)col.Width.DisplayValue}" : $"0:{h}:{(int)col.Width.DisplayValue}"); } var dir = System.IO.Path.GetDirectoryName(LRSettingsPath); if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir); System.IO.File.WriteAllText(LRSettingsPath, string.Join("\n", lines)); } catch { } }
         private void LoadLRColumnSettings() { try { var path = LRSettingsPath; if (!System.IO.File.Exists(path)) return; string sortCol = ""; bool sortAsc = true; foreach (var line in System.IO.File.ReadAllLines(path)) { if (line.StartsWith("_SortColumn:")) { sortCol = line.Substring("_SortColumn:".Length); continue; } if (line.StartsWith("_SortAscending:")) { bool.TryParse(line.Substring("_SortAscending:".Length), out sortAsc); continue; } var parts = line.Split(':'); if (parts.Length >= 2) { bool vis = parts[0] == "1"; var h = parts[1]; foreach (var col in LRLedgerGrid.Columns) { var ch = (col.Header?.ToString() ?? "").Replace(" ▲", "").Replace(" ▼", "").Trim(); if (string.Equals(ch, h, StringComparison.OrdinalIgnoreCase)) { col.Visibility = vis ? Visibility.Visible : Visibility.Collapsed; if (parts.Length >= 3 && double.TryParse(parts[2], out double w) && w > 10) col.Width = new DataGridLength(w); break; } } } } LRVM?.SetSort(sortCol, sortAsc); } catch { } }
-        private void ImportChallan_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select Challan Import File" }; if (dialog.ShowDialog() != true) return; if (dialog.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) || dialog.FileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase)) { MessageBox.Show("Please export your Excel file as CSV first.", "Format Not Supported", MessageBoxButton.OK, MessageBoxImage.Information); return; } try { var lines = System.IO.File.ReadAllLines(dialog.FileName); if (lines.Length < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = SplitCsvLine(lines[0]); var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new ChallanRepository(); int imported = 0, errors = 0; int maxSr = repo.GetMaxSr(); var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = lines.Length - 1; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; for (int i = 1; i < lines.Length; i++) { try { var parts = SplitCsvLine(lines[i]); var entry = new ChallanEntry { Sr = ++maxSr, ChallanNumber = GetCol(parts, colMap, "ChallanNumber") ?? GetCol(parts, colMap, "ChallanNo") ?? GetCol(parts, colMap, "CHALLANNO"), Date = ParseDate(GetCol(parts, colMap, "Date") ?? GetCol(parts, colMap, "DATE")), LRNumber = GetCol(parts, colMap, "LRNumber") ?? GetCol(parts, colMap, "LRNumber") ?? GetCol(parts, colMap, "LRNO"), BrokerName = GetCol(parts, colMap, "BrokerName") ?? GetCol(parts, colMap, "Broker"), From = GetCol(parts, colMap, "From") ?? GetCol(parts, colMap, "FROM"), To = GetCol(parts, colMap, "To") ?? GetCol(parts, colMap, "TO"), VehicleNumber = GetCol(parts, colMap, "VehicleNumber") ?? GetCol(parts, colMap, "VehicleNo") ?? GetCol(parts, colMap, "VEHICLENO"), VehicleType = GetCol(parts, colMap, "VehicleType"), DriverName = GetCol(parts, colMap, "DriverName") ?? GetCol(parts, colMap, "Driver"), DriverMobile = GetCol(parts, colMap, "DriverMobile") ?? GetCol(parts, colMap, "DriverMobile"), EngineNo = GetCol(parts, colMap, "EngineNo"), LicenceNo = GetCol(parts, colMap, "LicenceNo"), PolicyNo = GetCol(parts, colMap, "PolicyNo"), ChassisNo = GetCol(parts, colMap, "ChassisNo"), OwnerName = GetCol(parts, colMap, "OwnerName") ?? GetCol(parts, colMap, "Owner"), PAN = GetCol(parts, colMap, "PAN"), LorryHire = ParseDecimal(GetCol(parts, colMap, "LorryHire") ?? GetCol(parts, colMap, "LorryHire")), LessTDS = ParseDecimal(GetCol(parts, colMap, "LessTDS")), AdvanceAmount = ParseDecimal(GetCol(parts, colMap, "AdvanceAmount") ?? GetCol(parts, colMap, "Advance")), AdvanceNEFT = ParseDecimal(GetCol(parts, colMap, "AdvanceNEFT")), AdvanceCash = ParseDecimal(GetCol(parts, colMap, "AdvanceCash")), AdvanceDate = ParseNullableDate(GetCol(parts, colMap, "AdvanceDate")), Detention = ParseDecimal(GetCol(parts, colMap, "Detention")), Hamali = ParseDecimal(GetCol(parts, colMap, "Hamali")), Deduction = ParseDecimal(GetCol(parts, colMap, "Deduction")), BalancePaidNEFT = ParseDecimal(GetCol(parts, colMap, "BalancePaidNEFT")), BalancePaidCash = ParseDecimal(GetCol(parts, colMap, "BalancePaidCash")), BalancePaidDate = ParseNullableDate(GetCol(parts, colMap, "BalancePaidDate")), PaidTo = GetCol(parts, colMap, "PaidTo"), Remarks = GetCol(parts, colMap, "Remarks"), BillAmount = ParseDecimal(GetCol(parts, colMap, "BillAmount")), Margin = ParseDecimal(GetCol(parts, colMap, "Margin")) }; entry.SuppressCalculations = true; entry.RecalculateBalance(); repo.Upsert(entry); imported++; } catch { errors++; } if (progress != null) progress.Value = i; if (status != null) status.Text = $"Importing {i}/{lines.Length - 1}"; } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) status.Text = $"Imported: {imported}, Errors: {errors}"; VM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); UpdatePageUI(); RefreshDashboard(); MessageBox.Show($"Challan import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
+        private void ImportChallan_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select Challan Import File" }; if (dialog.ShowDialog() != true) return; if (dialog.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) || dialog.FileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase)) { MessageBox.Show("Please export your Excel file as CSV first.", "Format Not Supported", MessageBoxButton.OK, MessageBoxImage.Information); return; } try { var lines = System.IO.File.ReadAllLines(dialog.FileName); if (lines.Length < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = SplitCsvLine(lines[0]); var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new ChallanRepository(); int imported = 0, errors = 0; int maxSr = repo.GetMaxSr(); var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = lines.Length - 1; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; for (int i = 1; i < lines.Length; i++) { try { var parts = SplitCsvLine(lines[i]); var entry = new ChallanEntry { Sr = ++maxSr, ChallanNumber = GetCol(parts, colMap, "ChallanNumber") ?? GetCol(parts, colMap, "ChallanNo") ?? GetCol(parts, colMap, "CHALLANNO"), Date = ParseDate(GetCol(parts, colMap, "Date") ?? GetCol(parts, colMap, "DATE")), LRNumber = GetCol(parts, colMap, "LRNumber") ?? GetCol(parts, colMap, "LRNumber") ?? GetCol(parts, colMap, "LRNO"), BrokerName = GetCol(parts, colMap, "BrokerName") ?? GetCol(parts, colMap, "Broker"), From = GetCol(parts, colMap, "From") ?? GetCol(parts, colMap, "FROM"), To = GetCol(parts, colMap, "To") ?? GetCol(parts, colMap, "TO"), VehicleNumber = GetCol(parts, colMap, "VehicleNumber") ?? GetCol(parts, colMap, "VehicleNo") ?? GetCol(parts, colMap, "VEHICLENO"), VehicleType = GetCol(parts, colMap, "VehicleType"), DriverName = GetCol(parts, colMap, "DriverName") ?? GetCol(parts, colMap, "Driver"), DriverMobile = GetCol(parts, colMap, "DriverMobile") ?? GetCol(parts, colMap, "DriverMobile"), EngineNo = GetCol(parts, colMap, "EngineNo"), LicenceNo = GetCol(parts, colMap, "LicenceNo"), PolicyNo = GetCol(parts, colMap, "PolicyNo"), ChassisNo = GetCol(parts, colMap, "ChassisNo"), OwnerName = GetCol(parts, colMap, "OwnerName") ?? GetCol(parts, colMap, "Owner"), PAN = GetCol(parts, colMap, "PAN"), LorryHire = ParseDecimal(GetCol(parts, colMap, "LorryHire") ?? GetCol(parts, colMap, "LorryHire")), LessTDS = ParseDecimal(GetCol(parts, colMap, "LessTDS")), AdvanceAmount = ParseDecimal(GetCol(parts, colMap, "AdvanceAmount") ?? GetCol(parts, colMap, "Advance")), AdvanceNEFT = ParseDecimal(GetCol(parts, colMap, "AdvanceNEFT")), AdvanceCash = ParseDecimal(GetCol(parts, colMap, "AdvanceCash")), AdvanceDate = ParseNullableDate(GetCol(parts, colMap, "AdvanceDate")), Detention = ParseDecimal(GetCol(parts, colMap, "Detention")), Hamali = ParseDecimal(GetCol(parts, colMap, "Hamali")), Deduction = ParseDecimal(GetCol(parts, colMap, "Deduction")), BalancePaidNEFT = ParseDecimal(GetCol(parts, colMap, "BalancePaidNEFT")), BalancePaidCash = ParseDecimal(GetCol(parts, colMap, "BalancePaidCash")), BalancePaidDate = ParseNullableDate(GetCol(parts, colMap, "BalancePaidDate")), PaidTo = GetCol(parts, colMap, "PaidTo"), Remarks = GetCol(parts, colMap, "Remarks"), BillAmount = ParseDecimal(GetCol(parts, colMap, "BillAmount")), Margin = ParseDecimal(GetCol(parts, colMap, "Margin")) }; entry.SuppressCalculations = true; entry.RecalculateBalance(); repo.Upsert(entry); imported++; } catch (Exception ex) { AppLogger.LogException(nameof(ImportChallan_Click), ex); errors++; } if (progress != null) progress.Value = i; if (status != null) status.Text = $"Importing {i}/{lines.Length - 1}"; } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) status.Text = $"Imported: {imported}, Errors: {errors}"; VM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); UpdatePageUI(); RefreshDashboard(); MessageBox.Show($"Challan import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
         private void EditSelected_Click(object sender, RoutedEventArgs e) { var item = LedgerGrid.SelectedItem as ChallanEntry; if (item == null) return; var form = new ChallanFormWindow(item, VM.Entries, VM.GetRepository()); form.Owner = this; form.Closed += (_, __) => { if (!form.WasSaved) return; var updated = form.Result; updated.RecalculateBalance(); try { VM.GetRepository().Upsert(updated); } catch { } var idx = VM.Entries.IndexOf(item); if (idx >= 0) VM.Entries[idx] = updated; SyncLinkedLREntriesFromChallan(updated); SyncAllChallanBillingFromLR(); }; form.Show(); }
         private void MakeBuilty_Click(object sender, RoutedEventArgs e)
         {
@@ -7920,7 +8553,7 @@ DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','
             };
             form.Show();
         }
-        private void DeleteSelected_Click(object sender, RoutedEventArgs e) { if (LedgerGrid == null) return; var selected = LedgerGrid.SelectedItems.Cast<ChallanEntry>().ToList(); if (selected.Count == 0) { MessageBox.Show("Select Challan entries to delete.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information); return; } if (MessageBox.Show($"Delete {selected.Count} challan entr{(selected.Count == 1 ? "y" : "ies")}?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return; foreach (var entry in selected) { try { using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString)) { conn.Open(); using (var cmd = conn.CreateCommand()) { cmd.CommandText = "DELETE FROM Challans WHERE Id = @id"; cmd.Parameters.AddWithValue("@id", entry.Id); cmd.ExecuteNonQuery(); } } } catch { } } VM.RefreshAfterDelete(); RefreshFilteredSummary(); RefreshDashboard(); }
+        private void DeleteSelected_Click(object sender, RoutedEventArgs e) { if (LedgerGrid == null) return; var selected = LedgerGrid.SelectedItems.Cast<ChallanEntry>().ToList(); if (selected.Count == 0) { MessageBox.Show("Select Challan entries to delete.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information); return; } if (MessageBox.Show($"Delete {selected.Count} challan entr{(selected.Count == 1 ? "y" : "ies")}?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return; foreach (var entry in selected) { try { _challanRepo.Delete(entry); } catch { } } VM.RefreshAfterDelete(); RefreshFilteredSummary(); RefreshDashboard(); }
         private void LedgerPreviewKeyDown(object sender, KeyEventArgs e) { DataGrid_PreviewKeyDown(sender, e); }
         private void OpenChallanCommentPopup(ChallanEntry entry)
         {
@@ -7987,34 +8620,12 @@ DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','
         private void UpdateChallanLRNumbers(int challanId, string newLrNo)
         {
             if (challanId <= 0 || string.IsNullOrWhiteSpace(newLrNo)) return;
-            using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-            {
-                conn.Open();
-                string existing = string.Empty;
-                using (var read = conn.CreateCommand())
-                {
-                    read.CommandText = "SELECT LRNumber FROM Challans WHERE Id = @id;";
-                    read.Parameters.AddWithValue("@id", challanId);
-                    existing = (read.ExecuteScalar() as string) ?? string.Empty;
-                }
-
-                var lrList = existing
-                    .Split(new[] { ',', ';', ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(x => x.Trim())
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                if (!lrList.Contains(newLrNo.Trim(), StringComparer.OrdinalIgnoreCase)) lrList.Add(newLrNo.Trim());
-                var merged = string.Join(", ", lrList);
-
-                using (var upd = conn.CreateCommand())
-                {
-                    upd.CommandText = "UPDATE Challans SET LRNumber = @lr WHERE Id = @id;";
-                    upd.Parameters.AddWithValue("@lr", merged);
-                    upd.Parameters.AddWithValue("@id", challanId);
-                    upd.ExecuteNonQuery();
-                }
-            }
+            var challan = _challanRepo.GetAll().FirstOrDefault(x => x.Id == challanId);
+            if (challan == null) return;
+            var lrList = SplitLrNumbers(challan.LRNumber).ToList();
+            if (!lrList.Contains(newLrNo.Trim(), StringComparer.OrdinalIgnoreCase)) lrList.Add(newLrNo.Trim());
+            challan.LRNumber = string.Join(", ", lrList);
+            _challanRepo.Upsert(challan);
             SyncAllChallanBillingFromLR();
         }
 
@@ -8027,46 +8638,31 @@ DELETE FROM sqlite_sequence WHERE name IN ('ReportingTracks','TrackingEntries','
 
             try
             {
-                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
+                var set = new HashSet<string>(lrTokens, StringComparer.OrdinalIgnoreCase);
+                foreach (var lr in _lrRepo.GetAll())
                 {
-                    conn.Open();
-                    var pNames = new List<string>();
-                    using (var cmd = conn.CreateCommand())
+                    var lrChNo = (lr.CHNo ?? string.Empty).Trim();
+                    var lrNo = (lr.LRNo ?? string.Empty).Trim();
+                    if ((!string.IsNullOrWhiteSpace(challanNo) && string.Equals(lrChNo, challanNo, StringComparison.OrdinalIgnoreCase)) ||
+                        (!string.IsNullOrWhiteSpace(lrNo) && set.Contains(lrNo)))
                     {
-                        cmd.Parameters.AddWithValue("@chNo", challanNo);
-                        for (int i = 0; i < lrTokens.Count; i++)
-                        {
-                            var pn = "@lr" + i;
-                            pNames.Add(pn);
-                            cmd.Parameters.AddWithValue(pn, lrTokens[i]);
-                        }
-
-                        var lrIn = pNames.Count > 0 ? $" OR LRNo IN ({string.Join(",", pNames)}) " : string.Empty;
-                        cmd.CommandText = $@"UPDATE LREntries
-SET FromLocation = @fromLoc,
-    ToLocation = @toLoc,
-    VehicleNo = @vehicleNo,
-    VehicleType = @vehicleType,
-    Broker = @broker
-WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
-                        cmd.Parameters.AddWithValue("@fromLoc", (object)(challan.From ?? string.Empty) ?? DBNull.Value);
-                        cmd.Parameters.AddWithValue("@toLoc", (object)(challan.To ?? string.Empty) ?? DBNull.Value);
-                        cmd.Parameters.AddWithValue("@vehicleNo", (object)(challan.VehicleNumber ?? string.Empty) ?? DBNull.Value);
-                        cmd.Parameters.AddWithValue("@vehicleType", (object)(challan.VehicleType ?? string.Empty) ?? DBNull.Value);
-                        cmd.Parameters.AddWithValue("@broker", (object)(challan.BrokerName ?? string.Empty) ?? DBNull.Value);
-                        cmd.ExecuteNonQuery();
+                        lr.From = challan.From;
+                        lr.To = challan.To;
+                        lr.VehicleNo = challan.VehicleNumber;
+                        lr.VehicleType = challan.VehicleType;
+                        lr.Broker = challan.BrokerName;
+                        _lrRepo.Upsert(lr);
                     }
                 }
 
                 if (LRVM?.Entries != null)
                 {
-                    var set = new HashSet<string>(lrTokens, StringComparer.OrdinalIgnoreCase);
                     foreach (var lr in LRVM.Entries)
                     {
                         var lrChNo = (lr.CHNo ?? string.Empty).Trim();
                         var lrNo = (lr.LRNo ?? string.Empty).Trim();
                         if ((!string.IsNullOrWhiteSpace(challanNo) && string.Equals(lrChNo, challanNo, StringComparison.OrdinalIgnoreCase)) ||
-                            (!string.IsNullOrWhiteSpace(lrNo) && set.Contains(lrNo)))
+                            (!string.IsNullOrWhiteSpace(lrNo) && lrTokens.Contains(lrNo, StringComparer.OrdinalIgnoreCase)))
                         {
                             lr.From = challan.From;
                             lr.To = challan.To;
@@ -8084,44 +8680,15 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
         {
             try
             {
-                var challans = new List<ChallanEntry>();
-                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-                {
-                    conn.Open();
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = @"SELECT Id, ChallanNumber, LRNumber, BrokerName, FromLocation, ToLocation, VehicleNumber, VehicleType
-                                            FROM Challans
-                                            ORDER BY Id;";
-                        using (var r = cmd.ExecuteReader())
-                        {
-                            while (r.Read())
-                            {
-                                challans.Add(new ChallanEntry
-                                {
-                                    Id = Convert.ToInt32(r["Id"]),
-                                    ChallanNumber = (r["ChallanNumber"] as string) ?? string.Empty,
-                                    LRNumber = (r["LRNumber"] as string) ?? string.Empty,
-                                    BrokerName = (r["BrokerName"] as string) ?? string.Empty,
-                                    From = (r["FromLocation"] as string) ?? string.Empty,
-                                    To = (r["ToLocation"] as string) ?? string.Empty,
-                                    VehicleNumber = (r["VehicleNumber"] as string) ?? string.Empty,
-                                    VehicleType = (r["VehicleType"] as string) ?? string.Empty
-                                });
-                            }
-                        }
-                    }
-                }
-
-                foreach (var ch in challans)
+                foreach (var ch in _challanRepo.GetAll())
                 {
                     SyncLinkedLREntriesFromChallan(ch);
                 }
             }
             catch { }
         }
-        private void LoadGridSettings() { try { var path = GridSettingsPath; if (!System.IO.File.Exists(path)) return; var json = System.IO.File.ReadAllText(path); var data = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json); if (data == null) return; if (data.TryGetValue("ChallanRowHeight", out var v) && LedgerGrid != null) LedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("LRRowHeight", out v) && LRLedgerGrid != null) LRLedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("TrackingRowHeight", out v) && TrackingLedgerGrid != null) TrackingLedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("BillRowHeight", out v) && BillLedgerGrid != null) BillLedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("CBSRowHeight", out v) && CBSGrid != null) CBSGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("CBSSortColumn", out v)) _cbsSortColumn = Convert.ToString(v) ?? string.Empty; if (data.TryGetValue("CBSSortAscending", out v)) _cbsSortAscending = Convert.ToBoolean(v); RestoreColumnWidthsFromDict(LedgerGrid, "Challan", data); RestoreColumnWidthsFromDict(LRLedgerGrid, "LR", data); RestoreColumnWidthsFromDict(TrackingLedgerGrid, "Tracking", data); RestoreColumnWidthsFromDict(BillLedgerGrid, "Bill", data); RestoreColumnWidthsFromDict(CBSGrid, "CBS", data); RestoreColumnWidthsFromDict(NewBookingGrid, "DashboardNewBooking", data); RestoreColumnWidthsFromDict(DashboardPendingBillGrid, "DashboardPendingBill", data); } catch { } }
-        private void SaveGridSettings() { try { var data = new Dictionary<string, object>(); if (LedgerGrid != null) { data["ChallanRowHeight"] = LedgerGrid.RowHeight; SaveColumnWidthsToDict(LedgerGrid, "Challan", data); } if (LRLedgerGrid != null) { data["LRRowHeight"] = LRLedgerGrid.RowHeight; SaveColumnWidthsToDict(LRLedgerGrid, "LR", data); } if (TrackingLedgerGrid != null) { data["TrackingRowHeight"] = TrackingLedgerGrid.RowHeight; SaveColumnWidthsToDict(TrackingLedgerGrid, "Tracking", data); } if (BillLedgerGrid != null) { data["BillRowHeight"] = BillLedgerGrid.RowHeight; SaveColumnWidthsToDict(BillLedgerGrid, "Bill", data); } if (CBSGrid != null) { data["CBSRowHeight"] = CBSGrid.RowHeight; SaveColumnWidthsToDict(CBSGrid, "CBS", data); } data["CBSSortColumn"] = _cbsSortColumn ?? string.Empty; data["CBSSortAscending"] = _cbsSortAscending; SaveColumnWidthsToDict(NewBookingGrid, "DashboardNewBooking", data); SaveColumnWidthsToDict(DashboardPendingBillGrid, "DashboardPendingBill", data); var dir = System.IO.Path.GetDirectoryName(GridSettingsPath); if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir); System.IO.File.WriteAllText(GridSettingsPath, new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(data)); } catch { } }
+        private void LoadGridSettings() { try { var path = GridSettingsPath; if (!System.IO.File.Exists(path)) return; var json = System.IO.File.ReadAllText(path); var data = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json); if (data == null) return; if (data.TryGetValue("ChallanRowHeight", out var v) && LedgerGrid != null) LedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("LRRowHeight", out v) && LRLedgerGrid != null) LRLedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("TrackingRowHeight", out v) && TrackingLedgerGrid != null) TrackingLedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("BillRowHeight", out v) && BillLedgerGrid != null) BillLedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("CBSRowHeight", out v) && CBSGrid != null) CBSGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("CBSSortColumn", out v)) _cbsSortColumn = Convert.ToString(v) ?? string.Empty; if (data.TryGetValue("CBSSortAscending", out v)) _cbsSortAscending = Convert.ToBoolean(v); RestoreColumnWidthsFromDict(LedgerGrid, "Challan", data); RestoreColumnWidthsFromDict(LRLedgerGrid, "LR", data); RestoreColumnWidthsFromDict(TrackingLedgerGrid, "Tracking", data); RestoreColumnWidthsFromDict(BillLedgerGrid, "Bill", data); RestoreColumnWidthsFromDict(CBSGrid, "CBS", data); } catch { } }
+        private void SaveGridSettings() { try { var data = new Dictionary<string, object>(); if (LedgerGrid != null) { data["ChallanRowHeight"] = LedgerGrid.RowHeight; SaveColumnWidthsToDict(LedgerGrid, "Challan", data); } if (LRLedgerGrid != null) { data["LRRowHeight"] = LRLedgerGrid.RowHeight; SaveColumnWidthsToDict(LRLedgerGrid, "LR", data); } if (TrackingLedgerGrid != null) { data["TrackingRowHeight"] = TrackingLedgerGrid.RowHeight; SaveColumnWidthsToDict(TrackingLedgerGrid, "Tracking", data); } if (BillLedgerGrid != null) { data["BillRowHeight"] = BillLedgerGrid.RowHeight; SaveColumnWidthsToDict(BillLedgerGrid, "Bill", data); } if (CBSGrid != null) { data["CBSRowHeight"] = CBSGrid.RowHeight; SaveColumnWidthsToDict(CBSGrid, "CBS", data); } data["CBSSortColumn"] = _cbsSortColumn ?? string.Empty; data["CBSSortAscending"] = _cbsSortAscending; var dir = System.IO.Path.GetDirectoryName(GridSettingsPath); if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir); System.IO.File.WriteAllText(GridSettingsPath, new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(data)); } catch { } }
         private void SaveColumnWidthsToDict(DataGrid grid, string prefix, Dictionary<string, object> data) { foreach (var col in grid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" ▲", "").Replace(" ▼", "").Trim(); if (!string.IsNullOrEmpty(h)) data[$"{prefix}_W_{h}"] = col.Width.DisplayValue; } }
         private void RestoreColumnWidthsFromDict(DataGrid grid, string prefix, Dictionary<string, object> data) { if (grid == null || data == null) return; foreach (var col in grid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" ▲", "").Replace(" ▼", "").Trim(); if (string.IsNullOrEmpty(h)) continue; var key = $"{prefix}_W_{h}"; if (data.TryGetValue(key, out var val) && val != null) { double w = Convert.ToDouble(val); if (w > 10) col.Width = new DataGridLength(w); } } }
         private static string GridSettingsPath => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Awagaman ERP", "grid_settings.json");
@@ -8767,9 +9334,12 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
 
         private sealed class BillPreviewDraft
         {
+            public int Version { get; set; } = 2;
             public List<BillPreviewLine> Lines { get; set; } = new List<BillPreviewLine>();
             public List<double> RowHeights { get; set; } = new List<double>();
         }
+
+        private const int BillPreviewDraftVersion = 2;
 
         private sealed class BillFormatTextBox
         {
@@ -8929,6 +9499,11 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                 if (!System.IO.File.Exists(path)) return null;
                 var json = System.IO.File.ReadAllText(path);
                 var draft = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<BillPreviewDraft>(json);
+                if (draft == null || draft.Version != BillPreviewDraftVersion || draft.Lines == null || draft.Lines.Count == 0)
+                {
+                    try { System.IO.File.Delete(path); } catch { }
+                    return null;
+                }
                 return draft;
             }
             catch { return null; }
@@ -8939,6 +9514,7 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             try
             {
                 if (draft == null) return;
+                draft.Version = BillPreviewDraftVersion;
                 var path = GetBillPreviewDraftPath(billNo);
                 var dir = System.IO.Path.GetDirectoryName(path);
                 if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
@@ -8975,21 +9551,6 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                     Lines = BuildBillPreviewLinesForGrid(billRows)
                 };
                 EnsureStChargeSummaryRow(preview.Lines, billRows.Sum(x => x.StCharge));
-                var loadedDraft = LoadBillPreviewDraft(preview.BillNo);
-                if (loadedDraft != null && loadedDraft.Lines != null && loadedDraft.Lines.Count > 0)
-                    preview.Lines = loadedDraft.Lines.Select(x => new BillPreviewLine
-                    {
-                        LRNo = x?.LRNo ?? string.Empty,
-                        LRDate = x?.LRDate ?? string.Empty,
-                        Invoice = x?.Invoice ?? string.Empty,
-                        Vehicle = x?.Vehicle ?? string.Empty,
-                        From = x?.From ?? string.Empty,
-                        To = x?.To ?? string.Empty,
-                        ChargesBreakdown = x?.ChargesBreakdown ?? string.Empty,
-                        WeightOrType = x?.WeightOrType ?? string.Empty,
-                        Rate = x?.Rate ?? string.Empty,
-                        Amount = x?.Amount ?? string.Empty
-                    }).ToList();
                 EnsureStChargeSummaryRow(preview.Lines, billRows.Sum(x => x.StCharge));
                 NormalizeInvoiceCellsInPreviewLines(preview.Lines);
 
@@ -9108,7 +9669,7 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                 };
                 var loadedLayoutSnapshot = cloneLayout(billLayout);
                 var loadedLinesSnapshot = cloneLines(preview.Lines);
-                var loadedRowHeightsSnapshot = (loadedDraft?.RowHeights ?? new List<double>()).ToList();
+                var loadedRowHeightsSnapshot = new List<double>();
 
                 var viewer = new ScrollViewer
                 {
@@ -9715,6 +10276,7 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             }
             catch (Exception ex)
             {
+                AppLogger.LogException(nameof(OpenBillFormatEditor), ex);
                 MessageBox.Show("Unable to open bill format view: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -9789,7 +10351,17 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             addTextBtn.Click += (_, __) =>
             {
                 layout.TextBoxes.Add(new BillFormatTextBox { Text = "New Text", X = 80, Y = 80, Width = 220, Height = 28, FontSize = layout.FontSize, Wrap = layout.WrapText });
-                grid.Items.Refresh();
+                try
+                {
+                    grid.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        try { grid.Items.Refresh(); } catch { }
+                    }), System.Windows.Threading.DispatcherPriority.Background);
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogException(nameof(OpenBillFormatEditor), ex);
+                }
             };
 
             applyBtn.Click += (_, __) =>
@@ -9804,7 +10376,10 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                     SaveBillFormatLayout(layout);
                     onChanged?.Invoke();
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    AppLogger.LogException(nameof(OpenBillFormatEditor), ex);
+                }
             };
             closeBtn.Click += (_, __) => dialog.Close();
             dialog.Content = root;
@@ -9843,6 +10418,7 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             }
             catch (Exception ex)
             {
+                AppLogger.LogException(nameof(ShowBillPrintPreview), ex);
                 MessageBox.Show("Unable to open print preview: " + ex.Message, "Preview Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -9996,8 +10572,6 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             {
                 return $"{x1.ToString("0.##", inv)} {y1.ToString("0.##", inv)} m {x2.ToString("0.##", inv)} {y2.ToString("0.##", inv)} l S\n";
             }
-            string MapY(double topY, double pageHeight) { return (pageHeight - topY).ToString("0.##", inv); }
-
             var lines = (preview?.Lines ?? new List<BillPreviewLine>()).ToList();
             var extraRows = Math.Max(0, layout.ExtraRows);
             for (int i = 0; i < extraRows; i++) lines.Add(new BillPreviewLine());
@@ -10300,8 +10874,9 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                     new object[] { 0, pdfPath, 0, true, false, Type.Missing, Type.Missing, false, Type.Missing });
                 return System.IO.File.Exists(pdfPath);
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogException(nameof(ExportBillPdfFromExcelTemplate), ex);
                 return false;
             }
             finally
@@ -10313,7 +10888,10 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                         workbook.GetType().InvokeMember("Close", System.Reflection.BindingFlags.InvokeMethod, null, workbook, new object[] { false });
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    AppLogger.LogException(nameof(ExportBillPdfFromExcelTemplate), ex);
+                }
                 try
                 {
                     if (excelApp != null)
@@ -10321,12 +10899,15 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                         excelApp.GetType().InvokeMember("Quit", System.Reflection.BindingFlags.InvokeMethod, null, excelApp, null);
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    AppLogger.LogException(nameof(ExportBillPdfFromExcelTemplate), ex);
+                }
                 if (worksheet != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(worksheet);
                 if (workbook != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(workbook);
                 if (workbooks != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(workbooks);
                 if (excelApp != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(excelApp);
-                try { if (System.IO.File.Exists(tempXlsx)) System.IO.File.Delete(tempXlsx); } catch { }
+                try { if (System.IO.File.Exists(tempXlsx)) System.IO.File.Delete(tempXlsx); } catch (Exception ex) { AppLogger.LogException(nameof(ExportBillPdfFromExcelTemplate), ex); }
             }
         }
 
@@ -10361,8 +10942,9 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                 System.IO.File.WriteAllBytes(pdfPath, bytes);
                 return System.IO.File.Exists(pdfPath);
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogException(nameof(ExportBillPdfFromRdlc), ex);
                 return false;
             }
         }
@@ -10713,7 +11295,14 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                         SetCellValueFromText(item, col, cols[c]);
                     }
                 }
-                grid.Items.Refresh();
+                try
+                {
+                    grid.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        try { grid.Items.Refresh(); } catch { }
+                    }), System.Windows.Threading.DispatcherPriority.Background);
+                }
+                catch { }
             }
             catch { }
         }
@@ -11243,7 +11832,7 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                     {
                         grid.CurrentCell = new DataGridCellInfo(nextRow, firstCol);
                         grid.SelectedCells.Clear();
-                        grid.SelectedCells.Add(grid.CurrentCell);
+                        SelectDataGridCellSafely(grid, grid.CurrentCell);
                     }
                     grid.SelectedItem = nextRow;
                     grid.ScrollIntoView(nextRow);
@@ -11271,7 +11860,7 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                     cell.Focus();
                     grid.CurrentCell = new DataGridCellInfo(cell);
                     grid.SelectedCells.Clear();
-                    grid.SelectedCells.Add(grid.CurrentCell);
+                    SelectDataGridCellSafely(grid, grid.CurrentCell);
                 };
 
                 grid.PreviewMouseLeftButtonDown += (s, e) =>
@@ -11410,7 +11999,7 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                             try
                             {
                                 var view = CollectionViewSource.GetDefaultView(grid.ItemsSource ?? grid.Items);
-                                view?.Refresh();
+                                RefreshCollectionViewSafely(view);
                             }
                             catch { }
                         }), System.Windows.Threading.DispatcherPriority.Background);
@@ -11428,7 +12017,7 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
                             var nextItem = grid.Items[nextIndex];
                             grid.CurrentCell = new DataGridCellInfo(nextItem, current.Column);
                             grid.SelectedCells.Clear();
-                            grid.SelectedCells.Add(grid.CurrentCell);
+                            SelectDataGridCellSafely(grid, grid.CurrentCell);
                             grid.ScrollIntoView(nextItem, current.Column);
                             e.Handled = true;
                         }
@@ -11885,56 +12474,12 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
         private List<BillEntry> GetBillEntriesForBillNo(string billNo)
         {
             var key = (billNo ?? string.Empty).Trim();
-            var rows = new List<BillEntry>();
-            if (key.Length == 0) return rows;
-            try
-            {
-                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-                {
-                    conn.Open();
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = @"SELECT Id, Sr, BillNo, BillDate, Party, LRNo, LRDate, FromLoc, ToLoc, VehicleType, Freight, Detention, HML, OTHR, StCharge, RCVD, TDS, DED, MOP, MR, Remarks, Date
-                                            FROM Bills
-                                            WHERE TRIM(COALESCE(BillNo,'')) = @bill
-                                            ORDER BY Sr, Id;";
-                        cmd.Parameters.AddWithValue("@bill", key);
-                        using (var r = cmd.ExecuteReader())
-                        {
-                            while (r.Read())
-                            {
-                                rows.Add(new BillEntry
-                                {
-                                    Id = Convert.ToInt32(r["Id"]),
-                                    Sr = Convert.ToInt32(r["Sr"]),
-                                    BillNo = r["BillNo"] as string,
-                                    BillDate = DateTime.TryParse(r["BillDate"] as string, out var bd) ? bd : DateTime.Today,
-                                    Party = r["Party"] as string,
-                                    LRNo = r["LRNo"] as string,
-                                    LRDate = DateTime.TryParse(r["LRDate"] as string, out var ld) ? ld : (DateTime?)null,
-                                    From = r["FromLoc"] as string,
-                                    To = r["ToLoc"] as string,
-                                    VehicleType = r["VehicleType"] as string,
-                                    Freight = Convert.ToDecimal(r["Freight"]),
-                                    Detention = Convert.ToDecimal(r["Detention"]),
-                                    HML = Convert.ToDecimal(r["HML"]),
-                                    OTHR = Convert.ToDecimal(r["OTHR"]),
-                                    StCharge = Convert.ToDecimal(r["StCharge"]),
-                                    RCVD = Convert.ToDecimal(r["RCVD"]),
-                                    TDS = Convert.ToDecimal(r["TDS"]),
-                                    DED = Convert.ToDecimal(r["DED"]),
-                                    MOP = r["MOP"] as string,
-                                    MR = r["MR"] as string,
-                                    Remarks = r["Remarks"] as string,
-                                    Date = DateTime.TryParse(r["Date"] as string, out var dt) ? dt : DateTime.Today
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-            catch { }
-            return rows;
+            if (key.Length == 0) return new List<BillEntry>();
+            return _billRepo.GetAll()
+                .Where(x => string.Equals((x.BillNo ?? string.Empty).Trim(), key, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(x => x.Sr)
+                .ThenBy(x => x.Id)
+                .ToList();
         }
 
         private static string NumberToWords(long number)
@@ -12245,17 +12790,8 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             if (key.Length == 0) return string.Empty;
             try
             {
-                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-                {
-                    conn.Open();
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = "SELECT Invoice FROM LREntries WHERE TRIM(COALESCE(LRNo,'')) = @lr LIMIT 1;";
-                        cmd.Parameters.AddWithValue("@lr", key);
-                        var obj = cmd.ExecuteScalar();
-                        return (obj == null || obj == DBNull.Value) ? string.Empty : Convert.ToString(obj);
-                    }
-                }
+                var lr = _lrRepo.GetAll().FirstOrDefault(x => string.Equals((x.LRNo ?? string.Empty).Trim(), key, StringComparison.OrdinalIgnoreCase));
+                return lr?.Invoice ?? string.Empty;
             }
             catch
             {
@@ -12319,17 +12855,8 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
             if (key.Length == 0) return string.Empty;
             try
             {
-                using (var conn = new System.Data.SQLite.SQLiteConnection(Awagaman_ERP.Data.AppDatabase.ConnectionString))
-                {
-                    conn.Open();
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = "SELECT VehicleNo FROM LREntries WHERE TRIM(COALESCE(LRNo,'')) = @lr LIMIT 1;";
-                        cmd.Parameters.AddWithValue("@lr", key);
-                        var obj = cmd.ExecuteScalar();
-                        return (obj == null || obj == DBNull.Value) ? string.Empty : Convert.ToString(obj);
-                    }
-                }
+                var lr = _lrRepo.GetAll().FirstOrDefault(x => string.Equals((x.LRNo ?? string.Empty).Trim(), key, StringComparison.OrdinalIgnoreCase));
+                return lr?.VehicleNo ?? string.Empty;
             }
             catch
             {
@@ -12459,3 +12986,4 @@ WHERE (TRIM(COALESCE(CHNo,'')) = TRIM(COALESCE(@chNo,''))) {lrIn};";
         private void TrackingRefresh_Click(object sender, RoutedEventArgs e) { if (TrackingSearchBox != null) TrackingSearchBox.Text = string.Empty; if (StatusFilterCombo != null) StatusFilterCombo.SelectedIndex = 0; if (TrackingLedgerGrid != null) TrackingLedgerGrid.UnselectAllCells(); }
     }
 }
+
