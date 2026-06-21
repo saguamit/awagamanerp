@@ -1,5 +1,5 @@
 #define MyAppName "Awagaman ERP"
-#define MyAppVersion "1.0.15"
+#define MyAppVersion "1.0.16"
 #define MyAppPublisher "Awagaman ERP"
 #define MyAppExeName "Awagaman ERP.exe"
 #define MySourceDir "c:\amit sagu\awagaman project\ATL ERP\Awagaman ERP\bin\Release"
