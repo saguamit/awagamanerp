@@ -3,11 +3,12 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Reflection;
 using System.Net.Http;
+using System.Net;
 using System.IO;
 using System.Threading.Tasks;
-using System.Web.Script.Serialization;
 using System.Windows;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using Awagaman_ERP.Data;
 
 namespace Awagaman_ERP
@@ -18,6 +19,7 @@ namespace Awagaman_ERP
 
         protected override void OnStartup(StartupEventArgs e)
         {
+            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             base.OnStartup(e);
             TryRegisterSyncfusionLicense();
             TryStartLocalApiServer();
@@ -253,38 +255,35 @@ namespace Awagaman_ERP
             using (var client = new HttpClient())
             {
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("AwagamanERP-Updater");
+                client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
                 var json = await client.GetStringAsync(apiUrl).ConfigureAwait(false);
-                var serializer = new JavaScriptSerializer();
-                var root = serializer.Deserialize<Dictionary<string, object>>(json);
-                if (root == null) return null;
 
-                var tag = root.ContainsKey("tag_name") ? Convert.ToString(root["tag_name"]) : string.Empty;
+                var tag = MatchValue(json, "\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
                 var version = ParseVersion(tag);
                 if (version == null) return null;
 
                 string downloadUrl = null;
                 string assetName = null;
-                if (root.ContainsKey("assets"))
+
+                var assetsBlock = MatchValue(json, "\"assets\"\\s*:\\s*\\[(.*)\\]\\s*,\\s*\"assets_url\"", RegexOptions.Singleline);
+                if (!string.IsNullOrWhiteSpace(assetsBlock))
                 {
-                    var assets = root["assets"] as System.Collections.IEnumerable;
-                    if (assets != null)
+                    var assetMatches = Regex.Matches(assetsBlock, "\\{(.*?)\\}", RegexOptions.Singleline);
+                    foreach (Match assetMatch in assetMatches)
                     {
-                        foreach (var assetObj in assets)
+                        var assetJson = assetMatch.Value;
+                        var name = MatchValue(assetJson, "\"name\"\\s*:\\s*\"([^\"]+)\"");
+                        var url = MatchValue(assetJson, "\"browser_download_url\"\\s*:\\s*\"([^\"]+)\"");
+                        if (!string.IsNullOrWhiteSpace(name) &&
+                            !string.IsNullOrWhiteSpace(url) &&
+                            (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)) &&
+                            (string.IsNullOrWhiteSpace(downloadUrl) || name.IndexOf("setup", StringComparison.OrdinalIgnoreCase) >= 0))
                         {
-                            var asset = assetObj as Dictionary<string, object>;
-                            if (asset == null) continue;
-                            var name = asset.ContainsKey("name") ? Convert.ToString(asset["name"]) : string.Empty;
-                            var url = asset.ContainsKey("browser_download_url") ? Convert.ToString(asset["browser_download_url"]) : string.Empty;
-                            if (!string.IsNullOrWhiteSpace(name) &&
-                                (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)) &&
-                                (string.IsNullOrWhiteSpace(downloadUrl) || name.IndexOf("setup", StringComparison.OrdinalIgnoreCase) >= 0))
+                            downloadUrl = url;
+                            assetName = name;
+                            if (name.IndexOf("setup", StringComparison.OrdinalIgnoreCase) >= 0)
                             {
-                                downloadUrl = url;
-                                assetName = name;
-                                if (name.IndexOf("setup", StringComparison.OrdinalIgnoreCase) >= 0)
-                                {
-                                    break;
-                                }
+                                break;
                             }
                         }
                     }
@@ -292,6 +291,12 @@ namespace Awagaman_ERP
 
                 return new ReleaseInfo { Version = version, DownloadUrl = downloadUrl, AssetName = assetName };
             }
+        }
+
+        private static string MatchValue(string input, string pattern, RegexOptions options = RegexOptions.None)
+        {
+            var match = Regex.Match(input ?? string.Empty, pattern, options);
+            return match.Success ? match.Groups[1].Value : string.Empty;
         }
 
         private static Version ParseVersion(string tag)
