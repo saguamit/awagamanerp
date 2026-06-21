@@ -62,6 +62,11 @@ namespace Awagaman_ERP
                     return;
                 }
 
+                if (IsApiHealthyAsync(BackendSettings.ApiBaseUrl).GetAwaiter().GetResult())
+                {
+                    return;
+                }
+
                 var path = BackendSettings.LocalApiExecutablePath;
                 if (string.IsNullOrWhiteSpace(path))
                 {
@@ -93,7 +98,7 @@ namespace Awagaman_ERP
                 };
 
                 _localApiProcess = Process.Start(startInfo);
-                WaitForLocalApiReadyAsync().GetAwaiter().GetResult();
+                _ = WaitForLocalApiReadyAsync();
             }
             catch
             {
@@ -131,14 +136,11 @@ namespace Awagaman_ERP
             {
                 using (var client = new HttpClient())
                 {
-                    var baseUrl = BackendSettings.ApiBaseUrl;
-                    var healthUrl = baseUrl.EndsWith("/") ? baseUrl + "api/health" : baseUrl + "/api/health";
                     for (var i = 0; i < 30; i++)
                     {
                         try
                         {
-                            var response = await client.GetAsync(healthUrl).ConfigureAwait(false);
-                            if (response.IsSuccessStatusCode)
+                            if (await IsApiHealthyAsync(BackendSettings.ApiBaseUrl, client).ConfigureAwait(false))
                             {
                                 return;
                             }
@@ -153,6 +155,39 @@ namespace Awagaman_ERP
             }
             catch
             {
+            }
+        }
+
+        private static async Task<bool> IsApiHealthyAsync(string baseUrl, HttpClient client = null)
+        {
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                return false;
+            }
+
+            var healthUrl = baseUrl.TrimEnd('/') + "/api/health";
+            var ownsClient = false;
+            if (client == null)
+            {
+                client = new HttpClient();
+                ownsClient = true;
+            }
+
+            try
+            {
+                var response = await client.GetAsync(healthUrl).ConfigureAwait(false);
+                return response.IsSuccessStatusCode;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                if (ownsClient)
+                {
+                    client.Dispose();
+                }
             }
         }
 
