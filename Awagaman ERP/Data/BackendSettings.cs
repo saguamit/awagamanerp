@@ -3,6 +3,7 @@ using System.Configuration;
 using System.Collections.Generic;
 using System.IO;
 using System.Web.Script.Serialization;
+using System.Text.RegularExpressions;
 
 namespace Awagaman_ERP.Data
 {
@@ -96,6 +97,7 @@ namespace Awagaman_ERP.Data
                 var data = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json);
                 if (data == null)
                 {
+                    ApplyLooseOverrides(json);
                     return;
                 }
 
@@ -138,7 +140,59 @@ namespace Awagaman_ERP.Data
             }
             catch
             {
-                // Ignore malformed config and keep App.config defaults.
+                try
+                {
+                    var dir = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                    var path = Path.Combine(dir, "Awagaman ERP", "network.settings.json");
+                    if (File.Exists(path))
+                    {
+                        ApplyLooseOverrides(File.ReadAllText(path));
+                    }
+                }
+                catch
+                {
+                    // Ignore malformed config and keep App.config defaults.
+                }
+            }
+        }
+
+        private static void ApplyLooseOverrides(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return;
+            }
+
+            var useRemote = Regex.Match(json, "\"UseRemoteApi\"\\s*:\\s*(true|false)", RegexOptions.IgnoreCase);
+            if (useRemote.Success)
+            {
+                bool parsed;
+                if (bool.TryParse(useRemote.Groups[1].Value, out parsed))
+                {
+                    _useRemoteApi = parsed;
+                }
+            }
+
+            var apiBaseUrl = Regex.Match(json, "\"ApiBaseUrl\"\\s*:\\s*\"([^\"]*)\"", RegexOptions.IgnoreCase);
+            if (apiBaseUrl.Success && !string.IsNullOrWhiteSpace(apiBaseUrl.Groups[1].Value))
+            {
+                _apiBaseUrl = apiBaseUrl.Groups[1].Value.Trim();
+            }
+
+            var runLocal = Regex.Match(json, "\"RunLocalApiServer\"\\s*:\\s*(true|false)", RegexOptions.IgnoreCase);
+            if (runLocal.Success)
+            {
+                bool parsed;
+                if (bool.TryParse(runLocal.Groups[1].Value, out parsed))
+                {
+                    _runLocalApiServer = parsed;
+                }
+            }
+
+            var localExe = Regex.Match(json, "\"LocalApiExecutablePath\"\\s*:\\s*\"([^\"]*)\"", RegexOptions.IgnoreCase);
+            if (localExe.Success && !string.IsNullOrWhiteSpace(localExe.Groups[1].Value))
+            {
+                _localApiExecutablePath = localExe.Groups[1].Value.Trim();
             }
         }
     }

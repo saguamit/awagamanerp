@@ -1,5 +1,5 @@
 #define MyAppName "Awagaman ERP"
-#define MyAppVersion "1.0.16"
+#define MyAppVersion "1.0.17"
 #define MyAppPublisher "Awagaman ERP"
 #define MyAppExeName "Awagaman ERP.exe"
 #define MySourceDir "c:\amit sagu\awagaman project\ATL ERP\Awagaman ERP\bin\Release"
@@ -113,6 +113,7 @@ var
   ApiUrl: string;
   DirName: string;
   ServerMode: Boolean;
+  LocalApiPath: string;
 begin
   ServerMode := InstallModePage.SelectedValueIndex = 0;
   if ServerMode then
@@ -124,15 +125,16 @@ begin
   if not DirExists(DirName) then
     ForceDirectories(DirName);
 
+  LocalApiPath := ExpandConstant('{app}\ApiServer\Awagaman.Api.exe');
+  StringChangeEx(LocalApiPath, '\', '\\', True);
+
   JsonText :=
     '{' + #13#10 +
     '  "UseRemoteApi": true,' + #13#10 +
     '  "ApiBaseUrl": "' + ApiUrl + '",' + #13#10 +
     '  "RunLocalApiServer": __SERVERMODE__,' + #13#10 +
-    '  "LocalApiExecutablePath": "{app}\ApiServer\Awagaman.Api.exe"' + #13#10 +
+    '  "LocalApiExecutablePath": "' + LocalApiPath + '"' + #13#10 +
     '}';
-
-  StringChangeEx(JsonText, '{app}', ExpandConstant('{app}'), True);
   if ServerMode then
     StringChangeEx(JsonText, '__SERVERMODE__', 'true', True)
   else
