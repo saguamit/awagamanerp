@@ -28,6 +28,7 @@ namespace Awagaman_ERP
             private ContextMenu _columnsMenu;
         private System.Windows.Threading.DispatcherTimer _searchTimer;
         private System.Windows.Threading.DispatcherTimer _challanFilterTimer;
+        private System.Windows.Threading.DispatcherTimer _remoteSyncTimer;
         private TextBox _activeSearchBox;
         private ContextMenu _lrColumnsMenu;
         private bool _onlyDueFilterEnabled;
@@ -172,6 +173,59 @@ namespace Awagaman_ERP
                     if (trackingView != null) trackingView.CollectionChanged += (s2, e2) => RefreshDashboard();
                 }
             };
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                _remoteSyncTimer = new System.Windows.Threading.DispatcherTimer();
+                _remoteSyncTimer.Interval = TimeSpan.FromSeconds(12);
+                _remoteSyncTimer.Tick += RemoteSyncTimer_Tick;
+                _remoteSyncTimer.Start();
+            }
+        }
+
+        private void RemoteSyncTimer_Tick(object sender, EventArgs e)
+        {
+            if (!IsLoaded || !IsVisible)
+            {
+                return;
+            }
+
+            // Skip sync while another owned window is active so we do not disturb in-progress edits.
+            try
+            {
+                if (Application.Current != null)
+                {
+                    foreach (Window window in Application.Current.Windows)
+                    {
+                        if (window != null && window != this && window.IsVisible && window.IsActive)
+                        {
+                            return;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                return;
+            }
+
+            try
+            {
+                VM?.RefreshAfterDelete();
+                LRVM?.RefreshAfterDelete();
+                BillVM?.RefreshAfterDelete();
+                TrackingVM?.LoadData();
+                RefreshCBSAccounts();
+                RefreshCBSGrid();
+                RefreshFilteredSummary();
+                LRRefreshFilteredSummary();
+                BillUpdatePageUI();
+                RefreshDashboard();
+            }
+            catch (Exception ex)
+            {
+                LogException(nameof(RemoteSyncTimer_Tick), ex);
+            }
         }
 
         private void ValidateRuntimeAssets()
