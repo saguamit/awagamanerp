@@ -22,7 +22,12 @@ namespace Awagaman_ERP
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             base.OnStartup(e);
             TryRegisterSyncfusionLicense();
-            TryStartLocalApiServer();
+            // Remote/shared mode should not spawn a local API process during desktop startup.
+            // The API can be hosted separately on the server machine.
+            if (!BackendSettings.UseRemoteApi)
+            {
+                TryStartLocalApiServer();
+            }
             _ = CheckForUpdatesAsync(showUpToDateMessage: false);
         }
 
