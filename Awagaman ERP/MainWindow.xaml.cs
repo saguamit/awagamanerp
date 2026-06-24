@@ -8520,7 +8520,58 @@ namespace Awagaman_ERP
         private void UpdateColumnVisibility() { if (VM == null || LedgerGrid == null) return; foreach (var col in LedgerGrid.Columns) { var header = (col.Header ?? "").ToString(); switch (header) { case "#": col.Visibility = VM.ShowSr ? Visibility.Visible : Visibility.Collapsed; break; case "Challan No": col.Visibility = VM.ShowChallanNumber ? Visibility.Visible : Visibility.Collapsed; break; case "Date": col.Visibility = VM.ShowDate ? Visibility.Visible : Visibility.Collapsed; break; case "LR No.": col.Visibility = VM.ShowLRNumber ? Visibility.Visible : Visibility.Collapsed; break; case "Agent/Broker": col.Visibility = VM.ShowBrokerName ? Visibility.Visible : Visibility.Collapsed; break; case "From": col.Visibility = VM.ShowFrom ? Visibility.Visible : Visibility.Collapsed; break; case "To": col.Visibility = VM.ShowTo ? Visibility.Visible : Visibility.Collapsed; break; case "Vehicle No": col.Visibility = VM.ShowVehicleNumber ? Visibility.Visible : Visibility.Collapsed; break; case "Vehicle Type": col.Visibility = VM.ShowVehicleType ? Visibility.Visible : Visibility.Collapsed; break; case "Driver": col.Visibility = VM.ShowDriverName ? Visibility.Visible : Visibility.Collapsed; break; case "Driver Mobile": col.Visibility = VM.ShowDriverMobile ? Visibility.Visible : Visibility.Collapsed; break; case "Engine No": col.Visibility = VM.ShowEngineNo ? Visibility.Visible : Visibility.Collapsed; break; case "Licence": col.Visibility = VM.ShowLicenceNo ? Visibility.Visible : Visibility.Collapsed; break; case "Policy": col.Visibility = VM.ShowPolicyNo ? Visibility.Visible : Visibility.Collapsed; break; case "Chassis": col.Visibility = VM.ShowChassisNo ? Visibility.Visible : Visibility.Collapsed; break; case "Owner": col.Visibility = VM.ShowOwnerName ? Visibility.Visible : Visibility.Collapsed; break; case "PAN": col.Visibility = VM.ShowPAN ? Visibility.Visible : Visibility.Collapsed; break; case "Lorry Hire": col.Visibility = VM.ShowLorryHire ? Visibility.Visible : Visibility.Collapsed; break; case "Less TDS": col.Visibility = VM.ShowLessTDS ? Visibility.Visible : Visibility.Collapsed; break; case "Advance": col.Visibility = VM.ShowAdvanceAmount ? Visibility.Visible : Visibility.Collapsed; break; case "Adv (NEFT)": col.Visibility = VM.ShowAdvanceNEFT ? Visibility.Visible : Visibility.Collapsed; break; case "Adv (Cash)": col.Visibility = VM.ShowAdvanceCash ? Visibility.Visible : Visibility.Collapsed; break; case "Adv Date": col.Visibility = VM.ShowAdvanceDate ? Visibility.Visible : Visibility.Collapsed; break; case "Balance": col.Visibility = VM.ShowBalance ? Visibility.Visible : Visibility.Collapsed; break; case "Detention": col.Visibility = VM.ShowDetention ? Visibility.Visible : Visibility.Collapsed; break; case "Hamali": col.Visibility = VM.ShowHamali ? Visibility.Visible : Visibility.Collapsed; break; case "Deduction": col.Visibility = VM.ShowDeduction ? Visibility.Visible : Visibility.Collapsed; break; case "Bal Paid (NEFT)": col.Visibility = VM.ShowBalancePaidNEFT ? Visibility.Visible : Visibility.Collapsed; break; case "Bal Paid (Cash)": col.Visibility = VM.ShowBalancePaidCash ? Visibility.Visible : Visibility.Collapsed; break; case "Bal Paid Date": col.Visibility = VM.ShowBalancePaidDate ? Visibility.Visible : Visibility.Collapsed; break; case "Due": col.Visibility = VM.ShowDue ? Visibility.Visible : Visibility.Collapsed; break; case "Paid To": col.Visibility = VM.ShowPaidTo ? Visibility.Visible : Visibility.Collapsed; break; case "Remarks": col.Visibility = VM.ShowRemarks ? Visibility.Visible : Visibility.Collapsed; break; case "Bill Amount": col.Visibility = VM.ShowBillAmount ? Visibility.Visible : Visibility.Collapsed; break; case "Margin": col.Visibility = VM.ShowMargin ? Visibility.Visible : Visibility.Collapsed; break; } } }
         private IEnumerable<(string Label, Func<bool> GetValue, Action<bool> SetValue)> GetColumnToggleConfigs() { yield return ("#", () => VM.ShowSr, value => VM.ShowSr = value); yield return ("Challan No", () => VM.ShowChallanNumber, value => VM.ShowChallanNumber = value); yield return ("Date", () => VM.ShowDate, value => VM.ShowDate = value); yield return ("LR No.", () => VM.ShowLRNumber, value => VM.ShowLRNumber = value); yield return ("Agent/Broker", () => VM.ShowBrokerName, value => VM.ShowBrokerName = value); yield return ("From", () => VM.ShowFrom, value => VM.ShowFrom = value); yield return ("To", () => VM.ShowTo, value => VM.ShowTo = value); yield return ("Vehicle No", () => VM.ShowVehicleNumber, value => VM.ShowVehicleNumber = value); yield return ("Vehicle Type", () => VM.ShowVehicleType, value => VM.ShowVehicleType = value); yield return ("Driver", () => VM.ShowDriverName, value => VM.ShowDriverName = value); yield return ("Driver Mobile", () => VM.ShowDriverMobile, value => VM.ShowDriverMobile = value); yield return ("Engine No", () => VM.ShowEngineNo, value => VM.ShowEngineNo = value); yield return ("Licence", () => VM.ShowLicenceNo, value => VM.ShowLicenceNo = value); yield return ("Policy", () => VM.ShowPolicyNo, value => VM.ShowPolicyNo = value); yield return ("Chassis", () => VM.ShowChassisNo, value => VM.ShowChassisNo = value); yield return ("Owner", () => VM.ShowOwnerName, value => VM.ShowOwnerName = value); yield return ("PAN", () => VM.ShowPAN, value => VM.ShowPAN = value); yield return ("Lorry Hire", () => VM.ShowLorryHire, value => VM.ShowLorryHire = value); yield return ("Less TDS", () => VM.ShowLessTDS, value => VM.ShowLessTDS = value); yield return ("Advance", () => VM.ShowAdvanceAmount, value => VM.ShowAdvanceAmount = value); yield return ("Adv (NEFT)", () => VM.ShowAdvanceNEFT, value => VM.ShowAdvanceNEFT = value); yield return ("Adv (Cash)", () => VM.ShowAdvanceCash, value => VM.ShowAdvanceCash = value); yield return ("Adv Date", () => VM.ShowAdvanceDate, value => VM.ShowAdvanceDate = value); yield return ("Balance", () => VM.ShowBalance, value => VM.ShowBalance = value); yield return ("Detention", () => VM.ShowDetention, value => VM.ShowDetention = value); yield return ("Hamali", () => VM.ShowHamali, value => VM.ShowHamali = value); yield return ("Deduction", () => VM.ShowDeduction, value => VM.ShowDeduction = value); yield return ("Bal Paid (NEFT)", () => VM.ShowBalancePaidNEFT, value => VM.ShowBalancePaidNEFT = value); yield return ("Bal Paid (Cash)", () => VM.ShowBalancePaidCash, value => VM.ShowBalancePaidCash = value); yield return ("Bal Paid Date", () => VM.ShowBalancePaidDate, value => VM.ShowBalancePaidDate = value); yield return ("Due", () => VM.ShowDue, value => VM.ShowDue = value); yield return ("Paid To", () => VM.ShowPaidTo, value => VM.ShowPaidTo = value); yield return ("Remarks", () => VM.ShowRemarks, value => VM.ShowRemarks = value); yield return ("Bill Amount", () => VM.ShowBillAmount, value => VM.ShowBillAmount = value); yield return ("Margin", () => VM.ShowMargin, value => VM.ShowMargin = value); }
         private void OpenChallanForm_Click(object sender, RoutedEventArgs e) { OpenChallanForm(); }
-        private void OpenChallanForm() { var form = new ChallanFormWindow(VM.Entries, VM.GetRepository()); form.Owner = this; form.Closed += (_, __) => { if (!form.WasSaved) return; var entry = form.Result; entry.Sr = VM.GetNextSr(); entry.RecalculateBalance(); VM.Entries.Add(entry); SyncAllChallanBillingFromLR(); try { var trackingEntry = new TrackingEntry { ChallanNo = entry.ChallanNumber, ChallanDate = entry.Date, From = entry.From, To = entry.To, VehicleNo = entry.VehicleNumber, DriverMobile = entry.DriverMobile }; TrackingVM.AddEntry(trackingEntry); } catch { } }; form.Show(); }
+        private void OpenChallanForm()
+        {
+            var form = new ChallanFormWindow(VM.Entries, VM.GetRepository());
+            form.Owner = this;
+            form.Closed += (_, __) =>
+            {
+                if (!form.WasSaved) return;
+
+                try
+                {
+                    var entry = form.Result;
+                    if (entry == null) return;
+
+                    entry.Sr = VM.GetNextSr();
+                    entry.RecalculateBalance();
+
+                    try
+                    {
+                        VM.Entries.Add(entry);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Unable to save challan entry: " + ex.Message, "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+
+                    VM.RefreshAfterDelete();
+                    SyncAllChallanBillingFromLR();
+                    UpdatePageUI();
+                    RefreshDashboard();
+
+                    try
+                    {
+                        var trackingEntry = new TrackingEntry
+                        {
+                            ChallanNo = entry.ChallanNumber,
+                            ChallanDate = entry.Date,
+                            From = entry.From,
+                            To = entry.To,
+                            VehicleNo = entry.VehicleNumber,
+                            DriverMobile = entry.DriverMobile
+                        };
+                        TrackingVM.AddEntry(trackingEntry);
+                    }
+                    catch { }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Unable to save challan entry: " + ex.Message, "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            };
+            form.Show();
+        }
         private void ResetAllData_Click(object sender, RoutedEventArgs e)
         {
             var first = MessageBox.Show(
@@ -8714,7 +8765,41 @@ namespace Awagaman_ERP
         private void SaveLRColumnSettings() { try { var lines = new List<string>(); lines.Add($"_SortColumn:{LRVM?.GetSortColumn() ?? ""}"); lines.Add($"_SortAscending:{LRVM?.IsCurrentSortAscending}"); foreach (var col in LRLedgerGrid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" ▲", "").Replace(" ▼", "").Trim(); if (!string.IsNullOrEmpty(h)) lines.Add(col.Visibility == Visibility.Visible ? $"1:{h}:{(int)col.Width.DisplayValue}" : $"0:{h}:{(int)col.Width.DisplayValue}"); } var dir = System.IO.Path.GetDirectoryName(LRSettingsPath); if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir); System.IO.File.WriteAllText(LRSettingsPath, string.Join("\n", lines)); } catch { } }
         private void LoadLRColumnSettings() { try { var path = LRSettingsPath; if (!System.IO.File.Exists(path)) return; string sortCol = ""; bool sortAsc = true; foreach (var line in System.IO.File.ReadAllLines(path)) { if (line.StartsWith("_SortColumn:")) { sortCol = line.Substring("_SortColumn:".Length); continue; } if (line.StartsWith("_SortAscending:")) { bool.TryParse(line.Substring("_SortAscending:".Length), out sortAsc); continue; } var parts = line.Split(':'); if (parts.Length >= 2) { bool vis = parts[0] == "1"; var h = parts[1]; foreach (var col in LRLedgerGrid.Columns) { var ch = (col.Header?.ToString() ?? "").Replace(" ▲", "").Replace(" ▼", "").Trim(); if (string.Equals(ch, h, StringComparison.OrdinalIgnoreCase)) { col.Visibility = vis ? Visibility.Visible : Visibility.Collapsed; if (parts.Length >= 3 && double.TryParse(parts[2], out double w) && w > 10) col.Width = new DataGridLength(w); break; } } } } LRVM?.SetSort(sortCol, sortAsc); } catch { } }
         private void ImportChallan_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select Challan Import File" }; if (dialog.ShowDialog() != true) return; if (dialog.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) || dialog.FileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase)) { MessageBox.Show("Please export your Excel file as CSV first.", "Format Not Supported", MessageBoxButton.OK, MessageBoxImage.Information); return; } try { var lines = System.IO.File.ReadAllLines(dialog.FileName); if (lines.Length < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = SplitCsvLine(lines[0]); var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new ChallanRepository(); int imported = 0, errors = 0; int maxSr = repo.GetMaxSr(); var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = lines.Length - 1; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; for (int i = 1; i < lines.Length; i++) { try { var parts = SplitCsvLine(lines[i]); var entry = new ChallanEntry { Sr = ++maxSr, ChallanNumber = GetCol(parts, colMap, "ChallanNumber") ?? GetCol(parts, colMap, "ChallanNo") ?? GetCol(parts, colMap, "CHALLANNO"), Date = ParseDate(GetCol(parts, colMap, "Date") ?? GetCol(parts, colMap, "DATE")), LRNumber = GetCol(parts, colMap, "LRNumber") ?? GetCol(parts, colMap, "LRNumber") ?? GetCol(parts, colMap, "LRNO"), BrokerName = GetCol(parts, colMap, "BrokerName") ?? GetCol(parts, colMap, "Broker"), From = GetCol(parts, colMap, "From") ?? GetCol(parts, colMap, "FROM"), To = GetCol(parts, colMap, "To") ?? GetCol(parts, colMap, "TO"), VehicleNumber = GetCol(parts, colMap, "VehicleNumber") ?? GetCol(parts, colMap, "VehicleNo") ?? GetCol(parts, colMap, "VEHICLENO"), VehicleType = GetCol(parts, colMap, "VehicleType"), DriverName = GetCol(parts, colMap, "DriverName") ?? GetCol(parts, colMap, "Driver"), DriverMobile = GetCol(parts, colMap, "DriverMobile") ?? GetCol(parts, colMap, "DriverMobile"), EngineNo = GetCol(parts, colMap, "EngineNo"), LicenceNo = GetCol(parts, colMap, "LicenceNo"), PolicyNo = GetCol(parts, colMap, "PolicyNo"), ChassisNo = GetCol(parts, colMap, "ChassisNo"), OwnerName = GetCol(parts, colMap, "OwnerName") ?? GetCol(parts, colMap, "Owner"), PAN = GetCol(parts, colMap, "PAN"), LorryHire = ParseDecimal(GetCol(parts, colMap, "LorryHire") ?? GetCol(parts, colMap, "LorryHire")), LessTDS = ParseDecimal(GetCol(parts, colMap, "LessTDS")), AdvanceAmount = ParseDecimal(GetCol(parts, colMap, "AdvanceAmount") ?? GetCol(parts, colMap, "Advance")), AdvanceNEFT = ParseDecimal(GetCol(parts, colMap, "AdvanceNEFT")), AdvanceCash = ParseDecimal(GetCol(parts, colMap, "AdvanceCash")), AdvanceDate = ParseNullableDate(GetCol(parts, colMap, "AdvanceDate")), Detention = ParseDecimal(GetCol(parts, colMap, "Detention")), Hamali = ParseDecimal(GetCol(parts, colMap, "Hamali")), Deduction = ParseDecimal(GetCol(parts, colMap, "Deduction")), BalancePaidNEFT = ParseDecimal(GetCol(parts, colMap, "BalancePaidNEFT")), BalancePaidCash = ParseDecimal(GetCol(parts, colMap, "BalancePaidCash")), BalancePaidDate = ParseNullableDate(GetCol(parts, colMap, "BalancePaidDate")), PaidTo = GetCol(parts, colMap, "PaidTo"), Remarks = GetCol(parts, colMap, "Remarks"), BillAmount = ParseDecimal(GetCol(parts, colMap, "BillAmount")), Margin = ParseDecimal(GetCol(parts, colMap, "Margin")) }; entry.SuppressCalculations = true; entry.RecalculateBalance(); repo.Upsert(entry); imported++; } catch (Exception ex) { AppLogger.LogException(nameof(ImportChallan_Click), ex); errors++; } if (progress != null) progress.Value = i; if (status != null) status.Text = $"Importing {i}/{lines.Length - 1}"; } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) status.Text = $"Imported: {imported}, Errors: {errors}"; VM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); UpdatePageUI(); RefreshDashboard(); MessageBox.Show($"Challan import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
-        private void EditSelected_Click(object sender, RoutedEventArgs e) { var item = LedgerGrid.SelectedItem as ChallanEntry; if (item == null) return; var form = new ChallanFormWindow(item, VM.Entries, VM.GetRepository()); form.Owner = this; form.Closed += (_, __) => { if (!form.WasSaved) return; var updated = form.Result; updated.RecalculateBalance(); try { VM.GetRepository().Upsert(updated); } catch { } var idx = VM.Entries.IndexOf(item); if (idx >= 0) VM.Entries[idx] = updated; SyncLinkedLREntriesFromChallan(updated); SyncAllChallanBillingFromLR(); }; form.Show(); }
+        private void EditSelected_Click(object sender, RoutedEventArgs e)
+        {
+            var item = LedgerGrid.SelectedItem as ChallanEntry;
+            if (item == null) return;
+
+            var form = new ChallanFormWindow(item, VM.Entries, VM.GetRepository());
+            form.Owner = this;
+            form.Closed += (_, __) =>
+            {
+                if (!form.WasSaved) return;
+
+                try
+                {
+                    var updated = form.Result;
+                    if (updated == null) return;
+
+                    updated.RecalculateBalance();
+                    try { VM.GetRepository().Upsert(updated); } catch { }
+
+                    var idx = VM.Entries.IndexOf(item);
+                    if (idx >= 0) VM.Entries[idx] = updated;
+
+                    VM.RefreshAfterDelete();
+                    SyncLinkedLREntriesFromChallan(updated);
+                    SyncAllChallanBillingFromLR();
+                    UpdatePageUI();
+                    RefreshDashboard();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Unable to update challan entry: " + ex.Message, "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            };
+            form.Show();
+        }
         private void MakeBuilty_Click(object sender, RoutedEventArgs e)
         {
             var item = LedgerGrid.SelectedItem as ChallanEntry;
