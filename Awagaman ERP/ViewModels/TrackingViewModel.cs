@@ -35,18 +35,21 @@ namespace Awagaman_ERP.ViewModels
             }
         }
 
-        public TrackingViewModel(ITrackingRepository repository = null)
+        public TrackingViewModel(ITrackingRepository repository = null, bool loadOnStartup = true)
         {
             _repository = repository ?? new TrackingRepository();
-            try
+            if (loadOnStartup)
             {
-                LoadData();
-            }
-            catch
-            {
-                Entries.Clear();
-                CurrentReportingTracks.Clear();
-                FilteredEntriesCount = 0;
+                try
+                {
+                    LoadData();
+                }
+                catch
+                {
+                    Entries.Clear();
+                    CurrentReportingTracks.Clear();
+                    FilteredEntriesCount = 0;
+                }
             }
         }
 
