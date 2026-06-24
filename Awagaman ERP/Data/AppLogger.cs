@@ -37,5 +37,22 @@ namespace Awagaman_ERP.Data
                 // Logging must never fail the app.
             }
         }
+
+        public static void LogMessage(string context, string message)
+        {
+            try
+            {
+                var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{context}] {message}{Environment.NewLine}";
+                lock (SyncRoot)
+                {
+                    File.AppendAllText(LogPath, line);
+                }
+                Debug.WriteLine(line);
+            }
+            catch
+            {
+                // Logging must never fail the app.
+            }
+        }
     }
 }

@@ -102,9 +102,9 @@ CREATE TABLE IF NOT EXISTS Challans (
     Margin REAL NOT NULL
 );");
 
-                    // Add Balance/Due columns for existing databases (safe if already exist)
-                    TryExecuteNonQuery(connection, "ALTER TABLE Challans ADD COLUMN ImportedBalance REAL;", "EnsureInitialized.Challans.ImportedBalance");
-                    TryExecuteNonQuery(connection, "ALTER TABLE Challans ADD COLUMN ImportedDue REAL;", "EnsureInitialized.Challans.ImportedDue");
+                    // Add Balance/Due columns for existing databases only when missing.
+                    TryAddColumn(connection, "Challans", "ImportedBalance", "REAL", "EnsureInitialized.Challans.ImportedBalance");
+                    TryAddColumn(connection, "Challans", "ImportedDue", "REAL", "EnsureInitialized.Challans.ImportedDue");
 
                     ExecuteNonQuery(connection, @"
 CREATE TABLE IF NOT EXISTS LREntries (
@@ -171,22 +171,8 @@ CREATE TABLE IF NOT EXISTS TrackingEntries (
     DeliveredTime TEXT
 );");
 
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Invoice TEXT;", "EnsureInitialized.LREntries.Invoice");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Value TEXT;", "EnsureInitialized.LREntries.Value");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Weight REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.Weight");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Hamali REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.Hamali");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Detention REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.Detention");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Others REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.Others");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN StCharge REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.StCharge");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN TDS REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.TDS");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN Ded REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.Ded");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN SizeL REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.SizeL");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN SizeW REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.SizeW");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN SizeH REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.SizeH");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN ActualWeight REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.ActualWeight");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN ChargedWeight REAL NOT NULL DEFAULT 0;", "EnsureInitialized.LREntries.ChargedWeight");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN PkgType TEXT;", "EnsureInitialized.LREntries.PkgType");
-                    TryExecuteNonQuery(connection, "ALTER TABLE LREntries ADD COLUMN PayType TEXT;", "EnsureInitialized.LREntries.PayType");
+                    // The CREATE TABLE already includes the current LR columns.
+                    // Only add future migration columns here, and only if they are missing.
 
                     ExecuteNonQuery(connection, @"
 CREATE TABLE IF NOT EXISTS ReportingTracks (
@@ -260,8 +246,7 @@ CREATE TABLE IF NOT EXISTS Parties (
     Remarks TEXT,
     Date TEXT
 );");
-                    TryExecuteNonQuery(connection, "ALTER TABLE Bills ADD COLUMN Remarks TEXT;", "EnsureInitialized.Bills.Remarks");
-                    TryExecuteNonQuery(connection, "ALTER TABLE Bills ADD COLUMN StCharge REAL DEFAULT 0;", "EnsureInitialized.Bills.StCharge");
+                    // Bills table already includes Remarks and StCharge in the CREATE TABLE above.
 
                     ExecuteNonQuery(connection, @"
 CREATE TABLE IF NOT EXISTS CBSAccounts (
@@ -337,8 +322,6 @@ CREATE TABLE IF NOT EXISTS VehicleLedger (
                         Freight REAL DEFAULT 0, Detention REAL DEFAULT 0, HML REAL DEFAULT 0, OTHR REAL DEFAULT 0,
                         StCharge REAL DEFAULT 0,
                         RCVD REAL DEFAULT 0, TDS REAL DEFAULT 0, DED REAL DEFAULT 0, MOP TEXT, MR TEXT, Remarks TEXT, Date TEXT);");
-                    TryExecuteNonQuery(c, "ALTER TABLE Bills ADD COLUMN Remarks TEXT;", "EnsureBillTablesExist.Bills.Remarks");
-                    TryExecuteNonQuery(c, "ALTER TABLE Bills ADD COLUMN StCharge REAL DEFAULT 0;", "EnsureBillTablesExist.Bills.StCharge");
                     ExecuteNonQuery(c, @"CREATE TABLE IF NOT EXISTS BillComments (
                         Id INTEGER PRIMARY KEY AUTOINCREMENT, BillId INTEGER NOT NULL,
                         Comment TEXT NOT NULL, CreatedAt TEXT NOT NULL);");
@@ -358,7 +341,6 @@ CREATE TABLE IF NOT EXISTS VehicleLedger (
                         Remarks TEXT,
                         DueAfter REAL NOT NULL DEFAULT 0,
                         CreatedAt TEXT NOT NULL);");
-                    TryExecuteNonQuery(c, "ALTER TABLE BillReceipts ADD COLUMN BillDate TEXT;", "EnsureBillTablesExist.BillReceipts.BillDate");
                     ExecuteNonQuery(c, "CREATE INDEX IF NOT EXISTS IX_BillReceipts_BillNo ON BillReceipts(BillNo);");
                 }
             }
@@ -366,6 +348,41 @@ CREATE TABLE IF NOT EXISTS VehicleLedger (
             {
                 AppLogger.LogException(nameof(EnsureBillTablesExist), ex);
             }
+        }
+
+        private static void TryAddColumn(SQLiteConnection connection, string tableName, string columnName, string sqlType, string context)
+        {
+            try
+            {
+                if (ColumnExists(connection, tableName, columnName))
+                {
+                    return;
+                }
+
+                ExecuteNonQuery(connection, $"ALTER TABLE {tableName} ADD COLUMN {columnName} {sqlType};");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(context, ex);
+            }
+        }
+
+        private static bool ColumnExists(SQLiteConnection connection, string tableName, string columnName)
+        {
+            using (var command = new SQLiteCommand($"PRAGMA table_info({tableName});", connection))
+            using (var reader = command.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    var existing = Convert.ToString(reader["name"]);
+                    if (string.Equals(existing, columnName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         private static void TryExecuteNonQuery(SQLiteConnection connection, string sql, string context)

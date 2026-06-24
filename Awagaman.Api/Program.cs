@@ -109,28 +109,77 @@ vehicles.MapDelete("/{id:int}", async (int id, AwagamanRepository repo) =>
 });
 
 var challans = app.MapGroup("/api/challans");
-challans.MapGet("/", async (AwagamanRepository repo) => Results.Ok(await repo.GetChallansAsync()));
+challans.MapGet("/", async (AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetChallansAsync());
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
+challans.MapGet("/max-sr", async (AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(new { maxSr = await repo.GetMaxChallanSrAsync() });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
 challans.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
 {
-    var item = await repo.GetChallanAsync(id);
-    return item is null ? Results.NotFound() : Results.Ok(item);
+    try
+    {
+        var item = await repo.GetChallanAsync(id);
+        return item is null ? Results.NotFound() : Results.Ok(item);
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
 });
 challans.MapPost("/", async (ChallanEntry entry, AwagamanRepository repo) =>
 {
-    var id = await repo.UpsertChallanAsync(entry);
-    entry.Id = id;
-    return Results.Created($"/api/challans/{id}", entry);
+    try
+    {
+        var id = await repo.UpsertChallanAsync(entry);
+        entry.Id = id;
+        return Results.Created($"/api/challans/{id}", entry);
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
 });
 challans.MapPut("/{id:int}", async (int id, ChallanEntry entry, AwagamanRepository repo) =>
 {
-    entry.Id = id;
-    await repo.UpsertChallanAsync(entry);
-    return Results.NoContent();
+    try
+    {
+        entry.Id = id;
+        await repo.UpsertChallanAsync(entry);
+        return Results.NoContent();
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
 });
 challans.MapDelete("/{id:int}", async (int id, AwagamanRepository repo) =>
 {
-    await repo.DeleteChallanAsync(id);
-    return Results.NoContent();
+    try
+    {
+        await repo.DeleteChallanAsync(id);
+        return Results.NoContent();
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
 });
 
 var lrs = app.MapGroup("/api/lr");

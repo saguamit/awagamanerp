@@ -483,58 +483,6 @@
                                 <Setter Property="Foreground" Value="#64748B" />
                                 <Setter Property="FontSize" Value="10.5" />
                             </Style>
-                            <Style x:Key="DashboardGridStyle" TargetType="DataGrid">
-                                <Setter Property="Background" Value="White" />
-                                <Setter Property="BorderThickness" Value="0" />
-                                <Setter Property="HeadersVisibility" Value="Column" />
-                                <Setter Property="GridLinesVisibility" Value="Horizontal" />
-                                <Setter Property="HorizontalGridLinesBrush" Value="#E3EAF4" />
-                                <Setter Property="RowBackground" Value="White" />
-                                <Setter Property="AlternatingRowBackground" Value="#F8FBFF" />
-                                <Setter Property="AlternationCount" Value="2" />
-                                <Setter Property="FontSize" Value="12.5" />
-                                <Setter Property="RowHeight" Value="30" />
-                                <Setter Property="CanUserAddRows" Value="False" />
-                                <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
-                                <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
-                                <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
-                                <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel" />
-                                <Setter Property="BorderBrush" Value="#DDE6F4" />
-                                <Setter Property="BorderThickness" Value="1" />
-                            </Style>
-                            <Style x:Key="DashboardTableRowStyle" TargetType="DataGridRow">
-                                <Setter Property="MinHeight" Value="34" />
-                                <Setter Property="Background" Value="White" />
-                                <Setter Property="BorderThickness" Value="0,0,0,1" />
-                                <Setter Property="BorderBrush" Value="#E7EDF6" />
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                <Setter Property="VerticalContentAlignment" Value="Center" />
-                                <Setter Property="SnapsToDevicePixels" Value="True" />
-                                <Style.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter Property="Background" Value="#F5F9FF" />
-                                    </Trigger>
-                                    <Trigger Property="IsSelected" Value="True">
-                                        <Setter Property="Background" Value="#EAF2FF" />
-                                        <Setter Property="BorderBrush" Value="#B8CDF8" />
-                                    </Trigger>
-                                </Style.Triggers>
-                            </Style>
-                            <Style x:Key="DashboardTableCellStyle" TargetType="DataGridCell">
-                                <Setter Property="Padding" Value="10,6" />
-                                <Setter Property="BorderThickness" Value="0" />
-                                <Setter Property="VerticalAlignment" Value="Center" />
-                                <Setter Property="Background" Value="Transparent" />
-                                <Style.Triggers>
-                                    <Trigger Property="IsSelected" Value="True">
-                                        <Setter Property="Background" Value="#DCE9FF" />
-                                        <Setter Property="Foreground" Value="#102A43" />
-                                    </Trigger>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter Property="Background" Value="#F5F9FF" />
-                                    </Trigger>
-                                </Style.Triggers>
-                            </Style>
                             <Style x:Key="DashboardActionButtonStyle" TargetType="Button">
                                 <Setter Property="Background" Value="#7C3AED" />
                                 <Setter Property="Foreground" Value="White" />

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using Awagaman_ERP.ViewModels;
 using Awagaman_ERP.Models;
@@ -108,7 +109,9 @@ namespace Awagaman_ERP
         private readonly VehicleRepository _vehicleRepo = new VehicleRepository();
         public MainWindow()
         {
+            LogException("StartupTrace", new Exception("MainWindow ctor begin"));
             InitializeComponent();
+            LogException("StartupTrace", new Exception("MainWindow InitializeComponent complete"));
             try
             {
                 var ver = Assembly.GetExecutingAssembly().GetName().Version;
@@ -119,10 +122,24 @@ namespace Awagaman_ERP
             }
             catch (Exception ex) { LogException(nameof(MainWindow), ex); }
             ValidateRuntimeAssets();
-            DataContext = new ChallanViewModel();
-            LRVM = new LRLedgerViewModel();
-            TrackingVM = new TrackingViewModel();
-            BillVM = new ViewModels.BillLedgerViewModel();
+            LogException("StartupTrace", new Exception("ValidateRuntimeAssets complete"));
+            try
+            {
+                LogException("StartupTrace", new Exception("Creating ChallanViewModel"));
+                DataContext = new ChallanViewModel();
+                LogException("StartupTrace", new Exception("Creating LRLedgerViewModel"));
+                LRVM = new LRLedgerViewModel();
+                LogException("StartupTrace", new Exception("Creating TrackingViewModel"));
+                TrackingVM = new TrackingViewModel();
+                LogException("StartupTrace", new Exception("Creating BillLedgerViewModel"));
+                BillVM = new ViewModels.BillLedgerViewModel();
+                LogException("StartupTrace", new Exception("ViewModels created"));
+            }
+            catch (Exception ex)
+            {
+                LogException("StartupTrace", ex);
+                throw;
+            }
 
             // Debounce timer for search boxes
             _searchTimer = new System.Windows.Threading.DispatcherTimer();
@@ -140,37 +157,72 @@ namespace Awagaman_ERP
 
             Loaded += (s, e) =>
             {
-                if (PageTitle != null) PageTitle.Text = "Dashboard";
-                LoadGridSettings();
-                if (!_initialLrBackfillDone)
+                LogException("StartupTrace", new Exception("MainWindow Loaded begin"));
+                try
                 {
-                    BackfillAllLinkedLREntriesFromChallans();
-                    _initialLrBackfillDone = true;
-                }
-                SyncAllChallanBillingFromLR();
-                RefreshDashboard();
-                UpdateColumnVisibility();
-                RestoreSortIndicator();
-                RefreshFilteredSummary();
-                RefreshCBSAccounts();
-                RefreshCBSGrid();
+                    if (PageTitle != null) PageTitle.Text = "Dashboard";
+                    LoadGridSettings();
 
-                var view = System.Windows.Data.CollectionViewSource.GetDefaultView(LedgerGrid.ItemsSource) as System.Collections.Specialized.INotifyCollectionChanged;
-                if (view != null) view.CollectionChanged += (s2, e2) => { RefreshFilteredSummary(); RefreshDashboard(); };
+                    if (LRLedgerGrid != null)
+                    {
+                        if (LRLedgerView.DataContext == null) LRLedgerView.DataContext = LRVM;
+                        EnforceLRLockedColumnsReadOnly();
+                    }
 
-                if (LRLedgerGrid != null)
-                {
-                    if (LRLedgerView.DataContext == null) LRLedgerView.DataContext = LRVM;
-                    EnforceLRLockedColumnsReadOnly();
-                    LRRefreshFilteredSummary();
-                    var lrView = System.Windows.Data.CollectionViewSource.GetDefaultView(LRLedgerGrid.ItemsSource) as System.Collections.Specialized.INotifyCollectionChanged;
+                    if (TrackingLedgerGrid != null)
+                    {
+                        var trackingView = CollectionViewSource.GetDefaultView(TrackingLedgerGrid.ItemsSource) as System.Collections.Specialized.INotifyCollectionChanged;
+                        if (trackingView != null) trackingView.CollectionChanged += (s2, e2) => DeferUi(() => RefreshDashboard());
+                    }
+
+                    var view = System.Windows.Data.CollectionViewSource.GetDefaultView(LedgerGrid.ItemsSource) as System.Collections.Specialized.INotifyCollectionChanged;
+                    if (view != null) view.CollectionChanged += (s2, e2) => { RefreshFilteredSummary(); DeferUi(() => RefreshDashboard()); };
+
+                    var lrView = LRLedgerGrid != null ? System.Windows.Data.CollectionViewSource.GetDefaultView(LRLedgerGrid.ItemsSource) as System.Collections.Specialized.INotifyCollectionChanged : null;
                     if (lrView != null) lrView.CollectionChanged += (s2, e2) => LRRefreshFilteredSummary();
-                }
 
-                if (TrackingLedgerGrid != null)
+                    DeferUi(() =>
+                    {
+                        try
+                        {
+                            UpdateColumnVisibility();
+                            RestoreSortIndicator();
+                            RefreshFilteredSummary();
+                            RefreshCBSAccounts();
+                            RefreshCBSGrid();
+                            RefreshDashboard();
+                        }
+                        catch (Exception ex)
+                        {
+                            LogException("MainWindow Loaded Deferred", ex);
+                        }
+                    }, System.Windows.Threading.DispatcherPriority.Background);
+
+                    Task.Run(() =>
+                    {
+                        try
+                        {
+                            if (!_initialLrBackfillDone)
+                            {
+                                BackfillAllLinkedLREntriesFromChallans();
+                                _initialLrBackfillDone = true;
+                            }
+
+                            SyncAllChallanBillingFromLR();
+                        }
+                        catch (Exception ex)
+                        {
+                            LogException("MainWindow StartupBackground", ex);
+                        }
+                    });
+                }
+                catch (Exception ex)
                 {
-                    var trackingView = CollectionViewSource.GetDefaultView(TrackingLedgerGrid.ItemsSource) as System.Collections.Specialized.INotifyCollectionChanged;
-                    if (trackingView != null) trackingView.CollectionChanged += (s2, e2) => RefreshDashboard();
+                    LogException("MainWindow Loaded", ex);
+                }
+                finally
+                {
+                    LogException("StartupTrace", new Exception("MainWindow Loaded end"));
                 }
             };
 
@@ -186,6 +238,11 @@ namespace Awagaman_ERP
         private void RemoteSyncTimer_Tick(object sender, EventArgs e)
         {
             if (!IsLoaded || !IsVisible)
+            {
+                return;
+            }
+
+            if (BackendSettings.UseRemoteApi && !IsRemoteApiHealthy())
             {
                 return;
             }
@@ -276,42 +333,57 @@ namespace Awagaman_ERP
 
         private void RefreshDashboard()
         {
-            var challans = _challanRepo.GetAll();
-            var bills = _billRepo.GetAll();
-            var cbsEntries = _cbsRepo.GetAll();
-            long totalChallans = challans.Count;
-            long dueChallans = 0;
-            long inTransit = 0;
-            long delivered = 0;
-            decimal totalDue = 0m;
-            foreach (var ch in challans)
+            Task.Run(() =>
             {
-                var due = ch.LorryHire - ch.LessTDS + ch.Detention + ch.Hamali - ch.Deduction - ch.AdvanceAmount - ch.BalancePaidNEFT - ch.BalancePaidCash;
-                totalDue += due;
-                if (due > 0m) dueChallans++;
-            }
-            foreach (var tracking in new TrackingRepository().GetAll())
+                try
+                {
+                    var challans = SafeLoad(() => _challanRepo.GetAll());
+                    var bills = SafeLoad(() => _billRepo.GetAll());
+                    var cbsEntries = SafeLoad(() => _cbsRepo.GetAll());
+                    long dueChallans = 0;
+                    decimal totalDue = 0m;
+
+                    foreach (var ch in challans)
+                    {
+                        var due = ch.LorryHire - ch.LessTDS + ch.Detention + ch.Hamali - ch.Deduction - ch.AdvanceAmount - ch.BalancePaidNEFT - ch.BalancePaidCash;
+                        totalDue += due;
+                        if (due > 0m) dueChallans++;
+                    }
+
+                    decimal billTotalDue = bills.Sum(b => b.Freight + b.Detention + b.HML + b.OTHR + b.StCharge - b.RCVD - b.TDS - b.DED);
+                    decimal cbsBankNet = cbsEntries.Sum(x => x.BankDr - x.BankCr);
+                    decimal cbsCashNet = cbsEntries.Sum(x => x.CashDr - x.CashCr);
+                    var newBookingItems = SafeLoad(() => LoadPendingBookingItems(50));
+                    var pendingBills = SafeLoad(() => LoadPendingBillItems(30));
+
+                    DeferUi(() =>
+                    {
+                        if (DashboardTotalDue != null) DashboardTotalDue.Text = $"₹ {totalDue:N2}";
+                        if (DashboardTotalChallans != null) DashboardTotalChallans.Text = $"{dueChallans} Due Challans";
+                        if (DashboardOutstanding != null) DashboardOutstanding.Text = $"₹ {billTotalDue:N2}";
+                        if (DashboardCBSBankNet != null) DashboardCBSBankNet.Text = $"₹ {cbsBankNet:N2}";
+                        if (DashboardCBSCashNet != null) DashboardCBSCashNet.Text = $"₹ {cbsCashNet:N2}";
+                        if (DashboardNewBookings != null) DashboardNewBookings.Text = newBookingItems.Count.ToString();
+                        if (DashboardBillsCard != null) DashboardBillsCard.ToolTip = $"Open pending bills window ({pendingBills.Count})";
+                    });
+                }
+                catch (Exception ex)
+                {
+                    LogException(nameof(RefreshDashboard), ex);
+                }
+            });
+        }
+
+        private static List<T> SafeLoad<T>(Func<List<T>> loader)
+        {
+            try
             {
-                if (tracking.DispatchDate != null && tracking.DeliveredDate == null) inTransit++;
-                if (tracking.DeliveredDate != null) delivered++;
+                return loader != null ? loader() : new List<T>();
             }
-            decimal billTotalDue = bills.Sum(b => b.Freight + b.Detention + b.HML + b.OTHR + b.StCharge - b.RCVD - b.TDS - b.DED);
-            decimal cbsBankNet = cbsEntries.Sum(x => x.BankDr - x.BankCr);
-            decimal cbsCashNet = cbsEntries.Sum(x => x.CashDr - x.CashCr);
-            long newBookings = 0;
-
-            if (DashboardTotalDue != null) DashboardTotalDue.Text = $"₹ {totalDue:N2}";
-            if (DashboardTotalChallans != null) DashboardTotalChallans.Text = $"{dueChallans} Due Challans";
-            if (DashboardOutstanding != null) DashboardOutstanding.Text = $"₹ {billTotalDue:N2}";
-            if (DashboardCBSBankNet != null) DashboardCBSBankNet.Text = $"₹ {cbsBankNet:N2}";
-            if (DashboardCBSCashNet != null) DashboardCBSCashNet.Text = $"₹ {cbsCashNet:N2}";
-
-            var newBookingItems = LoadPendingBookingItems(50);
-            newBookings = newBookingItems.Count;
-            if (DashboardNewBookings != null) DashboardNewBookings.Text = newBookings.ToString();
-
-            var pendingBills = LoadPendingBillItems(30);
-            if (DashboardBillsCard != null) DashboardBillsCard.ToolTip = $"Open pending bills window ({pendingBills.Count})";
+            catch
+            {
+                return new List<T>();
+            }
         }
 
         private void DataGrid_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -552,24 +624,6 @@ namespace Awagaman_ERP
                 if (i < items.Count - 1) sb.AppendLine();
             }
             if (sb.Length > 0) Clipboard.SetText(sb.ToString());
-        }
-
-        private void NewBookingGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
-        {
-            if (e.EditAction != DataGridEditAction.Commit) return;
-            var entry = e.Row.Item as ChallanEntry;
-            if (entry == null || entry.Id <= 0) return;
-            try
-            {
-                if (e.EditingElement is TextBox textBox)
-                {
-                    var binding = textBox.GetBindingExpression(TextBox.TextProperty);
-                    binding?.UpdateSource();
-                }
-                VM?.GetRepository().Upsert(entry);
-                SyncAllChallanBillingFromLR();
-            }
-            catch { }
         }
 
         private void DashboardMakeBill_Click(object sender, RoutedEventArgs e)
@@ -855,7 +909,7 @@ namespace Awagaman_ERP
             };
 
             win.Content = root;
-            win.ShowDialog();
+            win.Show();
         }
 
         private List<LREntry> LoadPendingBillItems(int limit = 50)
@@ -1048,7 +1102,7 @@ namespace Awagaman_ERP
             };
 
             win.Content = root;
-            win.ShowDialog();
+            win.Show();
         }
 
         private DataTemplate BuildCreateBillButtonTemplate()
@@ -1799,6 +1853,11 @@ namespace Awagaman_ERP
         {
             try
             {
+                if (BackendSettings.UseRemoteApi && !IsRemoteApiHealthy())
+                {
+                    return;
+                }
+
                 // Ensure required system accounts exist.
                 AddCBSAccount("LHS");
                 AddCBSAccount("BFRS");
@@ -1859,6 +1918,23 @@ namespace Awagaman_ERP
                 }
             }
             catch { }
+        }
+
+        private static bool IsRemoteApiHealthy()
+        {
+            try
+            {
+                using (var client = new System.Net.Http.HttpClient())
+                {
+                    client.Timeout = TimeSpan.FromSeconds(5);
+                    var response = client.GetAsync(BackendSettings.ApiBaseUrl.TrimEnd('/') + "/api/health").GetAwaiter().GetResult();
+                    return response.IsSuccessStatusCode;
+                }
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static List<CashBankStatementEntry> BuildCBSAccountViewRows(IEnumerable<CashBankStatementEntry> rawRows)
@@ -2850,6 +2926,7 @@ namespace Awagaman_ERP
                 CashBankStatementEntry summaryEditBeforeSnapshot = null;
                 int summaryEditEntryId = -1;
                 bool suppressSummaryUndo = false;
+                Action refreshSummaryView = null;
                 Func<object, string, string> getValue = (rowObj, h) =>
                 {
                     if (rowObj == null) return string.Empty;
@@ -2974,14 +3051,14 @@ namespace Awagaman_ERP
                     {
                         activeFilterColumn = null;
                         activeFilterValues.Clear();
-                        accountList.RaiseEvent(new SelectionChangedEventArgs(System.Windows.Controls.Primitives.Selector.SelectionChangedEvent, new List<object>(), new List<object>()));
+                        refreshSummaryView?.Invoke();
                     };
                     var miClearFilter = new MenuItem { Header = "Clear Filter" };
                     miClearFilter.Click += (_, __) =>
                     {
                         activeFilterColumn = null;
                         activeFilterValues.Clear();
-                        accountList.RaiseEvent(new SelectionChangedEventArgs(System.Windows.Controls.Primitives.Selector.SelectionChangedEvent, new List<object>(), new List<object>()));
+                        refreshSummaryView?.Invoke();
                     };
                     menu.Items.Add(miSelectAll);
                     menu.Items.Add(miClearFilter);
@@ -3014,7 +3091,7 @@ namespace Awagaman_ERP
                             }
                             if (miVal.IsChecked) activeFilterValues.Add(val); else activeFilterValues.Remove(val);
                             if (activeFilterValues.Count == 0) activeFilterColumn = null;
-                            accountList.RaiseEvent(new SelectionChangedEventArgs(System.Windows.Controls.Primitives.Selector.SelectionChangedEvent, new List<object>(), new List<object>()));
+                            refreshSummaryView?.Invoke();
                         };
                         menu.Items.Add(miVal);
                     }
@@ -3475,6 +3552,8 @@ namespace Awagaman_ERP
                 {
                     accountList.SelectedIndex = 0;
                 }
+
+                refreshSummaryView = () => refreshSelected();
 
                 win.Content = root;
                 win.Show();

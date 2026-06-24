@@ -41,6 +41,7 @@ namespace Awagaman_ERP.ViewModels
         public string GetSortColumn() => _sortColumn;
         private List<ChallanEntry> _nextPageCache;
         private List<ChallanEntry> _prevPageCache;
+        private bool _isLoadingPage;
         public ObservableCollection<ChallanEntry> Entries { get; } = new ObservableCollection<ChallanEntry>();
         private ObservableCollection<ChallanEntry> _pagedEntries = new ObservableCollection<ChallanEntry>();
         public ObservableCollection<ChallanEntry> PagedEntries
@@ -316,64 +317,78 @@ namespace Awagaman_ERP.ViewModels
 
         public void LoadPage()
         {
+            if (_isLoadingPage)
+            {
+                return;
+            }
+
+            _isLoadingPage = true;
             _suppressPersistence = true;
-            PagedEntries.Clear();
-            if (_countDirty)
+            try
             {
+                PagedEntries.Clear();
+                if (_countDirty)
+                {
+                    if (_hasAdvancedFilter)
+                        _totalCount = _repository.GetTotalCountAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo);
+                    else if (string.IsNullOrEmpty(_searchFilter))
+                        _totalCount = _repository.GetTotalCount();
+                    else
+                        _totalCount = _repository.GetTotalCount(_searchFilter);
+                    _countDirty = false;
+                }
+
+                List<ChallanEntry> items;
                 if (_hasAdvancedFilter)
-                    _totalCount = _repository.GetTotalCountAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo);
+                {
+                    items = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, CurrentPage, PageSize, _sortColumn, _sortAscending);
+                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, 1, PageSize, _sortColumn, _sortAscending); }
+                }
                 else if (string.IsNullOrEmpty(_searchFilter))
-                    _totalCount = _repository.GetTotalCount();
+                {
+                    items = _repository.GetPage(CurrentPage, PageSize, _sortColumn, _sortAscending);
+                }
                 else
-                    _totalCount = _repository.GetTotalCount(_searchFilter);
-                _countDirty = false;
-            }
+                {
+                    items = _repository.Search(_searchFilter, CurrentPage, PageSize, _sortColumn, _sortAscending);
+                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.Search(_searchFilter, 1, PageSize, _sortColumn, _sortAscending); }
+                }
 
-            List<ChallanEntry> items;
-            if (_hasAdvancedFilter)
-            {
-                items = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, CurrentPage, PageSize, _sortColumn, _sortAscending);
-                if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, 1, PageSize, _sortColumn, _sortAscending); }
-            }
-            else if (string.IsNullOrEmpty(_searchFilter))
-            {
-                items = _repository.GetPage(CurrentPage, PageSize, _sortColumn, _sortAscending);
-            }
-            else
-            {
-                items = _repository.Search(_searchFilter, CurrentPage, PageSize, _sortColumn, _sortAscending);
-                if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.Search(_searchFilter, 1, PageSize, _sortColumn, _sortAscending); }
-            }
+                PagedEntries = new ObservableCollection<ChallanEntry>(items);
 
-            PagedEntries = new ObservableCollection<ChallanEntry>(items);
+                var commentIds = _repository.GetChallanIdsWithComments();
+                foreach (var entry in PagedEntries)
+                    entry.HasComments = commentIds.Contains(entry.Id);
 
-            // Mark challans with comments
-            var commentIds = _repository.GetChallanIdsWithComments();
-            foreach (var entry in PagedEntries)
-                entry.HasComments = commentIds.Contains(entry.Id);
-
-            if (CurrentPage < TotalPages)
-            {
-                if (_hasAdvancedFilter)
-                    _nextPageCache = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
-                else if (string.IsNullOrEmpty(_searchFilter))
-                    _nextPageCache = _repository.GetPage(CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
+                if (CurrentPage < TotalPages)
+                {
+                    if (_hasAdvancedFilter)
+                        _nextPageCache = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
+                    else if (string.IsNullOrEmpty(_searchFilter))
+                        _nextPageCache = _repository.GetPage(CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
+                    else
+                        _nextPageCache = _repository.Search(_searchFilter, CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
+                }
                 else
-                    _nextPageCache = _repository.Search(_searchFilter, CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
-            }
-            else
-                _nextPageCache = null;
+                {
+                    _nextPageCache = null;
+                }
 
-            _suppressPersistence = false;
-            FilteredEntriesCount = PagedEntries.Count;
-            OnPropertyChanged(nameof(PageInfo));
-            OnPropertyChanged(nameof(TotalCount));
-            OnPropertyChanged(nameof(TotalPages));
-            OnPropertyChanged(nameof(CanGoPrevious));
-            OnPropertyChanged(nameof(CanGoNext));
-            OnPropertyChanged(nameof(CanGoFirst));
-            OnPropertyChanged(nameof(CanGoLast));
-            _pageLoaded = true;
+                FilteredEntriesCount = PagedEntries.Count;
+                OnPropertyChanged(nameof(PageInfo));
+                OnPropertyChanged(nameof(TotalCount));
+                OnPropertyChanged(nameof(TotalPages));
+                OnPropertyChanged(nameof(CanGoPrevious));
+                OnPropertyChanged(nameof(CanGoNext));
+                OnPropertyChanged(nameof(CanGoFirst));
+                OnPropertyChanged(nameof(CanGoLast));
+                _pageLoaded = true;
+            }
+            finally
+            {
+                _suppressPersistence = false;
+                _isLoadingPage = false;
+            }
         }
 
         public void EnsurePageLoaded()
@@ -498,9 +513,12 @@ namespace Awagaman_ERP.ViewModels
 
             if (e.PropertyName == nameof(ChallanEntry.Due))
             {
-            OnPropertyChanged(nameof(TotalDue));
-            if (_suppressPersistence) return;
-            LoadPage();
+                OnPropertyChanged(nameof(TotalDue));
+                if (_suppressPersistence || _isLoadingPage)
+                {
+                    return;
+                }
+                return;
             }
             
             if (_suppressPersistence || entry == null)

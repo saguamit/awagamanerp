@@ -22,6 +22,7 @@ namespace Awagaman_ERP.ViewModels
         private string _searchFilter = "";
         private string _sortColumn = "LRNo";
         private bool _sortAscending = false;
+        private bool _isLoadingPage;
         public bool IsCurrentSortAscending => string.IsNullOrEmpty(_sortColumn) || _sortAscending;
         public string GetSortColumn() => _sortColumn;
         private List<LREntry> _nextPageCache;
@@ -93,47 +94,60 @@ namespace Awagaman_ERP.ViewModels
 
         public void LoadPage()
         {
+            if (_isLoadingPage)
+            {
+                return;
+            }
+
+            _isLoadingPage = true;
             _suppressPersistence = true;
-            PagedEntries.Clear();
-            if (_countDirty)
+            try
             {
-                _totalCount = string.IsNullOrEmpty(_searchFilter)
-                    ? _repository.GetTotalCount()
-                    : _repository.GetTotalCount(_searchFilter);
-                _countDirty = false;
-            }
+                PagedEntries.Clear();
+                if (_countDirty)
+                {
+                    _totalCount = string.IsNullOrEmpty(_searchFilter)
+                        ? _repository.GetTotalCount()
+                        : _repository.GetTotalCount(_searchFilter);
+                    _countDirty = false;
+                }
 
-            List<LREntry> items;
-            if (string.IsNullOrEmpty(_searchFilter))
-            {
-                items = _repository.GetPage(CurrentPage, PageSize, _sortColumn, _sortAscending);
-            }
-            else
-            {
-                items = _repository.Search(_searchFilter, CurrentPage, PageSize, _sortColumn, _sortAscending);
-                if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.Search(_searchFilter, 1, PageSize, _sortColumn, _sortAscending); }
-            }
-
-            PagedEntries = new ObservableCollection<LREntry>(items);
-            MarkComments(PagedEntries);
-
-            if (CurrentPage < TotalPages)
-            {
+                List<LREntry> items;
                 if (string.IsNullOrEmpty(_searchFilter))
-                    _nextPageCache = _repository.GetPage(CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
+                {
+                    items = _repository.GetPage(CurrentPage, PageSize, _sortColumn, _sortAscending);
+                }
                 else
-                    _nextPageCache = _repository.Search(_searchFilter, CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
-            }
-            else { _nextPageCache = null; }
+                {
+                    items = _repository.Search(_searchFilter, CurrentPage, PageSize, _sortColumn, _sortAscending);
+                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.Search(_searchFilter, 1, PageSize, _sortColumn, _sortAscending); }
+                }
 
-            _suppressPersistence = false;
-            FilteredEntriesCount = PagedEntries.Count;
-            OnPropertyChanged(nameof(PageInfo));
-            OnPropertyChanged(nameof(TotalCount));
-            OnPropertyChanged(nameof(TotalPages));
-            OnPropertyChanged(nameof(CanGoPrevious));
-            OnPropertyChanged(nameof(CanGoNext));
-            _pageLoaded = true;
+                PagedEntries = new ObservableCollection<LREntry>(items);
+                MarkComments(PagedEntries);
+
+                if (CurrentPage < TotalPages)
+                {
+                    if (string.IsNullOrEmpty(_searchFilter))
+                        _nextPageCache = _repository.GetPage(CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
+                    else
+                        _nextPageCache = _repository.Search(_searchFilter, CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
+                }
+                else { _nextPageCache = null; }
+
+                FilteredEntriesCount = PagedEntries.Count;
+                OnPropertyChanged(nameof(PageInfo));
+                OnPropertyChanged(nameof(TotalCount));
+                OnPropertyChanged(nameof(TotalPages));
+                OnPropertyChanged(nameof(CanGoPrevious));
+                OnPropertyChanged(nameof(CanGoNext));
+                _pageLoaded = true;
+            }
+            finally
+            {
+                _suppressPersistence = false;
+                _isLoadingPage = false;
+            }
         }
 
         public void EnsurePageLoaded()

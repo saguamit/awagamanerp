@@ -11,7 +11,10 @@ namespace Awagaman_ERP.Data
         public CBSAccountRepository()
         {
             AppDatabase.EnsureInitialized();
-            EnsureDefaults();
+            if (!BackendSettings.UseRemoteApi)
+            {
+                EnsureDefaults();
+            }
         }
 
         public List<CBSAccountEntry> GetAll()
@@ -209,12 +212,19 @@ namespace Awagaman_ERP.Data
         {
             try
             {
-                if (FindByName("Cash A/c") == null) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "Cash A/c", IsActive = true });
-                if (FindByName("Bank A/c") == null) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "Bank A/c", IsActive = true });
-                if (FindByName("LHS") == null) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "LHS", IsActive = true });
-                if (FindByName("BFRS") == null) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "BFRS", IsActive = true });
+                var accounts = RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts");
+                if (!AccountExists(accounts, "Cash A/c")) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "Cash A/c", IsActive = true });
+                if (!AccountExists(accounts, "Bank A/c")) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "Bank A/c", IsActive = true });
+                if (!AccountExists(accounts, "LHS")) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "LHS", IsActive = true });
+                if (!AccountExists(accounts, "BFRS")) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "BFRS", IsActive = true });
             }
             catch { }
+        }
+
+        private static bool AccountExists(IEnumerable<CBSAccountEntry> accounts, string accountName)
+        {
+            var key = (accountName ?? string.Empty).Trim();
+            return accounts != null && accounts.Any(x => string.Equals((x.AccountName ?? string.Empty).Trim(), key, StringComparison.OrdinalIgnoreCase));
         }
     }
 }

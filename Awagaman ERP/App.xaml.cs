@@ -19,15 +19,20 @@ namespace Awagaman_ERP
 
         protected override void OnStartup(StartupEventArgs e)
         {
+            AppLogger.LogMessage("Startup", "OnStartup begin");
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             base.OnStartup(e);
+            AppLogger.LogMessage("Startup", "Base OnStartup complete");
             TryRegisterSyncfusionLicense();
+            AppLogger.LogMessage("Startup", "Syncfusion license step complete");
             // Remote/shared mode should not spawn a local API process during desktop startup.
             // The API can be hosted separately on the server machine.
             if (!BackendSettings.UseRemoteApi)
             {
+                AppLogger.LogMessage("Startup", "Starting local API server");
                 TryStartLocalApiServer();
             }
+            AppLogger.LogMessage("Startup", "Checking updates");
             _ = CheckForUpdatesAsync(showUpToDateMessage: false);
         }
 

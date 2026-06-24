@@ -208,6 +208,9 @@ public sealed class PostgresSchemaInitializer
             await conn.ExecuteAsync(sql);
         }
 
+        await conn.ExecuteAsync("ALTER TABLE challans ADD COLUMN IF NOT EXISTS imported_balance NUMERIC(18,2) NOT NULL DEFAULT 0;");
+        await conn.ExecuteAsync("ALTER TABLE challans ADD COLUMN IF NOT EXISTS imported_due NUMERIC(18,2) NOT NULL DEFAULT 0;");
+
         await conn.ExecuteAsync("CREATE INDEX IF NOT EXISTS ix_parties_party_name ON parties(party_name);");
         await conn.ExecuteAsync("CREATE INDEX IF NOT EXISTS ix_challans_challan_number ON challans(challan_number);");
         await conn.ExecuteAsync("CREATE INDEX IF NOT EXISTS ix_lr_entries_lrno ON lr_entries(lrno);");

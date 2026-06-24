@@ -105,6 +105,9 @@ public sealed class AwagamanRepository
             imported_balance AS ImportedBalance, imported_due AS ImportedDue
             FROM challans ORDER BY sr, id;");
 
+    public Task<int> GetMaxChallanSrAsync() =>
+        ExecuteScalarIntAsync("SELECT COALESCE(MAX(sr), 0) FROM challans;", new { });
+
     public Task<ChallanEntry?> GetChallanAsync(int id) =>
         QuerySingleOrDefaultAsync<ChallanEntry>(@"SELECT
             id, sr, challan_number AS ChallanNumber, date, lr_number AS LRNumber, broker_name AS BrokerName,

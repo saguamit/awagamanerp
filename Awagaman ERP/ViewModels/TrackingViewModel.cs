@@ -38,35 +38,56 @@ namespace Awagaman_ERP.ViewModels
         public TrackingViewModel(ITrackingRepository repository = null)
         {
             _repository = repository ?? new TrackingRepository();
-            LoadData();
+            try
+            {
+                LoadData();
+            }
+            catch
+            {
+                Entries.Clear();
+                CurrentReportingTracks.Clear();
+                FilteredEntriesCount = 0;
+            }
         }
 
         public void LoadData()
         {
-            _suppressPersistence = true;
-            Entries.Clear();
-
-            foreach (var entry in _repository.GetAll())
+            try
             {
-                Entries.Add(entry);
-            }
+                _suppressPersistence = true;
+                Entries.Clear();
 
-            // Load latest report and full report tracks for each entry
-            var latestReports = _repository.GetLatestReportForAll();
-            foreach (var entry in Entries)
+                foreach (var entry in _repository.GetAll())
+                {
+                    Entries.Add(entry);
+                }
+
+                // Load latest report and full report tracks for each entry
+                var latestReports = _repository.GetLatestReportForAll();
+                foreach (var entry in Entries)
+                {
+                    if (latestReports.TryGetValue(entry.Id, out var report))
+                    {
+                        entry.LatestReport = report;
+                    }
+                    foreach (var track in _repository.GetReportingTracks(entry.Id))
+                    {
+                        entry.ReportTracks.Add(track);
+                    }
+                }
+
+                FilteredEntriesCount = Entries.Count;
+            }
+            catch
             {
-                if (latestReports.TryGetValue(entry.Id, out var report))
-                {
-                    entry.LatestReport = report;
-                }
-                foreach (var track in _repository.GetReportingTracks(entry.Id))
-                {
-                    entry.ReportTracks.Add(track);
-                }
+                Entries.Clear();
+                CurrentReportingTracks.Clear();
+                FilteredEntriesCount = 0;
             }
-
-            _suppressPersistence = false;
-            FilteredEntriesCount = Entries.Count;
+            finally
+            {
+                _suppressPersistence = false;
+            }
         }
 
         public void LoadReportingTracks()

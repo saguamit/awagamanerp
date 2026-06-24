@@ -24,6 +24,7 @@ namespace Awagaman_ERP.ViewModels
         private List<BillEntry> _prevPageCache;
         private int _filteredEntriesCount;
         private decimal _filteredTotalDue;
+        private bool _isLoadingPage;
 
         public bool IsCurrentSortAscending => string.IsNullOrEmpty(_sortColumn) || _sortAscending;
         public string GetSortColumn() => _sortColumn;
@@ -70,6 +71,12 @@ namespace Awagaman_ERP.ViewModels
 
         public void LoadPage()
         {
+            if (_isLoadingPage)
+            {
+                return;
+            }
+
+            _isLoadingPage = true;
             try
             {
                 PagedEntries.Clear();
@@ -107,6 +114,10 @@ namespace Awagaman_ERP.ViewModels
             catch (Exception ex)
             {
                 System.Windows.MessageBox.Show("Bill ledger error: " + ex.Message, "Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            }
+            finally
+            {
+                _isLoadingPage = false;
             }
         }
 
