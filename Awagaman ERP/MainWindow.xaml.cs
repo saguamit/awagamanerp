@@ -188,8 +188,6 @@ namespace Awagaman_ERP
                             UpdateColumnVisibility();
                             RestoreSortIndicator();
                             RefreshFilteredSummary();
-                            RefreshCBSAccounts();
-                            RefreshCBSGrid();
                             RefreshDashboard();
                         }
                         catch (Exception ex)
