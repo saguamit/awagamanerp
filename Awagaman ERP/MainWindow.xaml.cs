@@ -72,6 +72,7 @@ namespace Awagaman_ERP
         private const string CbsSearchPlaceholder = "Search CBS...";
         private bool _cbsGridResizeHooksAttached;
         private readonly HashSet<DataGridColumn> _cbsWidthHookedColumns = new HashSet<DataGridColumn>();
+        private bool _cbsLedgerLoadInProgress;
         private sealed class ChallanEditAction
         {
             public int EntryId;
@@ -1775,7 +1776,7 @@ namespace Awagaman_ERP
             catch { }
         }
 
-        private void OpenCBSLedger_Click(object sender, RoutedEventArgs e)
+        private async void OpenCBSLedger_Click(object sender, RoutedEventArgs e)
         {
             DashboardView.Visibility = Visibility.Collapsed;
             DeliveryChallanView.Visibility = Visibility.Collapsed;
@@ -1796,8 +1797,67 @@ namespace Awagaman_ERP
             TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle");
 
             if (PageTitle != null) PageTitle.Text = "Cash Bank Statement";
-            RefreshCBSAccounts();
-            RefreshCBSGrid();
+            await LoadCBSLedgerAsync();
+        }
+
+        private async Task LoadCBSLedgerAsync()
+        {
+            if (_cbsLedgerLoadInProgress) return;
+            _cbsLedgerLoadInProgress = true;
+            try
+            {
+                var snapshot = await Task.Run(() =>
+                {
+                    SyncSystemCBSFromChallan();
+
+                    var accounts = _cbsAccountRepo.GetAll();
+                    var names = accounts
+                        .Where(a => a.IsActive)
+                        .Select(a => (a.AccountName ?? string.Empty).Trim())
+                        .Where(a => a.Length > 0)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(a => a)
+                        .ToList();
+
+                    var entries = BuildCBSAccountViewRows(_cbsRepo.GetAll());
+                    return Tuple.Create(accounts, names, entries);
+                });
+
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    _allCbsAccounts = snapshot.Item1;
+
+                    for (int i = CBSAccountNames.Count - 1; i >= 0; i--)
+                    {
+                        var existing = CBSAccountNames[i];
+                        if (!snapshot.Item2.Any(n => string.Equals(n, existing, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            CBSAccountNames.RemoveAt(i);
+                        }
+                    }
+
+                    foreach (var name in snapshot.Item2)
+                    {
+                        if (!CBSAccountNames.Any(x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            CBSAccountNames.Add(name);
+                        }
+                    }
+
+                    _allCbsEntries = snapshot.Item3;
+                    if (CBSGrid != null) CBSGrid.ItemsSource = _allCbsEntries;
+                    ReapplyCBSViewState();
+                    RefreshDataGridItemsSafely(CBSGrid);
+                    UpdateCBSFooter();
+                });
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _cbsLedgerLoadInProgress = false;
+            }
         }
 
         private void RefreshCBSAccounts()
@@ -1857,8 +1917,8 @@ namespace Awagaman_ERP
                 }
 
                 // Ensure required system accounts exist.
-                AddCBSAccount("LHS");
-                AddCBSAccount("BFRS");
+                AddCBSAccount("LHS", refreshUi: false, trackUndo: false);
+                AddCBSAccount("BFRS", refreshUi: false, trackUndo: false);
 
                 // Rebuild LHS from current challan data so existing saved data is also applied.
                 var allCbs = _cbsRepo.GetAll();
@@ -2112,7 +2172,7 @@ namespace Awagaman_ERP
             return result;
         }
 
-        private void AddCBSAccount(string name)
+        private void AddCBSAccount(string name, bool refreshUi = true, bool trackUndo = true)
         {
             try
             {
@@ -2123,17 +2183,20 @@ namespace Awagaman_ERP
                     {
                         existing.IsActive = true;
                         _cbsAccountRepo.Upsert(existing);
-                        _cbsAccountUndoStack.Push(new CbsAccountUndoAction
+                        if (trackUndo)
                         {
-                            Account = new CBSAccountEntry
+                            _cbsAccountUndoStack.Push(new CbsAccountUndoAction
                             {
-                                Id = existing.Id,
-                                Sr = existing.Sr,
-                                AccountName = existing.AccountName,
-                                IsActive = true
-                            },
-                            WasReactivated = true
-                        });
+                                Account = new CBSAccountEntry
+                                {
+                                    Id = existing.Id,
+                                    Sr = existing.Sr,
+                                    AccountName = existing.AccountName,
+                                    IsActive = true
+                                },
+                                WasReactivated = true
+                            });
+                        }
                     }
                 }
                 else
@@ -2145,14 +2208,20 @@ namespace Awagaman_ERP
                         IsActive = true
                     };
                     _cbsAccountRepo.Upsert(created);
-                    _cbsAccountUndoStack.Push(new CbsAccountUndoAction
+                    if (trackUndo)
                     {
-                        Account = created,
-                        WasCreated = true
-                    });
+                        _cbsAccountUndoStack.Push(new CbsAccountUndoAction
+                        {
+                            Account = created,
+                            WasCreated = true
+                        });
+                    }
                 }
 
-                RefreshCBSAccounts();
+                if (refreshUi)
+                {
+                    RefreshCBSAccounts();
+                }
             }
             catch (Exception ex)
             {
