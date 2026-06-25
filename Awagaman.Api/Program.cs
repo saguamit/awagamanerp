@@ -2,6 +2,8 @@ using Awagaman.Api.DataAccess;
 using Awagaman.Api.Models;
 using Dapper;
 using Microsoft.AspNetCore.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 DefaultTypeMap.MatchNamesWithUnderscores = true;
 
@@ -9,15 +11,15 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.WebHost.UseUrls(builder.Configuration["ApiUrls"] ?? "http://0.0.0.0:5088");
 
+var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+ConfigureJsonOptions(jsonOptions);
+
 builder.Services.AddSingleton<IPgConnectionFactory, PgConnectionFactory>();
 builder.Services.AddSingleton<PostgresSchemaInitializer>();
 builder.Services.AddSingleton<AwagamanRepository>();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
-    options.SerializerOptions.PropertyNamingPolicy = null;
-    options.SerializerOptions.DictionaryKeyPolicy = null;
-    options.SerializerOptions.Converters.Add(new LegacyDateTimeJsonConverter());
-    options.SerializerOptions.Converters.Add(new LegacyNullableDateTimeJsonConverter());
+    ConfigureJsonOptions(options.SerializerOptions);
 });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -143,10 +145,16 @@ challans.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
         return Results.Problem(ex.ToString(), statusCode: 500);
     }
 });
-challans.MapPost("/", async (ChallanEntry entry, AwagamanRepository repo) =>
+challans.MapPost("/", async (JsonElement body, AwagamanRepository repo) =>
 {
     try
     {
+        var entry = DeserializeBody<ChallanEntry>(body, jsonOptions);
+        if (entry == null)
+        {
+            return Results.BadRequest("Invalid challan payload.");
+        }
+
         var id = await repo.UpsertChallanAsync(entry);
         return Results.Created($"/api/challans/{id}", new { id });
     }
@@ -155,10 +163,16 @@ challans.MapPost("/", async (ChallanEntry entry, AwagamanRepository repo) =>
         return Results.Problem(ex.ToString(), statusCode: 500);
     }
 });
-challans.MapPut("/{id:int}", async (int id, ChallanEntry entry, AwagamanRepository repo) =>
+challans.MapPut("/{id:int}", async (int id, JsonElement body, AwagamanRepository repo) =>
 {
     try
     {
+        var entry = DeserializeBody<ChallanEntry>(body, jsonOptions);
+        if (entry == null)
+        {
+            return Results.BadRequest("Invalid challan payload.");
+        }
+
         entry.Id = id;
         await repo.UpsertChallanAsync(entry);
         return Results.NoContent();
@@ -351,3 +365,22 @@ tracking.MapDelete("/{id:int}", async (int id, AwagamanRepository repo) =>
 });
 
 app.Run();
+
+void ConfigureJsonOptions(JsonSerializerOptions options)
+{
+    options.PropertyNamingPolicy = null;
+    options.DictionaryKeyPolicy = null;
+    options.Converters.Add(new LegacyDateTimeJsonConverter());
+    options.Converters.Add(new LegacyNullableDateTimeJsonConverter());
+}
+
+static T? DeserializeBody<T>(JsonElement body, JsonSerializerOptions options)
+{
+    var raw = body.GetRawText();
+    if (string.IsNullOrWhiteSpace(raw))
+    {
+        return default;
+    }
+
+    return JsonSerializer.Deserialize<T>(raw, options);
+}
