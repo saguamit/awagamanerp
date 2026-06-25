@@ -8592,10 +8592,20 @@ namespace Awagaman_ERP
                         MessageBox.Show("Unable to save challan entry: " + ex.Message, "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
                     }
 
-                    VM.RefreshAfterDelete();
-                    SyncSingleChallanBillingFromLR(entry);
-                    UpdatePageUI();
-                    RefreshDashboard();
+                    DeferUi(() =>
+                    {
+                        try
+                        {
+                            VM.RefreshAfterDelete();
+                            SyncSingleChallanBillingFromLR(entry);
+                            UpdatePageUI();
+                            RefreshDashboard();
+                        }
+                        catch (Exception refreshEx)
+                        {
+                            LogException("OpenChallanForm Refresh", refreshEx);
+                        }
+                    }, System.Windows.Threading.DispatcherPriority.Background);
 
                     try
                     {
