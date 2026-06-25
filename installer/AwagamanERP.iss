@@ -1,9 +1,8 @@
 ﻿#define MyAppName "Awagaman ERP"
-#define MyAppVersion "1.0.35"
+#define MyAppVersion "1.0.36"
 #define MyAppPublisher "Awagaman ERP"
 #define MyAppExeName "Awagaman ERP.exe"
-#define MySourceDir "c:\amit sagu\awagaman project\ATL ERP\Awagaman ERP\bin\Release"
-#define MyApiSourceDir "c:\amit sagu\awagaman project\ATL ERP\Awagaman.Api\bin\Release\net8.0\publish"
+#define MySourceDir "c:\amit sagu\awagaman project\ATL ERP_pre_multiuser\Awagaman ERP\bin\Release"
 
 [Setup]
 AppId={{CC0D8D4A-A778-4CD8-9F47-D4C6AA12E33A}
@@ -13,13 +12,13 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\Awagaman ERP
 DefaultGroupName=Awagaman ERP
 DisableProgramGroupPage=yes
-OutputDir=c:\amit sagu\awagaman project\ATL ERP\dist
-OutputBaseFilename=AwagamanERP-Setup
+OutputDir=c:\amit sagu\awagaman project\ATL ERP_pre_multiuser\dist
+OutputBaseFilename=AwagamanERP-Setup-v1.0.36
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
-SetupIconFile=c:\amit sagu\awagaman project\ATL ERP\Awagaman ERP\logo.ico
+SetupIconFile=c:\amit sagu\awagaman project\ATL ERP_pre_multiuser\Awagaman ERP\logo.ico
 UninstallDisplayIcon={app}\Awagaman ERP.exe
 
 [Languages]
@@ -29,15 +28,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "c:\amit sagu\awagaman project\ATL ERP\installer\prereqs\VC_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "c:\amit sagu\awagaman project\ATL ERP\installer\prereqs\VC_redist.x86.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+Source: "c:\amit sagu\awagaman project\ATL ERP_pre_multiuser\installer\prereqs\VC_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+Source: "c:\amit sagu\awagaman project\ATL ERP_pre_multiuser\installer\prereqs\VC_redist.x86.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 Source: "{#MySourceDir}\Awagaman ERP.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\Awagaman ERP.exe.config"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\*.png"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\lr_format_layout.default.txt"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#MyApiSourceDir}\*"; DestDir: "{app}\ApiServer"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MySourceDir}\de\*"; DestDir: "{app}\de"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MySourceDir}\x64\*"; DestDir: "{app}\x64"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MySourceDir}\x86\*"; DestDir: "{app}\x86"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -82,20 +80,20 @@ begin
     wpSelectDir,
     'Connection Mode',
     'Choose how this installation should connect to data',
-    'Select server mode for this PC, or client mode to point to another PC.',
+    'Use the VPS cloud server unless you are testing another API server.',
     False,
     False);
-  InstallModePage.Add('This PC is the server and should start the API locally');
-  InstallModePage.Add('This PC is a client and should connect to another server');
+  InstallModePage.Add('Use Awagaman VPS cloud server');
+  InstallModePage.Add('Use custom API URL');
   InstallModePage.SelectedValueIndex := 0;
 
   ServerUrlPage := CreateInputQueryPage(
     InstallModePage.ID,
     'Server Address',
-    'Enter the server URL for client installs',
-    'Leave the default when this PC is the server.');
+    'Enter the server URL',
+    'Leave the default for the Awagaman VPS cloud server.');
   ServerUrlPage.Add('API Base URL:', False);
-  ServerUrlPage.Values[0] := 'http://localhost:5088';
+  ServerUrlPage.Values[0] := 'http://187.127.153.124:5088';
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
@@ -103,7 +101,7 @@ begin
   if CurPageID = ServerUrlPage.ID then
   begin
     if InstallModePage.SelectedValueIndex = 0 then
-      ServerUrlPage.Values[0] := 'http://localhost:5088';
+      ServerUrlPage.Values[0] := 'http://187.127.153.124:5088';
   end;
 end;
 
@@ -115,9 +113,9 @@ var
   ServerMode: Boolean;
   LocalApiPath: string;
 begin
-  ServerMode := InstallModePage.SelectedValueIndex = 0;
-  if ServerMode then
-    ApiUrl := 'http://localhost:5088'
+  ServerMode := False;
+  if InstallModePage.SelectedValueIndex = 0 then
+    ApiUrl := 'http://187.127.153.124:5088'
   else
     ApiUrl := NormalizeApiUrl(ServerUrlPage.Values[0]);
 
