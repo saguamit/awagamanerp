@@ -16,7 +16,7 @@ namespace Awagaman_ERP.Data
         {
             var baseUrl = BackendSettings.ApiBaseUrl;
             var client = new HttpClient { BaseAddress = new Uri(baseUrl.EndsWith("/") ? baseUrl : baseUrl + "/") };
-            client.Timeout = TimeSpan.FromSeconds(30);
+            client.Timeout = TimeSpan.FromSeconds(10);
             return client;
         }
 

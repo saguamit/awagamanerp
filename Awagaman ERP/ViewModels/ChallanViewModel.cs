@@ -620,6 +620,64 @@ namespace Awagaman_ERP.ViewModels
             LoadPage();
         }
 
+        public void ShowSavedEntry(ChallanEntry entry)
+        {
+            if (entry == null)
+            {
+                return;
+            }
+
+            if (!PagedEntries.Any(x => x.Id == entry.Id && entry.Id > 0))
+            {
+                if (_sortAscending)
+                {
+                    PagedEntries.Add(entry);
+                }
+                else
+                {
+                    PagedEntries.Insert(0, entry);
+                }
+            }
+
+            _totalCount = Math.Max(_totalCount + 1, PagedEntries.Count);
+            FilteredEntriesCount = PagedEntries.Count;
+            _countDirty = true;
+            _nextPageCache = null;
+            _prevPageCache = null;
+            OnPropertyChanged(nameof(TotalCount));
+            OnPropertyChanged(nameof(PageInfo));
+            OnPropertyChanged(nameof(TotalPages));
+            OnPropertyChanged(nameof(CanGoPrevious));
+            OnPropertyChanged(nameof(CanGoNext));
+            OnPropertyChanged(nameof(CanGoFirst));
+            OnPropertyChanged(nameof(CanGoLast));
+        }
+
+        public void AcceptSavedEntry(ChallanEntry entry)
+        {
+            if (entry == null)
+            {
+                return;
+            }
+
+            _suppressPersistence = true;
+            try
+            {
+                if (!Entries.Any(x => (entry.Id > 0 && x.Id == entry.Id) ||
+                                      (!string.IsNullOrWhiteSpace(entry.ChallanNumber) &&
+                                       string.Equals(x.ChallanNumber, entry.ChallanNumber, StringComparison.OrdinalIgnoreCase))))
+                {
+                    Entries.Add(entry);
+                }
+            }
+            finally
+            {
+                _suppressPersistence = false;
+            }
+
+            ShowSavedEntry(entry);
+        }
+
         public void SetSort(string column, bool ascending)
         {
             _sortColumn = column ?? "";

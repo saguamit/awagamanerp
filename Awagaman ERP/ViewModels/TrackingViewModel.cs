@@ -120,13 +120,13 @@ namespace Awagaman_ERP.ViewModels
             _selectedEntry.LatestReport = $"{track.ReportDateTime:dd-MMM HH:mm} - {track.Remarks}";
         }
 
-        public void AddEntry(TrackingEntry entry)
+        public void AddEntry(TrackingEntry entry, bool persist = true)
         {
             if (entry == null) return;
             entry.Sr = Entries.Count + 1;
             Entries.Add(entry);
 
-            if (!_suppressPersistence)
+            if (persist && !_suppressPersistence)
             {
                 _repository.Upsert(entry);
             }

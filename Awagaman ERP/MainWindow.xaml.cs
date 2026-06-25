@@ -241,11 +241,6 @@ namespace Awagaman_ERP
                 return;
             }
 
-            if (BackendSettings.UseRemoteApi && !IsRemoteApiHealthy())
-            {
-                return;
-            }
-
             // Skip sync while another owned window is active so we do not disturb in-progress edits.
             try
             {
@@ -267,12 +262,6 @@ namespace Awagaman_ERP
 
             try
             {
-                VM?.RefreshAfterDelete();
-                LRVM?.RefreshAfterDelete();
-                BillVM?.RefreshAfterDelete();
-                TrackingVM?.LoadData();
-                RefreshCBSAccounts();
-                RefreshCBSGrid();
                 RefreshFilteredSummary();
                 LRRefreshFilteredSummary();
                 BillUpdatePageUI();
@@ -8583,44 +8572,68 @@ namespace Awagaman_ERP
                     entry.Sr = VM.GetNextSr();
                     entry.RecalculateBalance();
 
-                    try
-                    {
-                        VM.Entries.Add(entry);
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show("Unable to save challan entry: " + ex.Message, "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                    }
-
-                    DeferUi(() =>
+                    Task.Run(() =>
                     {
                         try
                         {
-                            VM.RefreshAfterDelete();
-                            SyncSingleChallanBillingFromLR(entry);
-                            UpdatePageUI();
-                            RefreshDashboard();
+                            VM.GetRepository().Upsert(entry);
                         }
-                        catch (Exception refreshEx)
+                        catch (Exception saveEx)
                         {
-                            LogException("OpenChallanForm Refresh", refreshEx);
+                            Dispatcher.BeginInvoke(new Action(() =>
+                            {
+                                MessageBox.Show("Unable to save challan entry: " + saveEx.Message, "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                            }));
+                            return;
                         }
-                    }, System.Windows.Threading.DispatcherPriority.Background);
 
-                    try
-                    {
-                        var trackingEntry = new TrackingEntry
+                        Dispatcher.BeginInvoke(new Action(() =>
                         {
-                            ChallanNo = entry.ChallanNumber,
-                            ChallanDate = entry.Date,
-                            From = entry.From,
-                            To = entry.To,
-                            VehicleNo = entry.VehicleNumber,
-                            DriverMobile = entry.DriverMobile
-                        };
-                        TrackingVM.AddEntry(trackingEntry);
-                    }
-                    catch { }
+                            try
+                            {
+                                VM.AcceptSavedEntry(entry);
+                                UpdatePageUI();
+                                RefreshDashboard();
+                            }
+                            catch (Exception refreshEx)
+                            {
+                                LogException("OpenChallanForm LocalRefresh", refreshEx);
+                            }
+                        }));
+
+                        if (!string.IsNullOrWhiteSpace(entry.LRNumber))
+                        {
+                            try { SyncSingleChallanBillingFromLR(entry); }
+                            catch (Exception syncEx) { LogException("OpenChallanForm BillingSync", syncEx); }
+                        }
+
+                        try
+                        {
+                            var trackingEntry = new TrackingEntry
+                            {
+                                ChallanNo = entry.ChallanNumber,
+                                ChallanDate = entry.Date,
+                                From = entry.From,
+                                To = entry.To,
+                                VehicleNo = entry.VehicleNumber,
+                                DriverMobile = entry.DriverMobile
+                            };
+
+                            if (BackendSettings.UseRemoteApi)
+                            {
+                                _trackingRepo.Upsert(trackingEntry);
+                                Dispatcher.BeginInvoke(new Action(() => TrackingVM.AddEntry(trackingEntry, persist: false)));
+                            }
+                            else
+                            {
+                                Dispatcher.BeginInvoke(new Action(() => TrackingVM.AddEntry(trackingEntry)));
+                            }
+                        }
+                        catch (Exception trackingEx)
+                        {
+                            LogException("OpenChallanForm TrackingSave", trackingEx);
+                        }
+                    });
                 }
                 catch (Exception ex)
                 {
