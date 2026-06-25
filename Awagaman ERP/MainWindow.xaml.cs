@@ -7978,6 +7978,53 @@ namespace Awagaman_ERP
             }
         }
 
+        private void SyncSingleChallanBillingFromLR(ChallanEntry challan)
+        {
+            if (challan == null) return;
+
+            try
+            {
+                var lrRows = _lrRepo.GetAll();
+                var lrByNo = lrRows
+                    .Where(x => !string.IsNullOrWhiteSpace(x.LRNo))
+                    .ToDictionary(x => (x.LRNo ?? string.Empty).Trim(),
+                        x => x.TotalFreight + x.Hamali + x.Detention + x.Others,
+                        StringComparer.OrdinalIgnoreCase);
+
+                var lrSet = new HashSet<string>(SplitLrNumbers(challan.LRNumber), StringComparer.OrdinalIgnoreCase);
+                if (!string.IsNullOrWhiteSpace(challan.ChallanNumber))
+                {
+                    foreach (var lr in lrRows)
+                    {
+                        if (string.Equals((lr.CHNo ?? string.Empty).Trim(), challan.ChallanNumber.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrWhiteSpace(lr.LRNo))
+                        {
+                            lrSet.Add(lr.LRNo.Trim());
+                        }
+                    }
+                }
+
+                decimal billAmount = 0m;
+                foreach (var lrNo in lrSet)
+                {
+                    if (lrByNo.TryGetValue(lrNo, out var total)) billAmount += total;
+                }
+
+                var margin = billAmount != 0m ? (billAmount - challan.LorryHire + challan.Detention + challan.Hamali) : 0m;
+                challan.BillAmount = billAmount;
+                challan.Margin = margin;
+                _challanRepo.Upsert(challan);
+
+                var vmEntry = VM?.PagedEntries?.FirstOrDefault(x => x.Id == challan.Id);
+                if (vmEntry != null)
+                {
+                    vmEntry.BillAmount = billAmount;
+                    vmEntry.Margin = margin;
+                }
+            }
+            catch { }
+        }
+
         private static IEnumerable<string> SplitLrNumbers(string raw)
         {
             return (raw ?? string.Empty)
@@ -8546,7 +8593,7 @@ namespace Awagaman_ERP
                     }
 
                     VM.RefreshAfterDelete();
-                    SyncAllChallanBillingFromLR();
+                    SyncSingleChallanBillingFromLR(entry);
                     UpdatePageUI();
                     RefreshDashboard();
 
@@ -8789,7 +8836,7 @@ namespace Awagaman_ERP
 
                     VM.RefreshAfterDelete();
                     SyncLinkedLREntriesFromChallan(updated);
-                    SyncAllChallanBillingFromLR();
+                    SyncSingleChallanBillingFromLR(updated);
                     UpdatePageUI();
                     RefreshDashboard();
                 }
