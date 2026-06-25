@@ -148,6 +148,11 @@ namespace Awagaman_ERP.Models
                         {
                             AdvanceCash = _advanceAmount - _advanceNeft;
                         }
+                        else
+                        {
+                            _advanceAmount = _advanceNeft + _advanceCash;
+                            OnPropertyChanged(nameof(AdvanceAmount));
+                        }
                         _isCalculatingAdvance = false;
                         RecalculateBalance();
                     }
@@ -171,6 +176,11 @@ namespace Awagaman_ERP.Models
                         if (_advanceAmount > 0)
                         {
                             AdvanceNEFT = _advanceAmount - _advanceCash;
+                        }
+                        else
+                        {
+                            _advanceAmount = _advanceNeft + _advanceCash;
+                            OnPropertyChanged(nameof(AdvanceAmount));
                         }
                         _isCalculatingAdvance = false;
                         RecalculateBalance();

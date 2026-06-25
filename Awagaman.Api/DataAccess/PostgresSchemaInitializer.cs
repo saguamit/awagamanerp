@@ -222,5 +222,15 @@ public sealed class PostgresSchemaInitializer
         await conn.ExecuteAsync("CREATE INDEX IF NOT EXISTS ix_lr_comments_lr_entry_id ON lr_comments(lr_entry_id);");
         await conn.ExecuteAsync("CREATE INDEX IF NOT EXISTS ix_bill_comments_bill_id ON bill_comments(bill_id);");
         await conn.ExecuteAsync("CREATE INDEX IF NOT EXISTS ix_reporting_tracks_tracking_entry_id ON reporting_tracks(tracking_entry_id);");
+
+        await conn.ExecuteAsync(@"
+            INSERT INTO cbs_accounts (sr, account_name, is_active)
+            VALUES
+                (1, 'Cash A/c', TRUE),
+                (2, 'Bank A/c', TRUE),
+                (3, 'LHS', TRUE),
+                (4, 'BFRS', TRUE)
+            ON CONFLICT (account_name) DO UPDATE
+            SET is_active = TRUE;");
     }
 }

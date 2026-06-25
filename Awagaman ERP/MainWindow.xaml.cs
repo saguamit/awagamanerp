@@ -1840,13 +1840,77 @@ namespace Awagaman_ERP
                     UpdateCBSFooter();
                 });
             }
-            catch
+            catch (Exception ex)
             {
+                LogException(nameof(LoadCBSLedgerAsync), ex);
             }
             finally
             {
                 _cbsLedgerLoadInProgress = false;
             }
+        }
+
+        private void ApplyCBSSnapshot(List<CBSAccountEntry> accounts, List<CashBankStatementEntry> entries)
+        {
+            _allCbsAccounts = accounts ?? new List<CBSAccountEntry>();
+            var names = _allCbsAccounts
+                .Where(a => a.IsActive)
+                .Select(a => (a.AccountName ?? string.Empty).Trim())
+                .Where(a => a.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(a => a)
+                .ToList();
+
+            for (int i = CBSAccountNames.Count - 1; i >= 0; i--)
+            {
+                var existing = CBSAccountNames[i];
+                if (!names.Any(n => string.Equals(n, existing, StringComparison.OrdinalIgnoreCase)))
+                {
+                    CBSAccountNames.RemoveAt(i);
+                }
+            }
+
+            foreach (var name in names)
+            {
+                if (!CBSAccountNames.Any(x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    CBSAccountNames.Add(name);
+                }
+            }
+
+            if (entries != null)
+            {
+                _allCbsEntries = entries;
+                if (CBSGrid != null) CBSGrid.ItemsSource = _allCbsEntries;
+                ReapplyCBSViewState();
+                RefreshDataGridItemsSafely(CBSGrid);
+                UpdateCBSFooter();
+            }
+        }
+
+        private void QueueCBSRefresh(bool rebuildSystemRows = false)
+        {
+            Task.Run(() =>
+            {
+                try
+                {
+                    if (rebuildSystemRows)
+                    {
+                        SyncSystemCBSFromChallan();
+                    }
+
+                    var accounts = _cbsAccountRepo.GetAll();
+                    var entries = CBSLedgerView != null && CBSLedgerView.Dispatcher.Invoke(() => CBSLedgerView.Visibility == Visibility.Visible)
+                        ? BuildCBSAccountViewRows(_cbsRepo.GetAll())
+                        : null;
+
+                    Dispatcher.BeginInvoke(new Action(() => ApplyCBSSnapshot(accounts, entries)));
+                }
+                catch (Exception ex)
+                {
+                    LogException(nameof(QueueCBSRefresh), ex);
+                }
+            });
         }
 
         private void RefreshCBSAccounts()
@@ -1906,8 +1970,8 @@ namespace Awagaman_ERP
                 }
 
                 // Ensure required system accounts exist.
-                AddCBSAccount("LHS", refreshUi: false, trackUndo: false);
-                AddCBSAccount("BFRS", refreshUi: false, trackUndo: false);
+                AddCBSAccount("LHS", refreshUi: false, trackUndo: false, showError: false);
+                AddCBSAccount("BFRS", refreshUi: false, trackUndo: false, showError: false);
 
                 // Rebuild LHS from current challan data so existing saved data is also applied.
                 var allCbs = _cbsRepo.GetAll();
@@ -1921,6 +1985,10 @@ namespace Awagaman_ERP
                 {
                     var advNeft = ch.AdvanceNEFT;
                     var advCash = ch.AdvanceCash;
+                    if (advNeft == 0m && advCash == 0m && ch.AdvanceAmount != 0m)
+                    {
+                        advCash = ch.AdvanceAmount;
+                    }
                     var balNeft = ch.BalancePaidNEFT;
                     var balCash = ch.BalancePaidCash;
                     if (advNeft == 0m && advCash == 0m && balNeft == 0m && balCash == 0m) continue;
@@ -1991,7 +2059,14 @@ namespace Awagaman_ERP
                     _cbsRepo.Delete(row);
                 }
 
-                if (ch.AdvanceNEFT != 0m || ch.AdvanceCash != 0m)
+                var advanceNeft = ch.AdvanceNEFT;
+                var advanceCash = ch.AdvanceCash;
+                if (advanceNeft == 0m && advanceCash == 0m && ch.AdvanceAmount != 0m)
+                {
+                    advanceCash = ch.AdvanceAmount;
+                }
+
+                if (advanceNeft != 0m || advanceCash != 0m)
                 {
                     var advDate = ch.AdvanceDate ?? ch.Date;
                     _cbsRepo.Upsert(new CashBankStatementEntry
@@ -2003,9 +2078,9 @@ namespace Awagaman_ERP
                         Particulars = advanceParticulars,
                         Remarks = "Auto from Challan",
                         BankDr = 0m,
-                        BankCr = ch.AdvanceNEFT,
+                        BankCr = advanceNeft,
                         CashDr = 0m,
-                        CashCr = ch.AdvanceCash
+                        CashCr = advanceCash
                     });
                 }
 
@@ -2227,7 +2302,7 @@ namespace Awagaman_ERP
             return result;
         }
 
-        private void AddCBSAccount(string name, bool refreshUi = true, bool trackUndo = true)
+        private void AddCBSAccount(string name, bool refreshUi = true, bool trackUndo = true, bool showError = true)
         {
             try
             {
@@ -2280,7 +2355,14 @@ namespace Awagaman_ERP
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Unable to add account: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                if (showError)
+                {
+                    MessageBox.Show("Unable to add account: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                else
+                {
+                    LogException(nameof(AddCBSAccount), ex);
+                }
             }
         }
 
@@ -7541,7 +7623,7 @@ namespace Awagaman_ERP
             }
             finally { _suppressChallanHistory = false; }
             _challanRedoStack.Push(new ChallanEditAction { EntryId = action.EntryId, Before = current, After = CloneChallanEntry(entry) });
-            RefreshCBSAccounts();
+            QueueCBSRefresh();
             RefreshDataGridItemsSafely(LedgerGrid);
             return true;
         }
@@ -7564,7 +7646,7 @@ namespace Awagaman_ERP
             }
             finally { _suppressChallanHistory = false; }
             _challanUndoStack.Push(new ChallanEditAction { EntryId = action.EntryId, Before = current, After = CloneChallanEntry(entry) });
-            RefreshCBSAccounts();
+            QueueCBSRefresh();
             RefreshDataGridItemsSafely(LedgerGrid);
             return true;
         }
@@ -7769,13 +7851,7 @@ namespace Awagaman_ERP
                 SyncLinkedLREntriesFromChallan(entry);
                 SyncAllChallanBillingFromLR();
                 SyncLhsCBSFromChallan(entry.CloneForPersistence());
-                RefreshCBSAccounts();
-                if (CBSLedgerView != null && CBSLedgerView.Visibility == Visibility.Visible)
-                {
-                    _allCbsEntries = BuildCBSAccountViewRows(_cbsRepo.GetAll());
-                    if (CBSGrid != null) CBSGrid.ItemsSource = _allCbsEntries;
-                    ReapplyCBSViewState();
-                }
+                QueueCBSRefresh();
 
                 if (!_suppressChallanHistory &&
                     beforeSnapshot != null &&
@@ -8692,23 +8768,7 @@ namespace Awagaman_ERP
                         }
 
                         SyncLhsCBSFromChallan(saveEntry);
-                        uiDispatcher.BeginInvoke(new Action(() =>
-                        {
-                            try
-                            {
-                                RefreshCBSAccounts();
-                                if (CBSLedgerView != null && CBSLedgerView.Visibility == Visibility.Visible)
-                                {
-                                    _allCbsEntries = BuildCBSAccountViewRows(_cbsRepo.GetAll());
-                                    if (CBSGrid != null) CBSGrid.ItemsSource = _allCbsEntries;
-                                    ReapplyCBSViewState();
-                                }
-                            }
-                            catch (Exception cbsUiEx)
-                            {
-                                LogException("OpenChallanForm CBSRefresh", cbsUiEx);
-                            }
-                        }));
+                        QueueCBSRefresh();
 
                         try
                         {
@@ -8964,13 +9024,7 @@ namespace Awagaman_ERP
                     SyncLinkedLREntriesFromChallan(updated);
                     SyncSingleChallanBillingFromLR(updated);
                     SyncLhsCBSFromChallan(updated.CloneForPersistence());
-                    RefreshCBSAccounts();
-                    if (CBSLedgerView != null && CBSLedgerView.Visibility == Visibility.Visible)
-                    {
-                        _allCbsEntries = BuildCBSAccountViewRows(_cbsRepo.GetAll());
-                        if (CBSGrid != null) CBSGrid.ItemsSource = _allCbsEntries;
-                        ReapplyCBSViewState();
-                    }
+                    QueueCBSRefresh();
                     UpdatePageUI();
                     RefreshDashboard();
                 }

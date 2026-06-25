@@ -21,8 +21,12 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                EnsureRemoteDefaults();
-                return RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts");
+                var accounts = RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts");
+                if (EnsureRemoteDefaults(accounts))
+                {
+                    accounts = RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts");
+                }
+                return accounts;
             }
             EnsureDefaults();
             var list = new List<CBSAccountEntry>();
@@ -51,8 +55,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                EnsureRemoteDefaults();
-                return RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts")
+                return GetAll()
                     .FindAll(x => x.IsActive)
                     .ConvertAll(x => (x.AccountName ?? string.Empty).Trim())
                     .FindAll(x => x.Length > 0);
@@ -79,7 +82,6 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                EnsureRemoteDefaults();
                 return RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts").Select(x => x.Sr).DefaultIfEmpty(0).Max();
             }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
@@ -96,7 +98,6 @@ namespace Awagaman_ERP.Data
             if (key.Length == 0) return null;
             if (BackendSettings.UseRemoteApi)
             {
-                EnsureRemoteDefaults();
                 return RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts")
                     .Find(x => string.Equals((x.AccountName ?? string.Empty).Trim(), key, StringComparison.OrdinalIgnoreCase));
             }
@@ -208,17 +209,41 @@ namespace Awagaman_ERP.Data
             catch { }
         }
 
-        private void EnsureRemoteDefaults()
+        private bool EnsureRemoteDefaults(List<CBSAccountEntry> accounts = null)
         {
             try
             {
-                var accounts = RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts");
-                if (!AccountExists(accounts, "Cash A/c")) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "Cash A/c", IsActive = true });
-                if (!AccountExists(accounts, "Bank A/c")) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "Bank A/c", IsActive = true });
-                if (!AccountExists(accounts, "LHS")) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "LHS", IsActive = true });
-                if (!AccountExists(accounts, "BFRS")) Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "BFRS", IsActive = true });
+                accounts = accounts ?? RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts");
+                var maxSr = accounts.Select(x => x.Sr).DefaultIfEmpty(0).Max();
+                var changed = false;
+
+                changed |= EnsureRemoteDefaultAccount(accounts, "Cash A/c", ref maxSr);
+                changed |= EnsureRemoteDefaultAccount(accounts, "Bank A/c", ref maxSr);
+                changed |= EnsureRemoteDefaultAccount(accounts, "LHS", ref maxSr);
+                changed |= EnsureRemoteDefaultAccount(accounts, "BFRS", ref maxSr);
+
+                return changed;
             }
-            catch { }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool EnsureRemoteDefaultAccount(List<CBSAccountEntry> accounts, string accountName, ref int maxSr)
+        {
+            if (AccountExists(accounts, accountName)) return false;
+
+            maxSr++;
+            var entry = new CBSAccountEntry
+            {
+                Sr = maxSr,
+                AccountName = accountName,
+                IsActive = true
+            };
+            entry.Id = RemoteApiClient.PostAndReadInt("api/cbs/accounts", entry);
+            accounts.Add(entry);
+            return true;
         }
 
         private static bool AccountExists(IEnumerable<CBSAccountEntry> accounts, string accountName)
