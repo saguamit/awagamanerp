@@ -413,13 +413,30 @@ namespace Awagaman_ERP.Data
 
             if (BackendSettings.UseRemoteApi)
             {
-                if (entry.Id <= 0)
+                try
                 {
-                    entry.Id = RemoteApiClient.PostAndReadInt("api/challans", entry);
+                    if (entry.Id <= 0)
+                    {
+                        entry.Id = RemoteApiClient.PostAndReadInt("api/challans", entry);
+                    }
+                    else
+                    {
+                        RemoteApiClient.Put($"api/challans/{entry.Id}", entry);
+                    }
                 }
-                else
+                catch (Exception)
                 {
-                    RemoteApiClient.Put($"api/challans/{entry.Id}", entry);
+                    if (entry.Id <= 0 && !string.IsNullOrWhiteSpace(entry.ChallanNumber))
+                    {
+                        var existing = FindByChallanNumber(entry.ChallanNumber);
+                        if (existing != null)
+                        {
+                            entry.Id = existing.Id;
+                            return;
+                        }
+                    }
+
+                    throw;
                 }
                 return;
             }

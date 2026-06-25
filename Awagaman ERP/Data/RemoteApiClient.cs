@@ -56,7 +56,14 @@ namespace Awagaman_ERP.Data
                 request.Content = new StringContent(json, Encoding.UTF8, "application/json");
                 using (var response = await Client.SendAsync(request).ConfigureAwait(false))
                 {
-                    response.EnsureSuccessStatusCode();
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        var responseBody = response.Content == null
+                            ? string.Empty
+                            : await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        throw new HttpRequestException(
+                            $"Remote API {method.Method} {route} failed: {(int)response.StatusCode} {response.ReasonPhrase}. {responseBody}");
+                    }
                     return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                 }
             }

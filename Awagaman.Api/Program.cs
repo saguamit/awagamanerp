@@ -16,6 +16,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.PropertyNamingPolicy = null;
     options.SerializerOptions.DictionaryKeyPolicy = null;
+    options.SerializerOptions.Converters.Add(new LegacyDateTimeJsonConverter());
+    options.SerializerOptions.Converters.Add(new LegacyNullableDateTimeJsonConverter());
 });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -67,8 +69,7 @@ parties.MapGet("/search", async (string query, AwagamanRepository repo) => Resul
 parties.MapPost("/", async (PartyEntry party, AwagamanRepository repo) =>
 {
     var id = await repo.UpsertPartyAsync(party);
-    party.Id = id;
-    return Results.Created($"/api/parties/{id}", party);
+    return Results.Created($"/api/parties/{id}", new { id });
 });
 parties.MapPut("/{id:int}", async (int id, PartyEntry party, AwagamanRepository repo) =>
 {
@@ -93,8 +94,7 @@ vehicles.MapGet("/search", async (string query, AwagamanRepository repo) => Resu
 vehicles.MapPost("/", async (VehicleEntry vehicle, AwagamanRepository repo) =>
 {
     var id = await repo.UpsertVehicleAsync(vehicle);
-    vehicle.Id = id;
-    return Results.Created($"/api/vehicles/{id}", vehicle);
+    return Results.Created($"/api/vehicles/{id}", new { id });
 });
 vehicles.MapPut("/{id:int}", async (int id, VehicleEntry vehicle, AwagamanRepository repo) =>
 {
@@ -148,8 +148,7 @@ challans.MapPost("/", async (ChallanEntry entry, AwagamanRepository repo) =>
     try
     {
         var id = await repo.UpsertChallanAsync(entry);
-        entry.Id = id;
-        return Results.Created($"/api/challans/{id}", entry);
+        return Results.Created($"/api/challans/{id}", new { id });
     }
     catch (Exception ex)
     {
@@ -192,8 +191,7 @@ lrs.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
 lrs.MapPost("/", async (LREntry entry, AwagamanRepository repo) =>
 {
     var id = await repo.UpsertLREntryAsync(entry);
-    entry.Id = id;
-    return Results.Created($"/api/lr/{id}", entry);
+    return Results.Created($"/api/lr/{id}", new { id });
 });
 lrs.MapPut("/{id:int}", async (int id, LREntry entry, AwagamanRepository repo) =>
 {
@@ -217,8 +215,7 @@ bills.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
 bills.MapPost("/", async (BillEntry entry, AwagamanRepository repo) =>
 {
     var id = await repo.UpsertBillAsync(entry);
-    entry.Id = id;
-    return Results.Created($"/api/bills/{id}", entry);
+    return Results.Created($"/api/bills/{id}", new { id });
 });
 bills.MapPut("/{id:int}", async (int id, BillEntry entry, AwagamanRepository repo) =>
 {
@@ -242,8 +239,7 @@ cbsAccounts.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
 cbsAccounts.MapPost("/", async (CBSAccountEntry entry, AwagamanRepository repo) =>
 {
     var id = await repo.UpsertCBSAccountAsync(entry);
-    entry.Id = id;
-    return Results.Created($"/api/cbs/accounts/{id}", entry);
+    return Results.Created($"/api/cbs/accounts/{id}", new { id });
 });
 cbsAccounts.MapPut("/{id:int}", async (int id, CBSAccountEntry entry, AwagamanRepository repo) =>
 {
@@ -262,8 +258,7 @@ cbsEntries.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
 cbsEntries.MapPost("/", async (CashBankStatementEntry entry, AwagamanRepository repo) =>
 {
     var id = await repo.UpsertCashBankStatementAsync(entry);
-    entry.Id = id;
-    return Results.Created($"/api/cbs/statements/{id}", entry);
+    return Results.Created($"/api/cbs/statements/{id}", new { id });
 });
 cbsEntries.MapPut("/{id:int}", async (int id, CashBankStatementEntry entry, AwagamanRepository repo) =>
 {
@@ -277,8 +272,7 @@ receipts.MapGet("/", async (AwagamanRepository repo) => Results.Ok(await repo.Ge
 receipts.MapPost("/", async (BillReceiptEntry entry, AwagamanRepository repo) =>
 {
     var id = await repo.UpsertBillReceiptAsync(entry);
-    entry.Id = id;
-    return Results.Created($"/api/bill-receipts/{id}", entry);
+    return Results.Created($"/api/bill-receipts/{id}", new { id });
 });
 receipts.MapPut("/{id:int}", async (int id, BillReceiptEntry entry, AwagamanRepository repo) =>
 {
@@ -293,8 +287,7 @@ comments.MapGet("/challan/all", async (AwagamanRepository repo) => Results.Ok(aw
 comments.MapPost("/challan", async (ChallanComment comment, AwagamanRepository repo) =>
 {
     var id = await repo.AddChallanCommentAsync(comment);
-    comment.Id = id;
-    return Results.Created($"/api/comments/challan/{comment.ChallanId}", comment);
+    return Results.Created($"/api/comments/challan/{comment.ChallanId}", new { id });
 });
 comments.MapDelete("/challan/{id:int}", async (int id, AwagamanRepository repo) =>
 {
@@ -306,8 +299,7 @@ comments.MapGet("/lr/all", async (AwagamanRepository repo) => Results.Ok(await r
 comments.MapPost("/lr", async (LRComment comment, AwagamanRepository repo) =>
 {
     var id = await repo.AddLRCommentAsync(comment);
-    comment.Id = id;
-    return Results.Created($"/api/comments/lr/{comment.LREntryId}", comment);
+    return Results.Created($"/api/comments/lr/{comment.LREntryId}", new { id });
 });
 comments.MapDelete("/lr/{id:int}", async (int id, AwagamanRepository repo) =>
 {
@@ -319,8 +311,7 @@ comments.MapGet("/bill/all", async (AwagamanRepository repo) => Results.Ok(await
 comments.MapPost("/bill", async (BillComment comment, AwagamanRepository repo) =>
 {
     var id = await repo.AddBillCommentAsync(comment);
-    comment.Id = id;
-    return Results.Created($"/api/comments/bill/{comment.BillId}", comment);
+    return Results.Created($"/api/comments/bill/{comment.BillId}", new { id });
 });
 comments.MapDelete("/bill/{id:int}", async (int id, AwagamanRepository repo) =>
 {
@@ -338,8 +329,7 @@ tracking.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
 tracking.MapPost("/", async (TrackingEntry entry, AwagamanRepository repo) =>
 {
     var id = await repo.UpsertTrackingAsync(entry);
-    entry.Id = id;
-    return Results.Created($"/api/tracking/{id}", entry);
+    return Results.Created($"/api/tracking/{id}", new { id });
 });
 tracking.MapPut("/{id:int}", async (int id, TrackingEntry entry, AwagamanRepository repo) =>
 {
@@ -351,8 +341,7 @@ tracking.MapPost("/{trackingEntryId:int}/reports", async (int trackingEntryId, R
 {
     track.TrackingEntryId = trackingEntryId;
     var id = await repo.AddReportingTrackAsync(track);
-    track.Id = id;
-    return Results.Created($"/api/tracking/{trackingEntryId}/reports/{id}", track);
+    return Results.Created($"/api/tracking/{trackingEntryId}/reports/{id}", new { id });
 });
 tracking.MapGet("/{trackingEntryId:int}/reports", async (int trackingEntryId, AwagamanRepository repo) => Results.Ok(await repo.GetReportingTracksAsync(trackingEntryId)));
 tracking.MapDelete("/{id:int}", async (int id, AwagamanRepository repo) =>
