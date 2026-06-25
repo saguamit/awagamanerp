@@ -1,5 +1,5 @@
-#define MyAppName "Awagaman ERP"
-#define MyAppVersion "1.0.30"
+﻿#define MyAppName "Awagaman ERP"
+#define MyAppVersion "1.0.31"
 #define MyAppPublisher "Awagaman ERP"
 #define MyAppExeName "Awagaman ERP.exe"
 #define MySourceDir "c:\amit sagu\awagaman project\ATL ERP\Awagaman ERP\bin\Release"
@@ -147,5 +147,6 @@ begin
   if CurStep = ssPostInstall then
     WriteNetworkSettings;
 end;
+
 
 

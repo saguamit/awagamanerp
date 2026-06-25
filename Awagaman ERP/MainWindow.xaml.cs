@@ -8571,12 +8571,13 @@ namespace Awagaman_ERP
 
                     entry.Sr = VM.GetNextSr();
                     entry.RecalculateBalance();
+                    var saveEntry = entry.CloneForPersistence();
 
                     Task.Run(() =>
                     {
                         try
                         {
-                            VM.GetRepository().Upsert(entry);
+                            VM.GetRepository().Upsert(saveEntry);
                         }
                         catch (Exception saveEx)
                         {
@@ -8591,6 +8592,7 @@ namespace Awagaman_ERP
                         {
                             try
                             {
+                                entry.Id = saveEntry.Id;
                                 VM.AcceptSavedEntry(entry);
                                 UpdatePageUI();
                                 RefreshDashboard();
@@ -8601,9 +8603,9 @@ namespace Awagaman_ERP
                             }
                         }));
 
-                        if (!string.IsNullOrWhiteSpace(entry.LRNumber))
+                        if (!string.IsNullOrWhiteSpace(saveEntry.LRNumber))
                         {
-                            try { SyncSingleChallanBillingFromLR(entry); }
+                            try { SyncSingleChallanBillingFromLR(saveEntry); }
                             catch (Exception syncEx) { LogException("OpenChallanForm BillingSync", syncEx); }
                         }
 
@@ -8611,12 +8613,12 @@ namespace Awagaman_ERP
                         {
                             var trackingEntry = new TrackingEntry
                             {
-                                ChallanNo = entry.ChallanNumber,
-                                ChallanDate = entry.Date,
-                                From = entry.From,
-                                To = entry.To,
-                                VehicleNo = entry.VehicleNumber,
-                                DriverMobile = entry.DriverMobile
+                                ChallanNo = saveEntry.ChallanNumber,
+                                ChallanDate = saveEntry.Date,
+                                From = saveEntry.From,
+                                To = saveEntry.To,
+                                VehicleNo = saveEntry.VehicleNumber,
+                                DriverMobile = saveEntry.DriverMobile
                             };
 
                             if (BackendSettings.UseRemoteApi)

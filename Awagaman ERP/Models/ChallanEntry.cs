@@ -310,6 +310,52 @@ namespace Awagaman_ERP.Models
             OnPropertyChanged(nameof(Due));
         }
 
+        public ChallanEntry CloneForPersistence()
+        {
+            var copy = new ChallanEntry
+            {
+                SuppressCalculations = true,
+                Id = Id,
+                Sr = Sr,
+                ChallanNumber = ChallanNumber,
+                Date = Date,
+                LRNumber = LRNumber,
+                BrokerName = BrokerName,
+                From = From,
+                To = To,
+                VehicleNumber = VehicleNumber,
+                VehicleType = VehicleType,
+                DriverName = DriverName,
+                DriverMobile = DriverMobile,
+                EngineNo = EngineNo,
+                LicenceNo = LicenceNo,
+                PolicyNo = PolicyNo,
+                ChassisNo = ChassisNo,
+                OwnerName = OwnerName,
+                PAN = PAN,
+                LorryHire = LorryHire,
+                LessTDS = LessTDS,
+                AdvanceAmount = AdvanceAmount,
+                AdvanceNEFT = AdvanceNEFT,
+                AdvanceCash = AdvanceCash,
+                AdvanceDate = AdvanceDate,
+                Detention = Detention,
+                Hamali = Hamali,
+                Deduction = Deduction,
+                BalancePaidNEFT = BalancePaidNEFT,
+                BalancePaidCash = BalancePaidCash,
+                BalancePaidDate = BalancePaidDate,
+                PaidTo = PaidTo,
+                Remarks = Remarks,
+                BillAmount = BillAmount,
+                Margin = Margin
+            };
+            copy.Balance = Balance;
+            copy.Due = Due;
+            copy.SuppressCalculations = SuppressCalculations;
+            return copy;
+        }
+
         public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string name = null)
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
