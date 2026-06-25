@@ -8572,23 +8572,27 @@ namespace Awagaman_ERP
                     entry.Sr = VM.GetNextSr();
                     entry.RecalculateBalance();
                     var saveEntry = entry.CloneForPersistence();
+                    var challanRepository = VM.GetRepository();
+                    var uiDispatcher = Dispatcher;
+                    var useRemoteApi = BackendSettings.UseRemoteApi;
 
                     Task.Run(() =>
                     {
                         try
                         {
-                            VM.GetRepository().Upsert(saveEntry);
+                            challanRepository.Upsert(saveEntry);
                         }
                         catch (Exception saveEx)
                         {
-                            Dispatcher.BeginInvoke(new Action(() =>
+                            LogException("OpenChallanForm Save", saveEx);
+                            uiDispatcher.BeginInvoke(new Action(() =>
                             {
                                 MessageBox.Show("Unable to save challan entry: " + saveEx.Message, "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
                             }));
                             return;
                         }
 
-                        Dispatcher.BeginInvoke(new Action(() =>
+                        uiDispatcher.BeginInvoke(new Action(() =>
                         {
                             try
                             {
@@ -8621,14 +8625,14 @@ namespace Awagaman_ERP
                                 DriverMobile = saveEntry.DriverMobile
                             };
 
-                            if (BackendSettings.UseRemoteApi)
+                            if (useRemoteApi)
                             {
                                 _trackingRepo.Upsert(trackingEntry);
-                                Dispatcher.BeginInvoke(new Action(() => TrackingVM.AddEntry(trackingEntry, persist: false)));
+                                uiDispatcher.BeginInvoke(new Action(() => TrackingVM.AddEntry(trackingEntry, persist: false)));
                             }
                             else
                             {
-                                Dispatcher.BeginInvoke(new Action(() => TrackingVM.AddEntry(trackingEntry)));
+                                uiDispatcher.BeginInvoke(new Action(() => TrackingVM.AddEntry(trackingEntry)));
                             }
                         }
                         catch (Exception trackingEx)
