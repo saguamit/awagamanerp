@@ -42,10 +42,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                return ApplySort(GetAllRemoteSafe(), sortColumn, sortAscending)
-                    .Skip((pageNumber - 1) * pageSize)
-                    .Take(pageSize)
-                    .ToList();
+                return GetRemotePage(pageNumber, pageSize, null, sortColumn, sortAscending).Items;
             }
             var entries = new List<LREntry>();
             int offset = (pageNumber - 1) * pageSize;
@@ -71,17 +68,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                var filter = (searchFilter ?? string.Empty).Trim();
-                return ApplySort(GetAllRemoteSafe().Where(e =>
-                    Contains(e.LRNo, filter) ||
-                    Contains(e.ConsignorName, filter) ||
-                    Contains(e.ConsigneeName, filter) ||
-                    Contains(e.VehicleNo, filter) ||
-                    Contains(e.BillNo, filter) ||
-                    Contains(e.CHNo, filter)), sortColumn, sortAscending)
-                    .Skip((pageNumber - 1) * pageSize)
-                    .Take(pageSize)
-                    .ToList();
+                return GetRemotePage(pageNumber, pageSize, searchFilter, sortColumn, sortAscending).Items;
             }
             var entries = new List<LREntry>();
             int offset = (pageNumber - 1) * pageSize;
@@ -106,15 +93,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                var filter = (searchFilter ?? string.Empty).Trim();
-                if (string.IsNullOrWhiteSpace(filter)) return GetAllRemoteSafe().Count;
-                return GetAllRemoteSafe().Count(e =>
-                    Contains(e.LRNo, filter) ||
-                    Contains(e.ConsignorName, filter) ||
-                    Contains(e.ConsigneeName, filter) ||
-                    Contains(e.VehicleNo, filter) ||
-                    Contains(e.BillNo, filter) ||
-                    Contains(e.CHNo, filter));
+                return GetRemotePage(1, 1, searchFilter, string.Empty, true).TotalCount;
             }
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = connection.CreateCommand())
@@ -464,6 +443,34 @@ LRNo {dir}, Sr, Id";
                 .OrderBy(e => e.Sr)
                 .ThenBy(e => e.Id)
                 .ToList();
+        }
+
+        private static RemotePagedResult<LREntry> GetRemotePage(int pageNumber, int pageSize, string searchFilter, string sortColumn, bool sortAscending)
+        {
+            var query = $"api/lr/page?page={pageNumber}&pageSize={pageSize}&asc={sortAscending.ToString().ToLowerInvariant()}";
+            if (!string.IsNullOrWhiteSpace(searchFilter)) query += $"&search={RemoteApiClient.UrlEncode(searchFilter)}";
+            if (!string.IsNullOrWhiteSpace(sortColumn)) query += $"&sort={RemoteApiClient.UrlEncode(sortColumn)}";
+            try
+            {
+                return RemoteApiClient.GetPage<LREntry>(query);
+            }
+            catch
+            {
+                var filtered = GetAllRemoteSafe().Where(e =>
+                    string.IsNullOrWhiteSpace(searchFilter) ||
+                    Contains(e.LRNo, searchFilter) ||
+                    Contains(e.ConsignorName, searchFilter) ||
+                    Contains(e.ConsigneeName, searchFilter) ||
+                    Contains(e.VehicleNo, searchFilter) ||
+                    Contains(e.BillNo, searchFilter) ||
+                    Contains(e.CHNo, searchFilter));
+                var sorted = ApplySort(filtered, sortColumn, sortAscending).ToList();
+                return new RemotePagedResult<LREntry>
+                {
+                    TotalCount = sorted.Count,
+                    Items = sorted.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToList()
+                };
+            }
         }
 
         private static IEnumerable<LREntry> ApplySort(IEnumerable<LREntry> source, string sortColumn, bool ascending)

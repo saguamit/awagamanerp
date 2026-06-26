@@ -133,6 +133,27 @@ challans.MapGet("/max-sr", async (AwagamanRepository repo) =>
         return Results.Problem(ex.ToString(), statusCode: 500);
     }
 });
+challans.MapGet("/page", async (
+    int page,
+    int pageSize,
+    string? search,
+    string? sort,
+    bool? asc,
+    string? challanNo,
+    string? lrNo,
+    string? from,
+    string? to,
+    AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetChallansPageAsync(page, pageSize, search, sort, asc ?? true, challanNo, lrNo, from, to));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
 challans.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
 {
     try
@@ -197,6 +218,17 @@ challans.MapDelete("/{id:int}", async (int id, AwagamanRepository repo) =>
 
 var lrs = app.MapGroup("/api/lr");
 lrs.MapGet("/", async (AwagamanRepository repo) => Results.Ok(await repo.GetLREntriesAsync()));
+lrs.MapGet("/page", async (int page, int pageSize, string? search, string? sort, bool? asc, AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetLREntriesPageAsync(page, pageSize, search, sort, asc ?? true));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
 lrs.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
 {
     var item = await repo.GetLREntryAsync(id);
@@ -221,6 +253,17 @@ lrs.MapDelete("/{id:int}", async (int id, AwagamanRepository repo) =>
 
 var bills = app.MapGroup("/api/bills");
 bills.MapGet("/", async (AwagamanRepository repo) => Results.Ok(await repo.GetBillsAsync()));
+bills.MapGet("/page", async (int page, int pageSize, string? search, string? sort, bool? asc, AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetBillsPageAsync(page, pageSize, search, sort, asc ?? true));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
 bills.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
 {
     var item = await repo.GetBillAsync(id);

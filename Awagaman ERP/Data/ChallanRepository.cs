@@ -85,10 +85,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                return ApplySort(GetAllRemoteSafe(), sortColumn, sortAscending)
-                    .Skip((pageNumber - 1) * pageSize)
-                    .Take(pageSize)
-                    .ToList();
+                return GetRemotePage(pageNumber, pageSize, null, sortColumn, sortAscending).Items;
             }
             var entries = new List<ChallanEntry>();
             int offset = (pageNumber - 1) * pageSize;
@@ -152,20 +149,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                var filter = (searchFilter ?? string.Empty).Trim();
-                return ApplySort(GetAllRemoteSafe().Where(e =>
-                    Contains(e.ChallanNumber, filter) ||
-                    Contains(e.LRNumber, filter) ||
-                    Contains(e.VehicleNumber, filter) ||
-                    Contains(e.VehicleType, filter) ||
-                    Contains(e.DriverName, filter) ||
-                    Contains(e.BrokerName, filter) ||
-                    Contains(e.From, filter) ||
-                    Contains(e.To, filter) ||
-                    Contains(e.OwnerName, filter)), sortColumn, sortAscending)
-                    .Skip((pageNumber - 1) * pageSize)
-                    .Take(pageSize)
-                    .ToList();
+                return GetRemotePage(pageNumber, pageSize, searchFilter, sortColumn, sortAscending).Items;
             }
             var entries = new List<ChallanEntry>();
             int offset = (pageNumber - 1) * pageSize;
@@ -235,14 +219,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                return ApplySort(GetAllRemoteSafe().Where(e =>
-                    (string.IsNullOrWhiteSpace(challanNo) || Contains(e.ChallanNumber, challanNo)) &&
-                    (string.IsNullOrWhiteSpace(lrNo) || Contains(e.LRNumber, lrNo)) &&
-                    (string.IsNullOrWhiteSpace(from) || Contains(e.From, from)) &&
-                    (string.IsNullOrWhiteSpace(to) || Contains(e.To, to))), sortColumn, sortAscending)
-                    .Skip((pageNumber - 1) * pageSize)
-                    .Take(pageSize)
-                    .ToList();
+                return GetRemotePage(pageNumber, pageSize, null, sortColumn, sortAscending, challanNo, lrNo, from, to).Items;
             }
             var entries = new List<ChallanEntry>();
             int offset = (pageNumber - 1) * pageSize;
@@ -274,11 +251,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                return GetAllRemoteSafe().Count(e =>
-                    (string.IsNullOrWhiteSpace(challanNo) || Contains(e.ChallanNumber, challanNo)) &&
-                    (string.IsNullOrWhiteSpace(lrNo) || Contains(e.LRNumber, lrNo)) &&
-                    (string.IsNullOrWhiteSpace(from) || Contains(e.From, from)) &&
-                    (string.IsNullOrWhiteSpace(to) || Contains(e.To, to)));
+                return GetRemotePage(1, 1, null, string.Empty, true, challanNo, lrNo, from, to).TotalCount;
             }
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = connection.CreateCommand())
@@ -299,7 +272,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                return GetAllRemoteSafe().Count;
+                return GetRemotePage(1, 1, null, string.Empty, true).TotalCount;
             }
             return GetTotalCount("");
         }
@@ -308,18 +281,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                var filter = (searchFilter ?? string.Empty).Trim();
-                if (string.IsNullOrWhiteSpace(filter)) return GetAllRemoteSafe().Count;
-                return GetAllRemoteSafe().Count(e =>
-                    Contains(e.ChallanNumber, filter) ||
-                    Contains(e.LRNumber, filter) ||
-                    Contains(e.VehicleNumber, filter) ||
-                    Contains(e.VehicleType, filter) ||
-                    Contains(e.DriverName, filter) ||
-                    Contains(e.BrokerName, filter) ||
-                    Contains(e.From, filter) ||
-                    Contains(e.To, filter) ||
-                    Contains(e.OwnerName, filter));
+                return GetRemotePage(1, 1, searchFilter, string.Empty, true).TotalCount;
             }
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = connection.CreateCommand())
@@ -560,6 +522,54 @@ WHERE Id = @Id;";
                 .OrderBy(e => e.Sr)
                 .ThenBy(e => e.Id)
                 .ToList();
+        }
+
+        private static RemotePagedResult<ChallanEntry> GetRemotePage(
+            int pageNumber,
+            int pageSize,
+            string searchFilter,
+            string sortColumn,
+            bool sortAscending,
+            string challanNo = null,
+            string lrNo = null,
+            string from = null,
+            string to = null)
+        {
+            var query = $"api/challans/page?page={pageNumber}&pageSize={pageSize}&asc={sortAscending.ToString().ToLowerInvariant()}";
+            if (!string.IsNullOrWhiteSpace(searchFilter)) query += $"&search={RemoteApiClient.UrlEncode(searchFilter)}";
+            if (!string.IsNullOrWhiteSpace(sortColumn)) query += $"&sort={RemoteApiClient.UrlEncode(sortColumn)}";
+            if (!string.IsNullOrWhiteSpace(challanNo)) query += $"&challanNo={RemoteApiClient.UrlEncode(challanNo)}";
+            if (!string.IsNullOrWhiteSpace(lrNo)) query += $"&lrNo={RemoteApiClient.UrlEncode(lrNo)}";
+            if (!string.IsNullOrWhiteSpace(from)) query += $"&from={RemoteApiClient.UrlEncode(from)}";
+            if (!string.IsNullOrWhiteSpace(to)) query += $"&to={RemoteApiClient.UrlEncode(to)}";
+            try
+            {
+                return RemoteApiClient.GetPage<ChallanEntry>(query);
+            }
+            catch
+            {
+                var filtered = GetAllRemoteSafe().Where(e =>
+                    (string.IsNullOrWhiteSpace(searchFilter) ||
+                     Contains(e.ChallanNumber, searchFilter) ||
+                     Contains(e.LRNumber, searchFilter) ||
+                     Contains(e.VehicleNumber, searchFilter) ||
+                     Contains(e.VehicleType, searchFilter) ||
+                     Contains(e.DriverName, searchFilter) ||
+                     Contains(e.BrokerName, searchFilter) ||
+                     Contains(e.From, searchFilter) ||
+                     Contains(e.To, searchFilter) ||
+                     Contains(e.OwnerName, searchFilter)) &&
+                    (string.IsNullOrWhiteSpace(challanNo) || Contains(e.ChallanNumber, challanNo)) &&
+                    (string.IsNullOrWhiteSpace(lrNo) || Contains(e.LRNumber, lrNo)) &&
+                    (string.IsNullOrWhiteSpace(from) || Contains(e.From, from)) &&
+                    (string.IsNullOrWhiteSpace(to) || Contains(e.To, to)));
+                var sorted = ApplySort(filtered, sortColumn, sortAscending).ToList();
+                return new RemotePagedResult<ChallanEntry>
+                {
+                    TotalCount = sorted.Count,
+                    Items = sorted.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToList()
+                };
+            }
         }
 
         private static IEnumerable<ChallanEntry> ApplySort(IEnumerable<ChallanEntry> source, string sortColumn, bool ascending)

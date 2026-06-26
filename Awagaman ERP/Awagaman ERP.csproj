@@ -118,6 +118,7 @@
     <Compile Include="Data\CashBankStatementRepository.cs" />
     <Compile Include="Data\VehicleRepository.cs" />
     <Compile Include="Data\RemoteApiClient.cs" />
+    <Compile Include="Data\RemotePagedResult.cs" />
     <Compile Include="Data\BillPrefixSettings.cs" />
     <Compile Include="Data\AppLogger.cs" />
     <Compile Include="ViewModels\ChallanViewModel.cs" />

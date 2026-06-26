@@ -40,6 +40,111 @@ public sealed class AwagamanRepository
         return await conn.ExecuteAsync(sql, param);
     }
 
+    private static int NormalizePage(int page) => page < 1 ? 1 : page;
+
+    private static int NormalizePageSize(int pageSize)
+    {
+        if (pageSize < 1) return 100;
+        return pageSize > 500 ? 500 : pageSize;
+    }
+
+    private static void AddLikeFilter(List<string> whereParts, DynamicParameters parameters, string columnName, string parameterName, string? value)
+    {
+        var text = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(text)) return;
+        whereParts.Add($"{columnName} ILIKE @{parameterName}");
+        parameters.Add(parameterName, $"%{text}%");
+    }
+
+    private static string SortDirection(bool ascending) => ascending ? "ASC" : "DESC";
+
+    private static string BuildChallanOrderBy(string? sortColumn, bool ascending)
+    {
+        var dir = SortDirection(ascending);
+        return (sortColumn ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "challannumber" => $"challan_number {dir}, sr {dir}, id {dir}",
+            "date" => $"date {dir} NULLS LAST, sr {dir}, id {dir}",
+            "lrnumber" => $"lr_number {dir}, sr {dir}, id {dir}",
+            "brokername" => $"broker_name {dir}, sr {dir}, id {dir}",
+            "from" or "fromlocation" => $"from_location {dir}, sr {dir}, id {dir}",
+            "to" or "tolocation" => $"to_location {dir}, sr {dir}, id {dir}",
+            "vehiclenumber" => $"vehicle_number {dir}, sr {dir}, id {dir}",
+            "vehicletype" => $"vehicle_type {dir}, sr {dir}, id {dir}",
+            "drivername" => $"driver_name {dir}, sr {dir}, id {dir}",
+            "drivermobile" => $"driver_mobile {dir}, sr {dir}, id {dir}",
+            "ownername" => $"owner_name {dir}, sr {dir}, id {dir}",
+            "lorryhire" => $"lorry_hire {dir}, sr {dir}, id {dir}",
+            "detention" => $"detention {dir}, sr {dir}, id {dir}",
+            "hamali" => $"hamali {dir}, sr {dir}, id {dir}",
+            "balance" => $"(lorry_hire - less_tds - advance_amount) {dir}, sr {dir}, id {dir}",
+            "due" => $"((lorry_hire - less_tds - advance_amount) + detention + hamali + deduction - balance_paid_neft - balance_paid_cash) {dir}, sr {dir}, id {dir}",
+            "billamount" => $"bill_amount {dir}, sr {dir}, id {dir}",
+            "margin" => $"margin {dir}, sr {dir}, id {dir}",
+            "sr" => $"sr {dir}, id {dir}",
+            _ => $"sr {dir}, id {dir}"
+        };
+    }
+
+    private static string BuildLROrderBy(string? sortColumn, bool ascending)
+    {
+        var dir = SortDirection(ascending);
+        return (sortColumn ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "lrno" => $"lrno {dir}, sr {dir}, id {dir}",
+            "date" => $"date {dir} NULLS LAST, sr {dir}, id {dir}",
+            "consignorname" => $"consignor_name {dir}, sr {dir}, id {dir}",
+            "consigneename" => $"consignee_name {dir}, sr {dir}, id {dir}",
+            "from" or "fromlocation" => $"from_location {dir}, sr {dir}, id {dir}",
+            "to" or "tolocation" => $"to_location {dir}, sr {dir}, id {dir}",
+            "vehicleno" => $"vehicle_no {dir}, sr {dir}, id {dir}",
+            "vehicletype" => $"vehicle_type {dir}, sr {dir}, id {dir}",
+            "chno" => $"chno {dir}, sr {dir}, id {dir}",
+            "totalfreight" => $"total_freight {dir}, sr {dir}, id {dir}",
+            "hamali" => $"hamali {dir}, sr {dir}, id {dir}",
+            "detention" => $"detention {dir}, sr {dir}, id {dir}",
+            "others" => $"others {dir}, sr {dir}, id {dir}",
+            "stcharge" => $"st_charge {dir}, sr {dir}, id {dir}",
+            "billno" => $"bill_no {dir}, sr {dir}, id {dir}",
+            "billparty" => $"bill_party {dir}, sr {dir}, id {dir}",
+            "broker" => $"broker {dir}, sr {dir}, id {dir}",
+            "sr" => $"sr {dir}, id {dir}",
+            _ => $"sr {dir}, id {dir}"
+        };
+    }
+
+    private static string BuildBillOrderBy(string? sortColumn, bool ascending)
+    {
+        var dir = SortDirection(ascending);
+        return (sortColumn ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "billno" => $"bill_no {dir}, sr {dir}, id {dir}",
+            "billdate" => $"bill_date {dir} NULLS LAST, sr {dir}, id {dir}",
+            "party" => $"party {dir}, sr {dir}, id {dir}",
+            "lrno" => $"lr_no {dir}, sr {dir}, id {dir}",
+            "lrdate" => $"lr_date {dir} NULLS LAST, sr {dir}, id {dir}",
+            "from" or "fromloc" => $"from_loc {dir}, sr {dir}, id {dir}",
+            "to" or "toloc" => $"to_loc {dir}, sr {dir}, id {dir}",
+            "vehicletype" => $"vehicle_type {dir}, sr {dir}, id {dir}",
+            "freight" => $"freight {dir}, sr {dir}, id {dir}",
+            "detention" => $"detention {dir}, sr {dir}, id {dir}",
+            "hml" => $"hml {dir}, sr {dir}, id {dir}",
+            "othr" => $"othr {dir}, sr {dir}, id {dir}",
+            "stcharge" => $"st_charge {dir}, sr {dir}, id {dir}",
+            "total" => $"(freight + detention + hml + othr + st_charge) {dir}, sr {dir}, id {dir}",
+            "rcvd" => $"rcvd {dir}, sr {dir}, id {dir}",
+            "tds" => $"tds {dir}, sr {dir}, id {dir}",
+            "ded" => $"ded {dir}, sr {dir}, id {dir}",
+            "due" => $"(freight + detention + hml + othr + st_charge - rcvd - tds - ded) {dir}, sr {dir}, id {dir}",
+            "mop" => $"mop {dir}, sr {dir}, id {dir}",
+            "mr" => $"mr {dir}, sr {dir}, id {dir}",
+            "remarks" => $"remarks {dir}, sr {dir}, id {dir}",
+            "date" => $"date {dir} NULLS LAST, sr {dir}, id {dir}",
+            "sr" => $"sr {dir}, id {dir}",
+            _ => $"bill_date DESC NULLS LAST, sr DESC, id DESC"
+        };
+    }
+
     public Task<IEnumerable<PartyEntry>> GetPartiesAsync() =>
         QueryAsync<PartyEntry>("SELECT id, sr, party_name AS PartyName, address AS Address, gst_no AS GSTNo FROM parties ORDER BY sr, id;");
 
@@ -105,6 +210,61 @@ public sealed class AwagamanRepository
             imported_balance AS ImportedBalance, imported_due AS ImportedDue
             FROM challans ORDER BY sr, id;");
 
+    public async Task<PagedResult<ChallanEntry>> GetChallansPageAsync(
+        int page,
+        int pageSize,
+        string? search,
+        string? sortColumn,
+        bool sortAscending,
+        string? challanNo = null,
+        string? lrNo = null,
+        string? from = null,
+        string? to = null)
+    {
+        page = NormalizePage(page);
+        pageSize = NormalizePageSize(pageSize);
+        var offset = (page - 1) * pageSize;
+        var whereParts = new List<string>();
+        var parameters = new DynamicParameters();
+        parameters.Add("limit", pageSize);
+        parameters.Add("offset", offset);
+
+        var q = (search ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            whereParts.Add(@"(
+                challan_number ILIKE @search OR lr_number ILIKE @search OR vehicle_number ILIKE @search OR
+                vehicle_type ILIKE @search OR driver_name ILIKE @search OR broker_name ILIKE @search OR
+                from_location ILIKE @search OR to_location ILIKE @search OR owner_name ILIKE @search)");
+            parameters.Add("search", $"%{q}%");
+        }
+
+        AddLikeFilter(whereParts, parameters, "challan_number", "challanNo", challanNo);
+        AddLikeFilter(whereParts, parameters, "lr_number", "lrNo", lrNo);
+        AddLikeFilter(whereParts, parameters, "from_location", "from", from);
+        AddLikeFilter(whereParts, parameters, "to_location", "to", to);
+
+        var where = whereParts.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", whereParts);
+        var orderBy = BuildChallanOrderBy(sortColumn, sortAscending);
+        var select = @"SELECT
+            id, sr, challan_number AS ChallanNumber, date, lr_number AS LRNumber, broker_name AS BrokerName,
+            from_location AS ""From"", to_location AS ""To"", vehicle_number AS VehicleNumber, vehicle_type AS VehicleType,
+            driver_name AS DriverName, driver_mobile AS DriverMobile, engine_no AS EngineNo, licence_no AS LicenceNo,
+            policy_no AS PolicyNo, chassis_no AS ChassisNo, owner_name AS OwnerName, pan AS PAN, lorry_hire AS LorryHire,
+            less_tds AS LessTDS, advance_amount AS AdvanceAmount, advance_neft AS AdvanceNEFT, advance_cash AS AdvanceCash,
+            advance_date AS AdvanceDate, detention AS Detention, hamali AS Hamali, deduction AS Deduction,
+            balance_paid_neft AS BalancePaidNEFT, balance_paid_cash AS BalancePaidCash, balance_paid_date AS BalancePaidDate,
+            paid_to AS PaidTo, remarks AS Remarks, bill_amount AS BillAmount, margin AS Margin,
+            imported_balance AS ImportedBalance, imported_due AS ImportedDue
+            FROM challans";
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM challans {where};", parameters);
+        var items = (await conn.QueryAsync<ChallanEntry>($"{select} {where} ORDER BY {orderBy} LIMIT @limit OFFSET @offset;", parameters)).ToList();
+        return new PagedResult<ChallanEntry> { Items = items, TotalCount = total };
+    }
+
     public Task<int> GetMaxChallanSrAsync() =>
         ExecuteScalarIntAsync("SELECT COALESCE(MAX(sr), 0) FROM challans;", new { });
 
@@ -167,6 +327,42 @@ public sealed class AwagamanRepository
             bill_party AS BillParty, broker AS Broker, frt_type AS FrtType, pay_type AS PayType, comm AS Comm, paid AS Paid
             FROM lr_entries ORDER BY sr, id;");
 
+    public async Task<PagedResult<LREntry>> GetLREntriesPageAsync(int page, int pageSize, string? search, string? sortColumn, bool sortAscending)
+    {
+        page = NormalizePage(page);
+        pageSize = NormalizePageSize(pageSize);
+        var offset = (page - 1) * pageSize;
+        var parameters = new DynamicParameters();
+        parameters.Add("limit", pageSize);
+        parameters.Add("offset", offset);
+        var where = string.Empty;
+        var q = (search ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            where = @"WHERE lrno ILIKE @search OR consignor_name ILIKE @search OR consignee_name ILIKE @search OR
+                vehicle_no ILIKE @search OR bill_no ILIKE @search OR chno ILIKE @search";
+            parameters.Add("search", $"%{q}%");
+        }
+
+        var orderBy = BuildLROrderBy(sortColumn, sortAscending);
+        var select = @"SELECT
+            id, sr, lrno AS LRNo, date, consignor_name AS ConsignorName, consignor_address AS ConsignorAddress, consignor_gst AS ConsignorGST,
+            consignee_name AS ConsigneeName, consignee_address AS ConsigneeAddress, consignee_gst AS ConsigneeGST,
+            from_location AS ""From"", to_location AS ""To"", vehicle_no AS VehicleNo, vehicle_type AS VehicleType,
+            weight AS Weight, size_l AS SizeL, size_w AS SizeW, size_h AS SizeH, actual_weight AS ActualWeight, charged_weight AS ChargedWeight,
+            pkg AS PKG, pkg_type AS PkgType, description AS Description, invoice AS Invoice, value AS Value, chno AS CHNo,
+            total_freight AS TotalFreight, hamali AS Hamali, detention AS Detention, others AS Others, st_charge AS StCharge,
+            neft AS NEFT, cash AS CASH, tds AS TDS, ded AS Ded, bill_no AS BillNo, bill_date AS BillDate, bill AS BILL,
+            bill_party AS BillParty, broker AS Broker, frt_type AS FrtType, pay_type AS PayType, comm AS Comm, paid AS Paid
+            FROM lr_entries";
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM lr_entries {where};", parameters);
+        var items = (await conn.QueryAsync<LREntry>($"{select} {where} ORDER BY {orderBy} LIMIT @limit OFFSET @offset;", parameters)).ToList();
+        return new PagedResult<LREntry> { Items = items, TotalCount = total };
+    }
+
     public Task<LREntry?> GetLREntryAsync(int id) =>
         QuerySingleOrDefaultAsync<LREntry>(@"SELECT
             id, sr, lrno AS LRNo, date, consignor_name AS ConsignorName, consignor_address AS ConsignorAddress, consignor_gst AS ConsignorGST,
@@ -217,6 +413,38 @@ public sealed class AwagamanRepository
             hml AS HML, othr AS OTHR, st_charge AS StCharge, rcvd AS RCVD, tds AS TDS, ded AS DED, mop AS MOP, mr AS MR,
             remarks AS Remarks, date AS Date
             FROM bills ORDER BY bill_date DESC NULLS LAST, sr, id;");
+
+    public async Task<PagedResult<BillEntry>> GetBillsPageAsync(int page, int pageSize, string? search, string? sortColumn, bool sortAscending)
+    {
+        page = NormalizePage(page);
+        pageSize = NormalizePageSize(pageSize);
+        var offset = (page - 1) * pageSize;
+        var parameters = new DynamicParameters();
+        parameters.Add("limit", pageSize);
+        parameters.Add("offset", offset);
+        var where = string.Empty;
+        var q = (search ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            where = @"WHERE bill_no ILIKE @search OR party ILIKE @search OR lr_no ILIKE @search OR
+                from_loc ILIKE @search OR to_loc ILIKE @search OR mr ILIKE @search OR remarks ILIKE @search";
+            parameters.Add("search", $"%{q}%");
+        }
+
+        var orderBy = BuildBillOrderBy(sortColumn, sortAscending);
+        var select = @"SELECT
+            id, sr, bill_no AS BillNo, bill_date AS BillDate, party AS Party, lr_no AS LRNo, lr_date AS LRDate,
+            from_loc AS FromLoc, to_loc AS ToLoc, vehicle_type AS VehicleType, freight AS Freight, detention AS Detention,
+            hml AS HML, othr AS OTHR, st_charge AS StCharge, rcvd AS RCVD, tds AS TDS, ded AS DED, mop AS MOP, mr AS MR,
+            remarks AS Remarks, date AS Date
+            FROM bills";
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM bills {where};", parameters);
+        var items = (await conn.QueryAsync<BillEntry>($"{select} {where} ORDER BY {orderBy} LIMIT @limit OFFSET @offset;", parameters)).ToList();
+        return new PagedResult<BillEntry> { Items = items, TotalCount = total };
+    }
 
     public Task<BillEntry?> GetBillAsync(int id) =>
         QuerySingleOrDefaultAsync<BillEntry>(@"SELECT

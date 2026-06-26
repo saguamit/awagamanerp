@@ -32,6 +32,17 @@ namespace Awagaman_ERP.Data
             return Serializer.Deserialize<T>(json);
         }
 
+        public static RemotePagedResult<T> GetPage<T>(string route)
+        {
+            var json = Client.GetStringAsync(route).GetAwaiter().GetResult();
+            return Serializer.Deserialize<RemotePagedResult<T>>(json) ?? new RemotePagedResult<T>();
+        }
+
+        public static string UrlEncode(string value)
+        {
+            return Uri.EscapeDataString(value ?? string.Empty);
+        }
+
         public static int PostAndReadInt(string route, object body)
         {
             var responseJson = SendJson(HttpMethod.Post, route, body).GetAwaiter().GetResult();

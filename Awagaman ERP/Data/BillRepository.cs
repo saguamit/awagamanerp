@@ -45,10 +45,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                return ApplySort(GetAllRemoteSafe(), sortColumn, sortAscending)
-                    .Skip((pageNumber - 1) * pageSize)
-                    .Take(pageSize)
-                    .ToList();
+                return GetRemotePage(pageNumber, pageSize, null, sortColumn, sortAscending).Items;
             }
             var list = new List<BillEntry>();
             int offset = (pageNumber - 1) * pageSize;
@@ -86,18 +83,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                filter = (filter ?? string.Empty).Trim();
-                return ApplySort(GetAllRemoteSafe().Where(e =>
-                    Contains(e.BillNo, filter) ||
-                    Contains(e.Party, filter) ||
-                    Contains(e.LRNo, filter) ||
-                    Contains(e.From, filter) ||
-                    Contains(e.To, filter) ||
-                    Contains(e.MR, filter) ||
-                    Contains(e.Remarks, filter)), sortColumn, sortAscending)
-                    .Skip((pageNumber - 1) * pageSize)
-                    .Take(pageSize)
-                    .ToList();
+                return GetRemotePage(pageNumber, pageSize, filter, sortColumn, sortAscending).Items;
             }
             var list = new List<BillEntry>();
             int offset = (pageNumber - 1) * pageSize;
@@ -120,15 +106,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                if (string.IsNullOrWhiteSpace(filter)) return GetAllRemoteSafe().Count;
-                return GetAllRemoteSafe().Count(e =>
-                    Contains(e.BillNo, filter) ||
-                    Contains(e.Party, filter) ||
-                    Contains(e.LRNo, filter) ||
-                    Contains(e.From, filter) ||
-                    Contains(e.To, filter) ||
-                    Contains(e.MR, filter) ||
-                    Contains(e.Remarks, filter));
+                return GetRemotePage(1, 1, filter, string.Empty, true).TotalCount;
             }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand(
@@ -289,6 +267,35 @@ LRNo {d}, Sr, Id";
                 .ThenByDescending(x => x.Sr)
                 .ThenByDescending(x => x.Id)
                 .ToList();
+        }
+
+        private static RemotePagedResult<BillEntry> GetRemotePage(int pageNumber, int pageSize, string filter, string sortColumn, bool sortAscending)
+        {
+            var query = $"api/bills/page?page={pageNumber}&pageSize={pageSize}&asc={sortAscending.ToString().ToLowerInvariant()}";
+            if (!string.IsNullOrWhiteSpace(filter)) query += $"&search={RemoteApiClient.UrlEncode(filter)}";
+            if (!string.IsNullOrWhiteSpace(sortColumn)) query += $"&sort={RemoteApiClient.UrlEncode(sortColumn)}";
+            try
+            {
+                return RemoteApiClient.GetPage<BillEntry>(query);
+            }
+            catch
+            {
+                var filtered = GetAllRemoteSafe().Where(e =>
+                    string.IsNullOrWhiteSpace(filter) ||
+                    Contains(e.BillNo, filter) ||
+                    Contains(e.Party, filter) ||
+                    Contains(e.LRNo, filter) ||
+                    Contains(e.From, filter) ||
+                    Contains(e.To, filter) ||
+                    Contains(e.MR, filter) ||
+                    Contains(e.Remarks, filter));
+                var sorted = ApplySort(filtered, sortColumn, sortAscending).ToList();
+                return new RemotePagedResult<BillEntry>
+                {
+                    TotalCount = sorted.Count,
+                    Items = sorted.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToList()
+                };
+            }
         }
 
         private static IEnumerable<BillEntry> ApplySort(IEnumerable<BillEntry> source, string col, bool asc)
