@@ -117,6 +117,7 @@
     <Compile Include="Data\CBSAccountRepository.cs" />
     <Compile Include="Data\CashBankStatementRepository.cs" />
     <Compile Include="Data\VehicleRepository.cs" />
+    <Compile Include="Data\MasterDataCache.cs" />
     <Compile Include="Data\RemoteApiClient.cs" />
     <Compile Include="Data\RemotePagedResult.cs" />
     <Compile Include="Data\BillPrefixSettings.cs" />
@@ -223,6 +224,7 @@
     <Compile Include="Models\CashBankStatementEntry.cs" />
     <Compile Include="Models\VehicleEntry.cs" />
     <Compile Include="Models\BillComment.cs" />
+    <Compile Include="Models\DashboardSummary.cs" />
     <Compile Include="Properties\AssemblyInfo.cs">
       <SubType>Code</SubType>
     </Compile>

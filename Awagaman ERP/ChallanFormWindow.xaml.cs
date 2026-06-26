@@ -3,6 +3,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using Awagaman_ERP.Data;
 using Awagaman_ERP.Models;
 using MahApps.Metro.Controls;
@@ -17,10 +18,12 @@ namespace Awagaman_ERP
         private int _editingSr;
         private readonly IChallanRepository _repository;
         private bool _ignoreVehicleSelection;
+        private readonly DispatcherTimer _vehicleSuggestionTimer = new DispatcherTimer { Interval = System.TimeSpan.FromMilliseconds(350) };
 
         public ChallanFormWindow(IEnumerable<ChallanEntry> allEntries, IChallanRepository repository = null)
         {
             InitializeComponent();
+            ConfigureDebounceTimers();
             _allEntries = allEntries ?? new List<ChallanEntry>();
             _repository = repository ?? new ChallanRepository();
             _editingSr = -1;
@@ -31,6 +34,7 @@ namespace Awagaman_ERP
         public ChallanFormWindow(ChallanEntry existing, IEnumerable<ChallanEntry> allEntries, IChallanRepository repository = null)
         {
             InitializeComponent();
+            ConfigureDebounceTimers();
             _allEntries = allEntries ?? new List<ChallanEntry>();
             _repository = repository ?? new ChallanRepository();
             _editingSr = existing.Sr;
@@ -73,6 +77,12 @@ namespace Awagaman_ERP
                 Margin = existing.Margin
             };
             DataContext = Result;
+        }
+
+        private void ConfigureDebounceTimers()
+        {
+            _vehicleSuggestionTimer.Tick += VehicleSuggestionTimer_Tick;
+            Closed += (s, e) => _vehicleSuggestionTimer.Stop();
         }
 
         private void ChallanNo_LostFocus(object sender, RoutedEventArgs e)
@@ -148,6 +158,26 @@ namespace Awagaman_ERP
         }
 
         private void VehicleNumberBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (VehiclePopup == null || VehicleSuggestionList == null || VehicleNumberBox == null) return;
+            var text = VehicleNumberBox.Text;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                _vehicleSuggestionTimer.Stop();
+                VehiclePopup.IsOpen = false;
+                return;
+            }
+            _vehicleSuggestionTimer.Stop();
+            _vehicleSuggestionTimer.Start();
+        }
+
+        private void VehicleSuggestionTimer_Tick(object sender, System.EventArgs e)
+        {
+            _vehicleSuggestionTimer.Stop();
+            UpdateVehicleSuggestions();
+        }
+
+        private void UpdateVehicleSuggestions()
         {
             if (VehiclePopup == null || VehicleSuggestionList == null || VehicleNumberBox == null) return;
             var text = VehicleNumberBox.Text;

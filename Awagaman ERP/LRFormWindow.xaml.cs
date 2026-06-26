@@ -9,6 +9,7 @@ using System.Linq;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Threading;
 
 namespace Awagaman_ERP
 {
@@ -18,6 +19,10 @@ namespace Awagaman_ERP
         private System.Collections.Generic.IEnumerable<ChallanEntry> _challanEntries;
         private System.Collections.Generic.IEnumerable<LREntry> _existingEntries;
         private decimal? _challanLorryHire;
+        private readonly DispatcherTimer _partySuggestionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+        private string _pendingSuggestionText;
+        private ListBox _pendingSuggestionListBox;
+        private Popup _pendingSuggestionPopup;
         public LREntry Result { get; private set; }
         public bool WasSaved { get; private set; }
 
@@ -57,6 +62,7 @@ namespace Awagaman_ERP
             ChallanEntry prefillFrom = null)
         {
             InitializeComponent();
+            ConfigureDebounceTimers();
             _challanEntries = challanEntries;
             _existingEntries = existingEntries;
 
@@ -132,6 +138,12 @@ namespace Awagaman_ERP
             DataContext = this;
             ApplyChallanDetailsFromCHNo();
             RefreshChallanLorryHire(clearWhenMissing: false);
+        }
+
+        private void ConfigureDebounceTimers()
+        {
+            _partySuggestionTimer.Tick += PartySuggestionTimer_Tick;
+            Closed += (s, e) => _partySuggestionTimer.Stop();
         }
 
         private void LRNo_LostFocus(object sender, RoutedEventArgs e)
@@ -353,17 +365,17 @@ namespace Awagaman_ERP
 
         private void ConsignorName_TextChanged(object sender, TextChangedEventArgs e)
         {
-            ShowSuggestions(ConsignorNameBox?.Text, ConsignorSuggestionList, ConsignorPopup);
+            QueueSuggestions(ConsignorNameBox?.Text, ConsignorSuggestionList, ConsignorPopup);
         }
 
         private void ConsigneeName_TextChanged(object sender, TextChangedEventArgs e)
         {
-            ShowSuggestions(ConsigneeNameBox?.Text, ConsigneeSuggestionList, ConsigneePopup);
+            QueueSuggestions(ConsigneeNameBox?.Text, ConsigneeSuggestionList, ConsigneePopup);
         }
 
         private void BillPartyBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            ShowSuggestions(BillPartyBox?.Text, BillPartySuggestionList, BillPartyPopup);
+            QueueSuggestions(BillPartyBox?.Text, BillPartySuggestionList, BillPartyPopup);
         }
 
         private void LRFormWindow_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -444,8 +456,32 @@ namespace Awagaman_ERP
 
         private bool _ignoreSelection;
 
+        private void QueueSuggestions(string text, ListBox listBox, Popup popup)
+        {
+            if (popup == null || listBox == null) return;
+            _partySuggestionTimer.Stop();
+            _pendingSuggestionText = text;
+            _pendingSuggestionListBox = listBox;
+            _pendingSuggestionPopup = popup;
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                popup.IsOpen = false;
+                return;
+            }
+
+            _partySuggestionTimer.Start();
+        }
+
+        private void PartySuggestionTimer_Tick(object sender, EventArgs e)
+        {
+            _partySuggestionTimer.Stop();
+            ShowSuggestions(_pendingSuggestionText, _pendingSuggestionListBox, _pendingSuggestionPopup);
+        }
+
         private void ShowSuggestions(string text, ListBox listBox, Popup popup)
         {
+            if (popup == null || listBox == null) return;
             if (string.IsNullOrWhiteSpace(text))
             {
                 popup.IsOpen = false;

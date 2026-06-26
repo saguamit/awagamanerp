@@ -60,6 +60,9 @@ app.MapGet("/api/health", () => Results.Ok(new
     utc = DateTime.UtcNow
 }));
 
+app.MapGet("/api/dashboard/summary", async (AwagamanRepository repo) =>
+    Results.Ok(await repo.GetDashboardSummaryAsync()));
+
 var parties = app.MapGroup("/api/parties");
 parties.MapGet("/", async (AwagamanRepository repo) => Results.Ok(await repo.GetPartiesAsync()));
 parties.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
@@ -253,11 +256,11 @@ lrs.MapDelete("/{id:int}", async (int id, AwagamanRepository repo) =>
 
 var bills = app.MapGroup("/api/bills");
 bills.MapGet("/", async (AwagamanRepository repo) => Results.Ok(await repo.GetBillsAsync()));
-bills.MapGet("/page", async (int page, int pageSize, string? search, string? sort, bool? asc, AwagamanRepository repo) =>
+bills.MapGet("/page", async (int page, int pageSize, string? search, string? sort, bool? asc, string? party, bool? dueOnly, AwagamanRepository repo) =>
 {
     try
     {
-        return Results.Ok(await repo.GetBillsPageAsync(page, pageSize, search, sort, asc ?? true));
+        return Results.Ok(await repo.GetBillsPageAsync(page, pageSize, search, sort, asc ?? true, party, dueOnly ?? false));
     }
     catch (Exception ex)
     {
@@ -335,6 +338,11 @@ receipts.MapPut("/{id:int}", async (int id, BillReceiptEntry entry, AwagamanRepo
 {
     entry.Id = id;
     await repo.UpsertBillReceiptAsync(entry);
+    return Results.NoContent();
+});
+receipts.MapDelete("/{id:int}", async (int id, AwagamanRepository repo) =>
+{
+    await repo.DeleteBillReceiptAsync(id);
     return Results.NoContent();
 });
 

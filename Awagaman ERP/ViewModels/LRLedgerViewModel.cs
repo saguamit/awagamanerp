@@ -313,15 +313,9 @@ namespace Awagaman_ERP.ViewModels
 
         private void Entry_PropertyChanged(object sender, PropertyChangedEventArgs e)
         {
-            if (_suppressPersistence) return;
-
-            var entry = sender as LREntry;
-            if (entry == null) return;
-
-            if (e.PropertyName != nameof(LREntry.Bal))
-            {
-                _repository.Upsert(entry);
-            }
+            // Persistence is handled by grid commit/form save paths. Saving here
+            // pushes partial values while the user is still editing, which is
+            // especially slow and unsafe in remote API mode.
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

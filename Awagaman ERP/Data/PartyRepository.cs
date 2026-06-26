@@ -13,7 +13,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                return RemoteApiClient.GetList<PartyEntry>("api/parties");
+                return MasterDataCache.GetParties(() => RemoteApiClient.GetList<PartyEntry>("api/parties"));
             }
             var list = new List<PartyEntry>();
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
@@ -39,7 +39,7 @@ namespace Awagaman_ERP.Data
             if (string.IsNullOrWhiteSpace(name)) return null;
             if (BackendSettings.UseRemoteApi)
             {
-                return RemoteApiClient.GetList<PartyEntry>("api/parties")
+                return GetAll()
                     .Find(p => string.Equals((p.PartyName ?? string.Empty).Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase));
             }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
@@ -67,7 +67,7 @@ namespace Awagaman_ERP.Data
             if (string.IsNullOrWhiteSpace(filter)) return list;
             if (BackendSettings.UseRemoteApi)
             {
-                return RemoteApiClient.GetList<PartyEntry>("api/parties")
+                return GetAll()
                     .FindAll(p => !string.IsNullOrWhiteSpace(p.PartyName) &&
                                   p.PartyName.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
                     .ConvertAll(p => p.PartyName);
@@ -96,6 +96,7 @@ namespace Awagaman_ERP.Data
                 {
                     RemoteApiClient.Put($"api/parties/{entry.Id}", entry);
                 }
+                MasterDataCache.InvalidateParties();
                 return;
             }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
@@ -129,6 +130,7 @@ namespace Awagaman_ERP.Data
             if (BackendSettings.UseRemoteApi)
             {
                 RemoteApiClient.Delete($"api/parties/{entry.Id}");
+                MasterDataCache.InvalidateParties();
                 return;
             }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))

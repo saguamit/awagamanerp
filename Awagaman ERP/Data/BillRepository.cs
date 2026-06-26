@@ -102,6 +102,72 @@ namespace Awagaman_ERP.Data
             return list;
         }
 
+        public List<BillEntry> SearchAdvanced(string filter, string party, bool dueOnly, int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true)
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetRemotePage(pageNumber, pageSize, filter, sortColumn, sortAscending, party, dueOnly).Items;
+            }
+
+            var list = new List<BillEntry>();
+            int offset = (pageNumber - 1) * pageSize;
+            string orderBy = BuildOrderBy(sortColumn, sortAscending);
+            var conditions = new List<string>();
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = c.CreateCommand())
+            {
+                if (!string.IsNullOrWhiteSpace(filter))
+                {
+                    conditions.Add("(BillNo LIKE @f OR Party LIKE @f OR LRNo LIKE @f OR FromLoc LIKE @f OR ToLoc LIKE @f OR MR LIKE @f OR Remarks LIKE @f)");
+                    cmd.Parameters.AddWithValue("@f", $"%{filter}%");
+                }
+                if (!string.IsNullOrWhiteSpace(party))
+                {
+                    conditions.Add("Party LIKE @party");
+                    cmd.Parameters.AddWithValue("@party", $"%{party.Trim()}%");
+                }
+                if (dueOnly)
+                {
+                    conditions.Add("(Freight+Detention+HML+OTHR+StCharge-RCVD-TDS-DED) > 0");
+                }
+
+                var where = conditions.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", conditions);
+                cmd.CommandText = $"SELECT * FROM Bills {where} ORDER BY {orderBy} LIMIT @lim OFFSET @off;";
+                cmd.Parameters.AddWithValue("@lim", pageSize);
+                cmd.Parameters.AddWithValue("@off", offset);
+                c.Open();
+                using (var r = cmd.ExecuteReader())
+                    while (r.Read()) list.Add(MapReader(r));
+            }
+            return list;
+        }
+
+        public List<BillEntry> SearchAdvancedAll(string filter, string party, bool dueOnly, string sortColumn = "", bool sortAscending = true)
+        {
+            if (!BackendSettings.UseRemoteApi)
+            {
+                var total = GetTotalCountAdvanced(filter, party, dueOnly);
+                return SearchAdvanced(filter, party, dueOnly, 1, Math.Max(total, 1), sortColumn, sortAscending);
+            }
+
+            const int pageSize = 500;
+            var all = new List<BillEntry>();
+            for (var page = 1; ; page++)
+            {
+                var result = GetRemotePage(page, pageSize, filter, sortColumn, sortAscending, party, dueOnly);
+                if (result.Items != null && result.Items.Count > 0)
+                {
+                    all.AddRange(result.Items);
+                }
+
+                if (all.Count >= result.TotalCount || result.Items == null || result.Items.Count == 0)
+                {
+                    break;
+                }
+            }
+            return all;
+        }
+
         public int GetTotalCount(string filter = "")
         {
             if (BackendSettings.UseRemoteApi)
@@ -114,6 +180,38 @@ namespace Awagaman_ERP.Data
                 : "SELECT COUNT(*) FROM Bills WHERE BillNo LIKE @f OR Party LIKE @f OR LRNo LIKE @f OR FromLoc LIKE @f OR ToLoc LIKE @f OR MR LIKE @f OR Remarks LIKE @f;", c))
             {
                 if (!string.IsNullOrWhiteSpace(filter)) cmd.Parameters.AddWithValue("@f", $"%{filter}%");
+                c.Open();
+                return Convert.ToInt32(cmd.ExecuteScalar());
+            }
+        }
+
+        public int GetTotalCountAdvanced(string filter, string party, bool dueOnly)
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetRemotePage(1, 1, filter, string.Empty, true, party, dueOnly).TotalCount;
+            }
+
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = c.CreateCommand())
+            {
+                var conditions = new List<string>();
+                if (!string.IsNullOrWhiteSpace(filter))
+                {
+                    conditions.Add("(BillNo LIKE @f OR Party LIKE @f OR LRNo LIKE @f OR FromLoc LIKE @f OR ToLoc LIKE @f OR MR LIKE @f OR Remarks LIKE @f)");
+                    cmd.Parameters.AddWithValue("@f", $"%{filter}%");
+                }
+                if (!string.IsNullOrWhiteSpace(party))
+                {
+                    conditions.Add("Party LIKE @party");
+                    cmd.Parameters.AddWithValue("@party", $"%{party.Trim()}%");
+                }
+                if (dueOnly)
+                {
+                    conditions.Add("(Freight+Detention+HML+OTHR+StCharge-RCVD-TDS-DED) > 0");
+                }
+                var where = conditions.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", conditions);
+                cmd.CommandText = $"SELECT COUNT(*) FROM Bills {where};";
                 c.Open();
                 return Convert.ToInt32(cmd.ExecuteScalar());
             }
@@ -269,11 +367,13 @@ LRNo {d}, Sr, Id";
                 .ToList();
         }
 
-        private static RemotePagedResult<BillEntry> GetRemotePage(int pageNumber, int pageSize, string filter, string sortColumn, bool sortAscending)
+        private static RemotePagedResult<BillEntry> GetRemotePage(int pageNumber, int pageSize, string filter, string sortColumn, bool sortAscending, string party = "", bool dueOnly = false)
         {
             var query = $"api/bills/page?page={pageNumber}&pageSize={pageSize}&asc={sortAscending.ToString().ToLowerInvariant()}";
             if (!string.IsNullOrWhiteSpace(filter)) query += $"&search={RemoteApiClient.UrlEncode(filter)}";
             if (!string.IsNullOrWhiteSpace(sortColumn)) query += $"&sort={RemoteApiClient.UrlEncode(sortColumn)}";
+            if (!string.IsNullOrWhiteSpace(party)) query += $"&party={RemoteApiClient.UrlEncode(party)}";
+            if (dueOnly) query += "&dueOnly=true";
             try
             {
                 return RemoteApiClient.GetPage<BillEntry>(query);
@@ -289,6 +389,14 @@ LRNo {d}, Sr, Id";
                     Contains(e.To, filter) ||
                     Contains(e.MR, filter) ||
                     Contains(e.Remarks, filter));
+                if (!string.IsNullOrWhiteSpace(party))
+                {
+                    filtered = filtered.Where(e => Contains(e.Party, party));
+                }
+                if (dueOnly)
+                {
+                    filtered = filtered.Where(e => e.Due > 0m);
+                }
                 var sorted = ApplySort(filtered, sortColumn, sortAscending).ToList();
                 return new RemotePagedResult<BillEntry>
                 {

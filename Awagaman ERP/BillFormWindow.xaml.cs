@@ -4,6 +4,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using Awagaman_ERP.Data;
 using Awagaman_ERP.Models;
 using MahApps.Metro.Controls;
@@ -16,10 +17,12 @@ namespace Awagaman_ERP
         public bool WasSaved { get; private set; }
         private readonly bool _isEditMode;
         private bool _ignorePartySelection;
+        private readonly DispatcherTimer _partySuggestionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
 
         public BillFormWindow()
         {
             InitializeComponent();
+            ConfigureDebounceTimers();
             Result = new BillEntry { BillDate = DateTime.Today, Date = DateTime.Today };
             DataContext = Result;
             _isEditMode = false;
@@ -29,6 +32,7 @@ namespace Awagaman_ERP
         public BillFormWindow(BillEntry existing)
         {
             InitializeComponent();
+            ConfigureDebounceTimers();
             Result = new BillEntry
             {
                 Id = existing.Id, Sr = existing.Sr,
@@ -42,6 +46,12 @@ namespace Awagaman_ERP
             DataContext = Result;
             _isEditMode = true;
             Loaded += BillFormWindow_Loaded;
+        }
+
+        private void ConfigureDebounceTimers()
+        {
+            _partySuggestionTimer.Tick += PartySuggestionTimer_Tick;
+            Closed += (s, e) => _partySuggestionTimer.Stop();
         }
 
         private void BillFormWindow_Loaded(object sender, RoutedEventArgs e)
@@ -95,6 +105,27 @@ namespace Awagaman_ERP
         }
 
         private void BillPartyBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+        {
+            if (BillPartyBox == null || BillPartyPopup == null || BillPartySuggestionList == null) return;
+            var text = BillPartyBox.Text;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                _partySuggestionTimer.Stop();
+                BillPartyPopup.IsOpen = false;
+                return;
+            }
+
+            _partySuggestionTimer.Stop();
+            _partySuggestionTimer.Start();
+        }
+
+        private void PartySuggestionTimer_Tick(object sender, EventArgs e)
+        {
+            _partySuggestionTimer.Stop();
+            UpdateBillPartySuggestions();
+        }
+
+        private void UpdateBillPartySuggestions()
         {
             if (BillPartyBox == null || BillPartyPopup == null || BillPartySuggestionList == null) return;
             var text = BillPartyBox.Text;

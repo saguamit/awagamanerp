@@ -21,10 +21,11 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                var accounts = RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts");
+                var accounts = MasterDataCache.GetCBSAccounts(() => RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts"));
                 if (EnsureRemoteDefaults(accounts))
                 {
-                    accounts = RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts");
+                    MasterDataCache.InvalidateCBSAccounts();
+                    accounts = MasterDataCache.GetCBSAccounts(() => RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts"));
                 }
                 return accounts;
             }
@@ -82,7 +83,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                return RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts").Select(x => x.Sr).DefaultIfEmpty(0).Max();
+                return GetAll().Select(x => x.Sr).DefaultIfEmpty(0).Max();
             }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand("SELECT COALESCE(MAX(Sr), 0) FROM CBSAccounts;", c))
@@ -98,7 +99,7 @@ namespace Awagaman_ERP.Data
             if (key.Length == 0) return null;
             if (BackendSettings.UseRemoteApi)
             {
-                return RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts")
+                return GetAll()
                     .Find(x => string.Equals((x.AccountName ?? string.Empty).Trim(), key, StringComparison.OrdinalIgnoreCase));
             }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
@@ -136,6 +137,7 @@ namespace Awagaman_ERP.Data
                 {
                     RemoteApiClient.Put($"api/cbs/accounts/{entry.Id}", entry);
                 }
+                MasterDataCache.InvalidateCBSAccounts();
                 return;
             }
 
@@ -174,6 +176,7 @@ namespace Awagaman_ERP.Data
             if (BackendSettings.UseRemoteApi)
             {
                 RemoteApiClient.Delete($"api/cbs/accounts/{entry.Id}");
+                MasterDataCache.InvalidateCBSAccounts();
                 return;
             }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
@@ -213,7 +216,7 @@ namespace Awagaman_ERP.Data
         {
             try
             {
-                accounts = accounts ?? RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts");
+                accounts = accounts ?? MasterDataCache.GetCBSAccounts(() => RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts"));
                 var maxSr = accounts.Select(x => x.Sr).DefaultIfEmpty(0).Max();
                 var changed = false;
 

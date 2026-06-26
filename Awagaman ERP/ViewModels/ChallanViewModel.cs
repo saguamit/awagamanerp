@@ -525,11 +525,8 @@ namespace Awagaman_ERP.ViewModels
             {
                 return;
             }
-
-            if (e.PropertyName != nameof(ChallanEntry.Balance) && e.PropertyName != nameof(ChallanEntry.Due))
-            {
-                _repository.Upsert(entry);
-            }
+            // Persistence is handled after the grid cell edit commits. Avoid
+            // saving partial values while the user is typing in remote mode.
         }
 
         protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string propertyName = null)
@@ -676,6 +673,53 @@ namespace Awagaman_ERP.ViewModels
             }
 
             ShowSavedEntry(entry);
+        }
+
+        public void RemoveOptimisticEntry(ChallanEntry entry)
+        {
+            if (entry == null)
+            {
+                return;
+            }
+
+            _suppressPersistence = true;
+            try
+            {
+                var existing = Entries.FirstOrDefault(x => ReferenceEquals(x, entry) ||
+                    (entry.Id > 0 && x.Id == entry.Id) ||
+                    (!string.IsNullOrWhiteSpace(entry.ChallanNumber) &&
+                     string.Equals(x.ChallanNumber, entry.ChallanNumber, StringComparison.OrdinalIgnoreCase)));
+                if (existing != null)
+                {
+                    Entries.Remove(existing);
+                }
+
+                existing = PagedEntries.FirstOrDefault(x => ReferenceEquals(x, entry) ||
+                    (entry.Id > 0 && x.Id == entry.Id) ||
+                    (!string.IsNullOrWhiteSpace(entry.ChallanNumber) &&
+                     string.Equals(x.ChallanNumber, entry.ChallanNumber, StringComparison.OrdinalIgnoreCase)));
+                if (existing != null)
+                {
+                    PagedEntries.Remove(existing);
+                }
+            }
+            finally
+            {
+                _suppressPersistence = false;
+            }
+
+            _totalCount = Math.Max(0, _totalCount - 1);
+            FilteredEntriesCount = PagedEntries.Count;
+            _countDirty = true;
+            _nextPageCache = null;
+            _prevPageCache = null;
+            OnPropertyChanged(nameof(TotalCount));
+            OnPropertyChanged(nameof(PageInfo));
+            OnPropertyChanged(nameof(TotalPages));
+            OnPropertyChanged(nameof(CanGoPrevious));
+            OnPropertyChanged(nameof(CanGoNext));
+            OnPropertyChanged(nameof(CanGoFirst));
+            OnPropertyChanged(nameof(CanGoLast));
         }
 
         public void SetSort(string column, bool ascending)
