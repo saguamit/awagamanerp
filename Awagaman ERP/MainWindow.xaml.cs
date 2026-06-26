@@ -332,9 +332,18 @@ namespace Awagaman_ERP
                 {
                     if (BackendSettings.UseRemoteApi)
                     {
-                        var summary = RemoteApiClient.Get<DashboardSummary>("api/dashboard/summary");
-                        ApplyDashboardSummary(summary);
-                        return;
+                        try
+                        {
+                            var summary = RemoteApiClient.Get<DashboardSummary>("api/dashboard/summary");
+                            ApplyDashboardSummary(summary);
+                            return;
+                        }
+                        catch (Exception summaryEx)
+                        {
+                            LogException("RefreshDashboard.RemoteSummary", summaryEx);
+                            // Older API deployments do not have the summary endpoint. Fall back to
+                            // repository calculations so dashboard cards never remain at startup zero.
+                        }
                     }
 
                     var challans = SafeLoad(() => _challanRepo.GetAll());
