@@ -367,11 +367,11 @@ namespace Awagaman_ERP
 
                     DeferUi(() =>
                     {
-                        if (DashboardTotalDue != null) DashboardTotalDue.Text = $"â‚¹ {totalDue:N2}";
+                        if (DashboardTotalDue != null) DashboardTotalDue.Text = $"Rs. {totalDue:N2}";
                         if (DashboardTotalChallans != null) DashboardTotalChallans.Text = $"{dueChallans} Due Challans";
-                        if (DashboardOutstanding != null) DashboardOutstanding.Text = $"â‚¹ {billTotalDue:N2}";
-                        if (DashboardCBSBankNet != null) DashboardCBSBankNet.Text = $"â‚¹ {cbsBankNet:N2}";
-                        if (DashboardCBSCashNet != null) DashboardCBSCashNet.Text = $"â‚¹ {cbsCashNet:N2}";
+                        if (DashboardOutstanding != null) DashboardOutstanding.Text = $"Rs. {billTotalDue:N2}";
+                        if (DashboardCBSBankNet != null) DashboardCBSBankNet.Text = $"Rs. {cbsBankNet:N2}";
+                        if (DashboardCBSCashNet != null) DashboardCBSCashNet.Text = $"Rs. {cbsCashNet:N2}";
                         if (DashboardNewBookings != null) DashboardNewBookings.Text = newBookingItems.Count.ToString();
                         if (DashboardBillsCard != null) DashboardBillsCard.ToolTip = $"Open pending bills window ({pendingBills.Count})";
                     });
@@ -407,11 +407,11 @@ namespace Awagaman_ERP
 
             DeferUi(() =>
             {
-                if (DashboardTotalDue != null) DashboardTotalDue.Text = $"â‚¹ {summary.ChallanDueAmount:N2}";
+                if (DashboardTotalDue != null) DashboardTotalDue.Text = $"Rs. {summary.ChallanDueAmount:N2}";
                 if (DashboardTotalChallans != null) DashboardTotalChallans.Text = $"{summary.DueChallanCount} Due Challans";
-                if (DashboardOutstanding != null) DashboardOutstanding.Text = $"â‚¹ {summary.BillDueAmount:N2}";
-                if (DashboardCBSBankNet != null) DashboardCBSBankNet.Text = $"â‚¹ {summary.CBSBankNet:N2}";
-                if (DashboardCBSCashNet != null) DashboardCBSCashNet.Text = $"â‚¹ {summary.CBSCashNet:N2}";
+                if (DashboardOutstanding != null) DashboardOutstanding.Text = $"Rs. {summary.BillDueAmount:N2}";
+                if (DashboardCBSBankNet != null) DashboardCBSBankNet.Text = $"Rs. {summary.CBSBankNet:N2}";
+                if (DashboardCBSCashNet != null) DashboardCBSCashNet.Text = $"Rs. {summary.CBSCashNet:N2}";
                 if (DashboardNewBookings != null) DashboardNewBookings.Text = summary.NewBookingCount.ToString();
                 if (DashboardBillsCard != null) DashboardBillsCard.ToolTip = $"Open pending bills window ({summary.PendingBillCount})";
             });
@@ -1204,6 +1204,7 @@ namespace Awagaman_ERP
         {
             try
             {
+                HideUtilityViews();
                 DashboardView.Visibility = Visibility.Collapsed;
                 DeliveryChallanView.Visibility = Visibility.Collapsed;
                 LRLedgerView.Visibility = Visibility.Collapsed;
@@ -1530,6 +1531,7 @@ namespace Awagaman_ERP
 
         private void OpenPartyLedgerTab_Click(object sender, RoutedEventArgs e)
         {
+            HideUtilityViews();
             DashboardView.Visibility = Visibility.Collapsed;
             DeliveryChallanView.Visibility = Visibility.Collapsed;
             LRLedgerView.Visibility = Visibility.Collapsed;
@@ -1882,6 +1884,7 @@ namespace Awagaman_ERP
 
         private void OpenVehicleLedgerTab_Click(object sender, RoutedEventArgs e)
         {
+            HideUtilityViews();
             DashboardView.Visibility = Visibility.Collapsed;
             DeliveryChallanView.Visibility = Visibility.Collapsed;
             LRLedgerView.Visibility = Visibility.Collapsed;
@@ -1943,6 +1946,7 @@ namespace Awagaman_ERP
 
         private async void OpenCBSLedger_Click(object sender, RoutedEventArgs e)
         {
+            HideUtilityViews();
             DashboardView.Visibility = Visibility.Collapsed;
             DeliveryChallanView.Visibility = Visibility.Collapsed;
             LRLedgerView.Visibility = Visibility.Collapsed;
@@ -5832,6 +5836,12 @@ namespace Awagaman_ERP
             if (PageTitle != null) PageTitle.Text = title;
         }
 
+        private void HideUtilityViews()
+        {
+            if (ImportGuideView != null) ImportGuideView.Visibility = Visibility.Collapsed;
+            if (ReportsView != null) ReportsView.Visibility = Visibility.Collapsed;
+        }
+
         private void SetTopTabsInactive()
         {
             try
@@ -9428,7 +9438,7 @@ namespace Awagaman_ERP
             e.Handled = true;
         }
 
-        private void OpenDashboard_Click(object sender, RoutedEventArgs e) { DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Collapsed; DashboardView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; TabDashboard.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); if (PageTitle != null) PageTitle.Text = "Dashboard"; RefreshDashboard(); }
+        private void OpenDashboard_Click(object sender, RoutedEventArgs e) { HideUtilityViews(); DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Collapsed; DashboardView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; TabDashboard.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); if (PageTitle != null) PageTitle.Text = "Dashboard"; RefreshDashboard(); }
         private void Refresh_Click(object sender, RoutedEventArgs e) { if (SearchBox != null) SearchBox.Text = string.Empty; if (ChallanFilterBox != null) ChallanFilterBox.Text = string.Empty; if (LRFilterBox != null) LRFilterBox.Text = string.Empty; if (FromFilterBox != null) FromFilterBox.Text = string.Empty; if (ToFilterBox != null) ToFilterBox.Text = string.Empty; _challanHeaderFilters.Clear(); _onlyDueFilterEnabled = false; if (OnlyDueButton != null) OnlyDueButton.Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#455A64")); ApplyChallanDueFilter(); if (LedgerGrid != null) LedgerGrid.UnselectAllCells(); }
         private void OnlyDueButton_Click(object sender, RoutedEventArgs e)
         {
@@ -9607,6 +9617,7 @@ namespace Awagaman_ERP
         }
         private void OpenLRLedger_Click(object sender, RoutedEventArgs e)
         {
+            HideUtilityViews();
             DashboardView.Visibility = Visibility.Collapsed;
             DeliveryChallanView.Visibility = Visibility.Collapsed;
             LRLedgerView.Visibility = Visibility.Visible;
@@ -9695,6 +9706,7 @@ namespace Awagaman_ERP
         }
         private void OpenDeliveryChallans_Click(object sender, RoutedEventArgs e)
         {
+            HideUtilityViews();
             DashboardView.Visibility = Visibility.Collapsed;
             LRLedgerView.Visibility = Visibility.Collapsed;
             DeliveryChallanView.Visibility = Visibility.Visible;
@@ -9732,7 +9744,7 @@ namespace Awagaman_ERP
             SyncAllChallanBillingFromLR();
             UpdatePageUI();
         }
-        private void OpenTrackingLedger_Click(object sender, RoutedEventArgs e) { DashboardView.Visibility = Visibility.Collapsed; DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; if (TrackingLedgerView.DataContext == null) TrackingLedgerView.DataContext = TrackingVM; if (TrackingLedgerGrid != null) TrackingLedgerGrid.ItemsSource = TrackingVM.Entries; if (TrackingVM != null && TrackingVM.Entries.Count == 0) TrackingVM.LoadData(); TabTrackingLedger.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDashboard.Style = (Style)FindResource("TabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count; if (PageTitle != null) PageTitle.Text = "Tracking Ledger"; }
+        private void OpenTrackingLedger_Click(object sender, RoutedEventArgs e) { HideUtilityViews(); DashboardView.Visibility = Visibility.Collapsed; DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; if (TrackingLedgerView.DataContext == null) TrackingLedgerView.DataContext = TrackingVM; if (TrackingLedgerGrid != null) TrackingLedgerGrid.ItemsSource = TrackingVM.Entries; if (TrackingVM != null && TrackingVM.Entries.Count == 0) TrackingVM.LoadData(); TabTrackingLedger.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDashboard.Style = (Style)FindResource("TabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count; if (PageTitle != null) PageTitle.Text = "Tracking Ledger"; }
         private void OpenTrackingEntryForm_Click(object sender, RoutedEventArgs e) { var entry = TrackingLedgerGrid?.SelectedItem as TrackingEntry; if (entry == null) { MessageBox.Show("Select a tracking entry to edit.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information); return; } var form = new TrackingEntryFormWindow(entry); form.Owner = this; form.Closed += (_, __) => { TrackingVM.UpdateEntry(entry); var repo = new TrackingRepository(); var reports = repo.GetReportingTracks(entry.Id); if (reports.Count > 0) entry.LatestReport = $"{reports[reports.Count - 1].ReportDateTime:dd-MMM HH:mm} - {reports[reports.Count - 1].Remarks}"; RefreshDashboard(); }; form.Show(); }
         private async void AppVersionText_MouseLeftButtonUp(object sender, MouseButtonEventArgs e) { await App.CheckForUpdatesOnDemandAsync(); }
         private void TrackingGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e) { OpenTrackingEntryForm_Click(sender, e); }

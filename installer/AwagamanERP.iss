@@ -1,5 +1,5 @@
 ﻿#define MyAppName "Awagaman ERP"
-#define MyAppVersion "1.0.40"
+#define MyAppVersion "1.0.43"
 #define MyAppPublisher "Awagaman ERP"
 #define MyAppExeName "Awagaman ERP.exe"
 #define MySourceDir "c:\amit sagu\awagaman project\ATL ERP_pre_multiuser\Awagaman ERP\bin\Release"
@@ -13,7 +13,7 @@ DefaultDirName={autopf}\Awagaman ERP
 DefaultGroupName=Awagaman ERP
 DisableProgramGroupPage=yes
 OutputDir=c:\amit sagu\awagaman project\ATL ERP_pre_multiuser\dist
-OutputBaseFilename=AwagamanERP-Setup-v1.0.40
+OutputBaseFilename=AwagamanERP-Setup-v1.0.43
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern

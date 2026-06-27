@@ -329,7 +329,7 @@
 
                         <Button Content="Sales" Tag="M3,20 L21,20 M6,17 L6,11 M12,17 L12,5 M18,17 L18,8" Style="{StaticResource SidebarButtonStyle}" />
 
-                        <Button Content="Delivery Challans" Tag="M3,7 L14,7 L14,17 L3,17 Z M14,10 L18,10 L21,14 L21,17 L14,17 M6,19 A2,2 0 1,0 6,15 A2,2 0 1,0 6,19 M18,19 A2,2 0 1,0 18,15 A2,2 0 1,0 18,19" Style="{StaticResource SidebarButtonStyle}" Foreground="{StaticResource ThemeBlue}" Background="#F3F4F6" />
+                        <Button Content="Ledgers" Tag="M3,7 L14,7 L14,17 L3,17 Z M14,10 L18,10 L21,14 L21,17 L14,17 M6,19 A2,2 0 1,0 6,15 A2,2 0 1,0 6,19 M18,19 A2,2 0 1,0 18,15 A2,2 0 1,0 18,19" Style="{StaticResource SidebarButtonStyle}" Foreground="{StaticResource ThemeBlue}" Background="#F3F4F6" Click="OpenDashboard_Click" ToolTip="Open ledger workspace" />
 
                         <Button Content="Purchase" Tag="M3,4 L5,4 L7,14 L18,14 L20,7 L6,7 M8,20 A2,2 0 1,0 8,16 A2,2 0 1,0 8,20 M17,20 A2,2 0 1,0 17,16 A2,2 0 1,0 17,20" Style="{StaticResource SidebarButtonStyle}" />
 
@@ -548,7 +548,7 @@
                                         </Border>
                                         <StackPanel Grid.Row="1" Margin="0,16,0,0">
                                             <TextBlock Text="Total Due" Style="{StaticResource DashboardMetricLabel}" Foreground="#C2410C" />
-                                            <TextBlock x:Name="DashboardTotalDue" Text="₹ 0.00" Style="{StaticResource DashboardMetricValue}" Foreground="#9A3412" Margin="0,4,0,0" />
+                                            <TextBlock x:Name="DashboardTotalDue" Text="Rs. 0.00" Style="{StaticResource DashboardMetricValue}" Foreground="#9A3412" Margin="0,4,0,0" />
                                             <TextBlock x:Name="DashboardTotalChallans" Text="0 Challans" Style="{StaticResource DashboardMetricHint}" Foreground="#C2410C" Margin="0,6,0,0" />
                                         </StackPanel>
                                     </Grid>
@@ -569,7 +569,7 @@
                                         </Border>
                                         <StackPanel Grid.Row="1" Margin="0,16,0,0">
                                             <TextBlock Text="Outstanding" Style="{StaticResource DashboardMetricLabel}" Foreground="#166534" />
-                                            <TextBlock x:Name="DashboardOutstanding" Text="₹ 0.00" Style="{StaticResource DashboardMetricValue}" Foreground="#14532D" Margin="0,4,0,0" />
+                                            <TextBlock x:Name="DashboardOutstanding" Text="Rs. 0.00" Style="{StaticResource DashboardMetricValue}" Foreground="#14532D" Margin="0,4,0,0" />
                                             <TextBlock Text="Amount pending across bill records" Style="{StaticResource DashboardMetricHint}" Foreground="#166534" Margin="0,6,0,0" />
                                         </StackPanel>
                                     </Grid>
@@ -590,9 +590,9 @@
                                         </Border>
                                         <StackPanel Grid.Row="1" Margin="0,16,0,0">
                                             <TextBlock Text="Bank Net" Style="{StaticResource DashboardMetricLabel}" Foreground="#1D4ED8" />
-                                            <TextBlock x:Name="DashboardCBSBankNet" Text="₹ 0.00" Style="{StaticResource DashboardMetricValue}" Foreground="#1E3A8A" Margin="0,4,0,0" />
+                                            <TextBlock x:Name="DashboardCBSBankNet" Text="Rs. 0.00" Style="{StaticResource DashboardMetricValue}" Foreground="#1E3A8A" Margin="0,4,0,0" />
                                             <TextBlock Text="Cash Net" Style="{StaticResource DashboardMetricLabel}" Foreground="#0369A1" Margin="0,10,0,0" />
-                                            <TextBlock x:Name="DashboardCBSCashNet" Text="₹ 0.00" Style="{StaticResource DashboardMetricValue}" Foreground="#0F766E" Margin="0,4,0,0" />
+                                            <TextBlock x:Name="DashboardCBSCashNet" Text="Rs. 0.00" Style="{StaticResource DashboardMetricValue}" Foreground="#0F766E" Margin="0,4,0,0" />
                                             <TextBlock Text="Open CBS ledger" Style="{StaticResource DashboardMetricHint}" Foreground="#1D4ED8" Margin="0,6,0,0" />
                                         </StackPanel>
                                     </Grid>
