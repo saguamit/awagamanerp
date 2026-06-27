@@ -27,8 +27,8 @@ public class BillEntry
     public string? Party { get; set; }
     public string? LRNo { get; set; }
     public DateTime? LRDate { get; set; }
-    public string? FromLoc { get; set; }
-    public string? ToLoc { get; set; }
+    public string? From { get; set; }
+    public string? To { get; set; }
     public string? VehicleType { get; set; }
     public decimal Freight { get; set; }
     public decimal Detention { get; set; }

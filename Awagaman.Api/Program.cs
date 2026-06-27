@@ -255,7 +255,17 @@ lrs.MapDelete("/{id:int}", async (int id, AwagamanRepository repo) =>
 });
 
 var bills = app.MapGroup("/api/bills");
-bills.MapGet("/", async (AwagamanRepository repo) => Results.Ok(await repo.GetBillsAsync()));
+bills.MapGet("/", async (AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetBillsAsync());
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
 bills.MapGet("/page", async (int page, int pageSize, string? search, string? sort, bool? asc, string? party, bool? dueOnly, AwagamanRepository repo) =>
 {
     try
@@ -269,24 +279,52 @@ bills.MapGet("/page", async (int page, int pageSize, string? search, string? sor
 });
 bills.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
 {
-    var item = await repo.GetBillAsync(id);
-    return item is null ? Results.NotFound() : Results.Ok(item);
+    try
+    {
+        var item = await repo.GetBillAsync(id);
+        return item is null ? Results.NotFound() : Results.Ok(item);
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
 });
 bills.MapPost("/", async (BillEntry entry, AwagamanRepository repo) =>
 {
-    var id = await repo.UpsertBillAsync(entry);
-    return Results.Created($"/api/bills/{id}", new { id });
+    try
+    {
+        var id = await repo.UpsertBillAsync(entry);
+        return Results.Created($"/api/bills/{id}", new { id });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
 });
 bills.MapPut("/{id:int}", async (int id, BillEntry entry, AwagamanRepository repo) =>
 {
-    entry.Id = id;
-    await repo.UpsertBillAsync(entry);
-    return Results.NoContent();
+    try
+    {
+        entry.Id = id;
+        await repo.UpsertBillAsync(entry);
+        return Results.NoContent();
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
 });
 bills.MapDelete("/{id:int}", async (int id, AwagamanRepository repo) =>
 {
-    await repo.DeleteBillAsync(id);
-    return Results.NoContent();
+    try
+    {
+        await repo.DeleteBillAsync(id);
+        return Results.NoContent();
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
 });
 
 var cbsAccounts = app.MapGroup("/api/cbs/accounts");
