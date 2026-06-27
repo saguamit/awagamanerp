@@ -94,9 +94,7 @@
 
                                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
 
-                                    <!-- Use Text for icon placeholder -->
-
-                                    <TextBlock Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" FontFamily="Segoe UI Symbol" FontSize="18" HorizontalAlignment="Center" Margin="0,0,0,4" />
+                                    <Path Data="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" Width="20" Height="20" Stretch="Uniform" Stroke="{TemplateBinding Foreground}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Fill="Transparent" HorizontalAlignment="Center" Margin="0,0,0,4" />
 
                                     <TextBlock Text="{TemplateBinding Content}" FontSize="12" HorizontalAlignment="Center" />
 
@@ -329,19 +327,19 @@
 
                     <StackPanel>
 
-                        <Button Content="Sales" Tag="📊" Style="{StaticResource SidebarButtonStyle}" />
+                        <Button Content="Sales" Tag="M3,20 L21,20 M6,17 L6,11 M12,17 L12,5 M18,17 L18,8" Style="{StaticResource SidebarButtonStyle}" />
 
-                        <Button Content="Delivery Challans" Tag="🚚" Style="{StaticResource SidebarButtonStyle}" Foreground="{StaticResource ThemeBlue}" Background="#F3F4F6" />
+                        <Button Content="Delivery Challans" Tag="M3,7 L14,7 L14,17 L3,17 Z M14,10 L18,10 L21,14 L21,17 L14,17 M6,19 A2,2 0 1,0 6,15 A2,2 0 1,0 6,19 M18,19 A2,2 0 1,0 18,15 A2,2 0 1,0 18,19" Style="{StaticResource SidebarButtonStyle}" Foreground="{StaticResource ThemeBlue}" Background="#F3F4F6" />
 
-                        <Button Content="Purchase" Tag="🛒" Style="{StaticResource SidebarButtonStyle}" />
+                        <Button Content="Purchase" Tag="M3,4 L5,4 L7,14 L18,14 L20,7 L6,7 M8,20 A2,2 0 1,0 8,16 A2,2 0 1,0 8,20 M17,20 A2,2 0 1,0 17,16 A2,2 0 1,0 17,20" Style="{StaticResource SidebarButtonStyle}" />
 
-                        <Button Content="Returns" Tag="↩" Style="{StaticResource SidebarButtonStyle}" />
+                        <Button Content="Returns" Tag="M9,7 L4,12 L9,17 M5,12 L16,12 A4,4 0 1,1 16,20" Style="{StaticResource SidebarButtonStyle}" />
 
-                        <Button Content="Master" Tag="≡" Style="{StaticResource SidebarButtonStyle}" />
+                        <Button Content="Master" Tag="M4,7 L20,7 M4,12 L20,12 M4,17 L20,17" Style="{StaticResource SidebarButtonStyle}" />
 
-                        <Button Content="Imports" Tag="📥" Style="{StaticResource SidebarButtonStyle}" />
-                        <Button Content="Reconciliation" Tag="📄" Style="{StaticResource SidebarButtonStyle}" />
-                        <Button Content="Reports" Tag="⊞" Style="{StaticResource SidebarButtonStyle}" Click="OpenReports_Click" />
+                        <Button Content="Imports" Tag="M12,3 L12,15 M8,11 L12,15 L16,11 M5,20 L19,20" Style="{StaticResource SidebarButtonStyle}" Click="OpenImportGuide_Click" />
+                        <Button Content="Reconciliation" Tag="M5,4 L19,4 L19,20 L5,20 Z M8,8 L16,8 M8,12 L16,12 M8,16 L13,16" Style="{StaticResource SidebarButtonStyle}" />
+                        <Button Content="Reports" Tag="M4,20 L20,20 M7,17 L7,12 M12,17 L12,7 M17,17 L17,10" Style="{StaticResource SidebarButtonStyle}" Click="OpenReports_Click" />
 
                     </StackPanel>
 
@@ -373,7 +371,7 @@
 
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
 
-                    <Button Content="â˜°" FontSize="18" Background="Transparent" BorderThickness="0" Foreground="#555555" Margin="0,0,16,0" Cursor="Hand" Click="ToggleSidebar_Click" ToolTip="Toggle Sidebar" />
+                    <Button Content="Menu" FontSize="13" Background="Transparent" BorderBrush="#D1D5DB" BorderThickness="1" Padding="10,4" Foreground="#555555" Margin="0,0,16,0" Cursor="Hand" Click="ToggleSidebar_Click" ToolTip="Hide / Show left menu" />
 
                     <TextBlock x:Name="PageTitle" Text="Delivery Challan List" FontSize="18" Foreground="#555555" FontWeight="SemiBold" VerticalAlignment="Center" />
 
@@ -381,7 +379,7 @@
 
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
 
-                    <TextBlock Text="ðŸ  / Dashboard" Foreground="#888888" FontSize="12" />
+                    <TextBlock Text="Home / Dashboard" Foreground="#888888" FontSize="12" />
 
                 </StackPanel>
 
@@ -436,6 +434,16 @@
                     </Border>
 
 
+
+                    <!-- Import Guide View -->
+                    <Grid x:Name="ImportGuideView" Grid.Row="1" Grid.RowSpan="4" Visibility="Collapsed" Background="White">
+                        <ContentControl x:Name="ImportGuideContentHost" />
+                    </Grid>
+
+                    <!-- Reports View -->
+                    <Grid x:Name="ReportsView" Grid.Row="1" Grid.RowSpan="4" Visibility="Collapsed" Background="White">
+                        <ContentControl x:Name="ReportsContentHost" />
+                    </Grid>
 
                     <!-- Dashboard View -->
                     <Grid x:Name="DashboardView" Grid.Row="1" Grid.RowSpan="4">
@@ -535,6 +543,9 @@
                                         <Border Background="#F97316" CornerRadius="12" HorizontalAlignment="Left" Padding="10,5">
                                             <TextBlock Text="Cash flow" Foreground="White" FontSize="11" FontWeight="SemiBold" />
                                         </Border>
+                                        <Border Background="#FFF0DF" CornerRadius="16" Width="34" Height="34" HorizontalAlignment="Right" VerticalAlignment="Top">
+                                            <Path Data="M4,18 L9,18 L9,10 L15,10 L15,18 L20,18 L12,26 Z M5,5 L19,5 L19,8 L5,8 Z" Fill="#F97316" Stretch="Uniform" Width="18" Height="18" />
+                                        </Border>
                                         <StackPanel Grid.Row="1" Margin="0,16,0,0">
                                             <TextBlock Text="Total Due" Style="{StaticResource DashboardMetricLabel}" Foreground="#C2410C" />
                                             <TextBlock x:Name="DashboardTotalDue" Text="₹ 0.00" Style="{StaticResource DashboardMetricValue}" Foreground="#9A3412" Margin="0,4,0,0" />
@@ -553,6 +564,9 @@
                                         <Border Background="#16A34A" CornerRadius="12" HorizontalAlignment="Left" Padding="10,5">
                                             <TextBlock Text="Bills" Foreground="White" FontSize="11" FontWeight="SemiBold" />
                                         </Border>
+                                        <Border Background="#DCFCE7" CornerRadius="16" Width="34" Height="34" HorizontalAlignment="Right" VerticalAlignment="Top">
+                                            <Path Data="M6,3 L18,3 L22,7 L22,25 L6,25 Z M18,3 L18,8 L22,8 M9,12 L19,12 M9,16 L19,16 M9,20 L16,20" Stroke="#16A34A" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Fill="Transparent" Stretch="Uniform" Width="18" Height="18" />
+                                        </Border>
                                         <StackPanel Grid.Row="1" Margin="0,16,0,0">
                                             <TextBlock Text="Outstanding" Style="{StaticResource DashboardMetricLabel}" Foreground="#166534" />
                                             <TextBlock x:Name="DashboardOutstanding" Text="₹ 0.00" Style="{StaticResource DashboardMetricValue}" Foreground="#14532D" Margin="0,4,0,0" />
@@ -570,6 +584,9 @@
                                         </Grid.RowDefinitions>
                                         <Border Background="#2563EB" CornerRadius="12" HorizontalAlignment="Left" Padding="10,5">
                                             <TextBlock Text="CBS" Foreground="White" FontSize="11" FontWeight="SemiBold" />
+                                        </Border>
+                                        <Border Background="#DBEAFE" CornerRadius="16" Width="34" Height="34" HorizontalAlignment="Right" VerticalAlignment="Top">
+                                            <Path Data="M4,9 L14,4 L24,9 Z M6,11 L6,21 M12,11 L12,21 M18,11 L18,21 M22,11 L22,21 M4,23 L24,23" Stroke="#2563EB" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Fill="Transparent" Stretch="Uniform" Width="20" Height="20" />
                                         </Border>
                                         <StackPanel Grid.Row="1" Margin="0,16,0,0">
                                             <TextBlock Text="Bank Net" Style="{StaticResource DashboardMetricLabel}" Foreground="#1D4ED8" />
@@ -590,6 +607,9 @@
                                         </Grid.RowDefinitions>
                                         <Border Background="#7C3AED" CornerRadius="12" HorizontalAlignment="Left" Padding="10,5">
                                             <TextBlock Text="Bookings" Foreground="White" FontSize="11" FontWeight="SemiBold" />
+                                        </Border>
+                                        <Border Background="#EDE9FE" CornerRadius="16" Width="34" Height="34" HorizontalAlignment="Right" VerticalAlignment="Top">
+                                            <Path Data="M5,7 L21,7 L21,22 L5,22 Z M8,4 L8,10 M18,4 L18,10 M8,13 L18,13 M8,17 L15,17" Stroke="#7C3AED" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Fill="Transparent" Stretch="Uniform" Width="19" Height="19" />
                                         </Border>
                                         <StackPanel Grid.Row="1" Margin="0,16,0,0">
                                             <TextBlock Text="New Bookings" Style="{StaticResource DashboardMetricLabel}" Foreground="#6D28D9" />
@@ -632,6 +652,7 @@
                                 <TextBox x:Name="BillSearchBox" TextChanged="BillSearchBox_TextChanged" Width="200" Height="26" BorderBrush="{StaticResource BorderLight}" FontSize="12" Padding="4,2" Margin="0,0,16,0" />
                                 <Button Content="↻" Background="{StaticResource ThemeGreen}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="BillRefresh_Click" ToolTip="Clear Filters" />
                                 <Button Content="📂" Background="#1565C0" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ImportBill_Click" ToolTip="Import Bills from CSV" />
+                                <Button Content="?" Background="#374151" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenImportGuide_Click" ToolTip="Import column names" />
                                 <Button Content="₹" Background="#00897B" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenReceiveBillAmount_Click" ToolTip="Receive Bill Amount" />
                                 <Button Content="🧾" Background="#6D4C41" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenBillReceiptHistory_Click" ToolTip="Bill Receipt History" />
                                 <Button Content="Σ" Background="#6D4C41" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenPartyBillSummary_Click" ToolTip="Party-wise Bill Due Summary" />
@@ -1060,9 +1081,9 @@
 
                             <!-- Summary Values -->
 
-                            <StackPanel Orientation="Horizontal">
+                            <WrapPanel>
 
-                                <StackPanel Margin="0,0,40,0">
+                                <StackPanel Margin="0,0,24,8" MinWidth="90">
 
                                     <TextBlock Text="Total Records" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
 
@@ -1070,7 +1091,7 @@
 
                                 </StackPanel>
 
-                                <StackPanel Margin="0,0,40,0">
+                                <StackPanel Margin="0,0,24,8" MinWidth="110">
 
                                     <TextBlock Text="Total Due Amount" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
 
@@ -1078,7 +1099,7 @@
 
                                 </StackPanel>
 
-                                <StackPanel Margin="0,0,40,0">
+                                <StackPanel Margin="0,0,24,8" MinWidth="90">
 
                                     <TextBlock Text="Total Margin" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
 
@@ -1086,7 +1107,7 @@
 
                                 </StackPanel>
 
-                                <StackPanel Margin="0,0,40,0">
+                                <StackPanel Margin="0,0,24,8" MinWidth="80">
 
                                     <TextBlock Text="Total SGST" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
 
@@ -1094,7 +1115,7 @@
 
                                 </StackPanel>
 
-                                <StackPanel Margin="0,0,40,0">
+                                <StackPanel Margin="0,0,24,8" MinWidth="90">
 
                                     <TextBlock Text="Total Amount" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
 
@@ -1102,7 +1123,7 @@
 
                                 </StackPanel>
 
-                            </StackPanel>
+                            </WrapPanel>
 
 
 
@@ -1122,37 +1143,38 @@
 
                     <Border Grid.Row="1" Background="#FAFAFA" BorderBrush="{StaticResource BorderLight}" BorderThickness="0,0,0,1" Padding="16,8">
 
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <WrapPanel VerticalAlignment="Center">
 
-                            <TextBlock Text="Search &amp; Filter" FontSize="12" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,16,0" />
+                            <TextBlock Text="Search &amp; Filter" FontSize="12" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,16,8" />
 
-                            <TextBlock Text="Challan No" FontSize="11" Foreground="#888" VerticalAlignment="Center" Margin="0,0,4,0" />
-                            <TextBox x:Name="ChallanFilterBox" TextChanged="ChallanFilterBox_TextChanged" Width="80" Height="22" FontSize="11" Padding="2,1" BorderBrush="#CCC" Margin="0,0,12,0" />
+                            <TextBlock Text="Challan No" FontSize="11" Foreground="#888" VerticalAlignment="Center" Margin="0,0,4,8" />
+                            <TextBox x:Name="ChallanFilterBox" TextChanged="ChallanFilterBox_TextChanged" Width="80" Height="22" FontSize="11" Padding="2,1" BorderBrush="#CCC" Margin="0,0,12,8" />
 
-                            <TextBlock Text="LR No" FontSize="11" Foreground="#888" VerticalAlignment="Center" Margin="0,0,4,0" />
-                            <TextBox x:Name="LRFilterBox" TextChanged="LRFilterBox_TextChanged" Width="80" Height="22" FontSize="11" Padding="2,1" BorderBrush="#CCC" Margin="0,0,12,0" />
+                            <TextBlock Text="LR No" FontSize="11" Foreground="#888" VerticalAlignment="Center" Margin="0,0,4,8" />
+                            <TextBox x:Name="LRFilterBox" TextChanged="LRFilterBox_TextChanged" Width="80" Height="22" FontSize="11" Padding="2,1" BorderBrush="#CCC" Margin="0,0,12,8" />
 
-                            <TextBlock Text="From" FontSize="11" Foreground="#888" VerticalAlignment="Center" Margin="0,0,4,0" />
-                            <TextBox x:Name="FromFilterBox" TextChanged="FromFilterBox_TextChanged" Width="80" Height="22" FontSize="11" Padding="2,1" BorderBrush="#CCC" Margin="0,0,12,0" />
+                            <TextBlock Text="From" FontSize="11" Foreground="#888" VerticalAlignment="Center" Margin="0,0,4,8" />
+                            <TextBox x:Name="FromFilterBox" TextChanged="FromFilterBox_TextChanged" Width="80" Height="22" FontSize="11" Padding="2,1" BorderBrush="#CCC" Margin="0,0,12,8" />
 
-                            <TextBlock Text="To" FontSize="11" Foreground="#888" VerticalAlignment="Center" Margin="0,0,4,0" />
-                            <TextBox x:Name="ToFilterBox" TextChanged="ToFilterBox_TextChanged" Width="80" Height="22" FontSize="11" Padding="2,1" BorderBrush="#CCC" Margin="0,0,16,0" />
+                            <TextBlock Text="To" FontSize="11" Foreground="#888" VerticalAlignment="Center" Margin="0,0,4,8" />
+                            <TextBox x:Name="ToFilterBox" TextChanged="ToFilterBox_TextChanged" Width="80" Height="22" FontSize="11" Padding="2,1" BorderBrush="#CCC" Margin="0,0,16,8" />
 
-                            <Button Content="↻" Background="{StaticResource ThemeGreen}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="Refresh_Click" ToolTip="Clear Filters &amp; Search" />
-                            <Button x:Name="OnlyDueButton" Content="Only Due" Background="#455A64" Foreground="White" BorderThickness="0" Width="70" Height="26" Margin="4,0" Cursor="Hand" Click="OnlyDueButton_Click" ToolTip="Show only due rows" />
+                            <Button Content="↻" Background="{StaticResource ThemeGreen}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="Refresh_Click" ToolTip="Clear Filters &amp; Search" />
+                            <Button x:Name="OnlyDueButton" Content="Only Due" Background="#455A64" Foreground="White" BorderThickness="0" Width="70" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="OnlyDueButton_Click" ToolTip="Show only due rows" />
 
-                            <Button Content="⚙" Background="{StaticResource ThemeBlue}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ShowColumnsMenu_Click" ToolTip="Columns" />
+                            <Button Content="⚙" Background="{StaticResource ThemeBlue}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="ShowColumnsMenu_Click" ToolTip="Columns" />
 
-                            <Button Content="✎" Background="#FF9800" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="EditSelected_Click" ToolTip="Edit Selected" />
+                            <Button Content="✎" Background="#FF9800" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="EditSelected_Click" ToolTip="Edit Selected" />
 
-                            <Button Background="#7B1FA2" Foreground="White" BorderThickness="0" Width="80" Height="26" Margin="4,0" Cursor="Hand" Click="MakeBuilty_Click" ToolTip="Create LR from selected Challan" FontSize="11">Make Builty</Button>
-                            <Button Content="₹" Background="#00897B" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenChallanPay_Click" ToolTip="Pay Challan (Broker-wise)" />
+                            <Button Background="#7B1FA2" Foreground="White" BorderThickness="0" Width="80" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="MakeBuilty_Click" ToolTip="Create LR from selected Challan" FontSize="11">Make Builty</Button>
+                            <Button Content="₹" Background="#00897B" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="OpenChallanPay_Click" ToolTip="Pay Challan (Broker-wise)" />
 
-                            <Button Content="📂" Background="#1565C0" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ImportChallan_Click" ToolTip="Import Challans from Excel" />
+                            <Button Content="Import" Background="#1565C0" Foreground="White" BorderThickness="0" Width="58" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="ImportChallan_Click" ToolTip="Import Challans from CSV" />
+                            <Button Content="?" Background="#374151" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="OpenImportGuide_Click" ToolTip="Import column names" />
 
-                            <Button Content="🗑" Background="#E53935" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="DeleteSelected_Click" ToolTip="Delete Selected" />
+                            <Button Content="Del" Background="#E53935" Foreground="White" BorderThickness="0" Width="38" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="DeleteSelected_Click" ToolTip="Delete Selected" />
 
-                        </StackPanel>
+                        </WrapPanel>
 
                     </Border>
 
@@ -1229,10 +1251,20 @@
                                          PreviewMouseRightButtonUp="LedgerGrid_PreviewMouseRightButtonUp"
                                          Sorting="LedgerGrid_Sorting"
                                          ColumnHeaderStyle="{StaticResource DataGridHeaderStyle}">
+                                    <local:CustomDataGrid.Resources>
+                                        <Style TargetType="{x:Type TextBlock}">
+                                            <Setter Property="VerticalAlignment" Value="Center" />
+                                            <Setter Property="Padding" Value="4,0" />
+                                            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                        </Style>
+                                    </local:CustomDataGrid.Resources>
                                     <DataGrid.CellStyle>
                                         <Style TargetType="DataGridCell">
                                             <Setter Property="BorderBrush" Value="#EEF2F7" />
                                             <Setter Property="BorderThickness" Value="0,0,1,1" />
+                                            <Setter Property="VerticalContentAlignment" Value="Center" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Padding" Value="0" />
                                             <Style.Triggers>
                                                 <Trigger Property="IsSelected" Value="True">
                                                     <Setter Property="Background" Value="#DBEAFE" />
@@ -1586,6 +1618,7 @@
                                 <Button Content="🗑" Background="#E53935" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="LRDeleteSelected_Click" ToolTip="Delete Selected" />
 
                                 <Button Content="📂" Background="#1565C0" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ImportLR_Click" ToolTip="Import LR from CSV" />
+                                <Button Content="?" Background="#374151" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenImportGuide_Click" ToolTip="Import column names" />
 
                                 <Button Content="📇" Background="#7B1FA2" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenPartyLedger_Click" ToolTip="Party Ledger" />
 
