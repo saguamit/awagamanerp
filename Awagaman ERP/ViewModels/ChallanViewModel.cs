@@ -6,7 +6,9 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
+using System.Windows;
 using Awagaman_ERP.Data;
 using Awagaman_ERP.Models;
 
@@ -42,6 +44,7 @@ namespace Awagaman_ERP.ViewModels
         private List<ChallanEntry> _nextPageCache;
         private List<ChallanEntry> _prevPageCache;
         private bool _isLoadingPage;
+        private bool _isLoadingPageAsync;
         public ObservableCollection<ChallanEntry> Entries { get; } = new ObservableCollection<ChallanEntry>();
         private ObservableCollection<ChallanEntry> _pagedEntries = new ObservableCollection<ChallanEntry>();
         public ObservableCollection<ChallanEntry> PagedEntries
@@ -80,6 +83,7 @@ namespace Awagaman_ERP.ViewModels
         public bool CanGoLast => CurrentPage < TotalPages;
 
         public string PageInfo => $"Page {CurrentPage} of {Math.Max(1, TotalPages)}";
+        public bool HasLoadedPage => _pageLoaded && !_countDirty;
 
         public decimal TotalDue => Entries.Sum(entry => entry?.Due ?? 0m);
         public int FilteredEntriesCount
@@ -194,6 +198,8 @@ namespace Awagaman_ERP.ViewModels
         public ChallanViewModel(IChallanRepository repository = null)
         {
             _repository = repository ?? new ChallanRepository();
+            if (BackendSettings.UseRemoteApi)
+                _pageSize = 100;
             AddCommand = new RelayCommand(_ => AddEntry(), _ => CanAdd());
             Entries.CollectionChanged += Entries_CollectionChanged;
             LoadColumnSettings();
@@ -360,7 +366,7 @@ namespace Awagaman_ERP.ViewModels
                 foreach (var entry in PagedEntries)
                     entry.HasComments = commentIds.Contains(entry.Id);
 
-                if (CurrentPage < TotalPages)
+                if (!BackendSettings.UseRemoteApi && CurrentPage < TotalPages)
                 {
                     if (_hasAdvancedFilter)
                         _nextPageCache = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
@@ -397,6 +403,144 @@ namespace Awagaman_ERP.ViewModels
             {
                 LoadPage();
             }
+        }
+
+        private class PageLoadResult
+        {
+            public int TotalCount;
+            public int CurrentPage;
+            public List<ChallanEntry> Items;
+            public HashSet<int> CommentIds;
+        }
+
+        public void EnsurePageLoadedAsync(Action afterLoad = null, Action<Exception> onError = null)
+        {
+            if (!BackendSettings.UseRemoteApi)
+            {
+                EnsurePageLoaded();
+                afterLoad?.Invoke();
+                return;
+            }
+
+            if (HasLoadedPage)
+            {
+                afterLoad?.Invoke();
+                return;
+            }
+
+            if (_isLoadingPageAsync)
+            {
+                return;
+            }
+
+            _isLoadingPageAsync = true;
+            var requestedPage = CurrentPage;
+            var requestedPageSize = PageSize;
+            var searchFilter = _searchFilter;
+            var filterChallanNo = _filterChallanNo;
+            var filterLRNo = _filterLRNo;
+            var filterFrom = _filterFrom;
+            var filterTo = _filterTo;
+            var hasAdvancedFilter = _hasAdvancedFilter;
+            var sortColumn = _sortColumn;
+            var sortAscending = _sortAscending;
+            var countDirty = _countDirty;
+
+            Task.Run(() =>
+            {
+                var result = new PageLoadResult();
+                result.CurrentPage = requestedPage;
+
+                if (countDirty)
+                {
+                    if (hasAdvancedFilter)
+                        result.TotalCount = _repository.GetTotalCountAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo);
+                    else if (string.IsNullOrEmpty(searchFilter))
+                        result.TotalCount = _repository.GetTotalCount();
+                    else
+                        result.TotalCount = _repository.GetTotalCount(searchFilter);
+                }
+                else
+                {
+                    result.TotalCount = _totalCount;
+                }
+
+                if (hasAdvancedFilter)
+                {
+                    result.Items = _repository.SearchAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, requestedPage, requestedPageSize, sortColumn, sortAscending);
+                    if (!result.Items.Any() && requestedPage > 1)
+                    {
+                        result.CurrentPage = 1;
+                        result.Items = _repository.SearchAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, 1, requestedPageSize, sortColumn, sortAscending);
+                    }
+                }
+                else if (string.IsNullOrEmpty(searchFilter))
+                {
+                    result.Items = _repository.GetPage(requestedPage, requestedPageSize, sortColumn, sortAscending);
+                }
+                else
+                {
+                    result.Items = _repository.Search(searchFilter, requestedPage, requestedPageSize, sortColumn, sortAscending);
+                    if (!result.Items.Any() && requestedPage > 1)
+                    {
+                        result.CurrentPage = 1;
+                        result.Items = _repository.Search(searchFilter, 1, requestedPageSize, sortColumn, sortAscending);
+                    }
+                }
+
+                result.CommentIds = _repository.GetChallanIdsWithComments();
+                return result;
+            }).ContinueWith(task =>
+            {
+                var dispatcher = Application.Current?.Dispatcher;
+                Action apply = () =>
+                {
+                    try
+                    {
+                        if (task.Exception != null)
+                        {
+                            var ex = task.Exception.InnerException ?? task.Exception;
+                            onError?.Invoke(ex);
+                            return;
+                        }
+
+                        var result = task.Result;
+                        _suppressPersistence = true;
+                        _currentPage = result.CurrentPage;
+                        _totalCount = result.TotalCount;
+                        _countDirty = false;
+                        _nextPageCache = null;
+                        PagedEntries = new ObservableCollection<ChallanEntry>(result.Items ?? new List<ChallanEntry>());
+
+                        var commentIds = result.CommentIds ?? new HashSet<int>();
+                        foreach (var entry in PagedEntries)
+                            entry.HasComments = commentIds.Contains(entry.Id);
+
+                        FilteredEntriesCount = PagedEntries.Count;
+                        OnPropertyChanged(nameof(CurrentPage));
+                        OnPropertyChanged(nameof(PageInfo));
+                        OnPropertyChanged(nameof(TotalCount));
+                        OnPropertyChanged(nameof(TotalPages));
+                        OnPropertyChanged(nameof(CanGoPrevious));
+                        OnPropertyChanged(nameof(CanGoNext));
+                        OnPropertyChanged(nameof(CanGoFirst));
+                        OnPropertyChanged(nameof(CanGoLast));
+                        OnPropertyChanged(nameof(HasLoadedPage));
+                        _pageLoaded = true;
+                        afterLoad?.Invoke();
+                    }
+                    finally
+                    {
+                        _suppressPersistence = false;
+                        _isLoadingPageAsync = false;
+                    }
+                };
+
+                if (dispatcher != null && !dispatcher.CheckAccess())
+                    dispatcher.BeginInvoke(apply);
+                else
+                    apply();
+            });
         }
 
         public int GetNextSr() => _repository.GetMaxSr() + 1;

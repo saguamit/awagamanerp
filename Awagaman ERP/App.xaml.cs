@@ -230,7 +230,7 @@ namespace Awagaman_ERP
                 }
 
                 var result = MessageBox.Show(
-                    $"A newer version is available.\n\nCurrent: {current}\nLatest: {latest.Version}\n\nDo you want to download and install the update now?\nThe app will close and the installer will run.",
+                    $"A newer version is available.\n\nCurrent: {current}\nLatest: {latest.Version}\n\nDo you want to update now?\nThe app will close, update files in-place, and open again. Your data/settings will be retained.",
                     "Update Available",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Information);
@@ -309,6 +309,8 @@ namespace Awagaman_ERP
 
                 string downloadUrl = null;
                 string assetName = null;
+                string setupDownloadUrl = null;
+                string setupAssetName = null;
 
                 var assetsBlock = MatchValue(json, "\"assets\"\\s*:\\s*\\[(.*)\\]\\s*,\\s*\"assets_url\"", RegexOptions.Singleline);
                 if (!string.IsNullOrWhiteSpace(assetsBlock))
@@ -319,19 +321,37 @@ namespace Awagaman_ERP
                         var assetJson = assetMatch.Value;
                         var name = MatchValue(assetJson, "\"name\"\\s*:\\s*\"([^\"]+)\"");
                         var url = MatchValue(assetJson, "\"browser_download_url\"\\s*:\\s*\"([^\"]+)\"");
-                        if (!string.IsNullOrWhiteSpace(name) &&
-                            !string.IsNullOrWhiteSpace(url) &&
-                            (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)) &&
-                            (string.IsNullOrWhiteSpace(downloadUrl) || name.IndexOf("setup", StringComparison.OrdinalIgnoreCase) >= 0))
+                        if (string.IsNullOrWhiteSpace(name) ||
+                            string.IsNullOrWhiteSpace(url) ||
+                            !(name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            continue;
+                        }
+
+                        if (name.IndexOf("update", StringComparison.OrdinalIgnoreCase) >= 0)
                         {
                             downloadUrl = url;
                             assetName = name;
-                            if (name.IndexOf("setup", StringComparison.OrdinalIgnoreCase) >= 0)
-                            {
-                                break;
-                            }
+                            break;
+                        }
+
+                        if (name.IndexOf("setup", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            setupDownloadUrl = url;
+                            setupAssetName = name;
+                        }
+                        else if (string.IsNullOrWhiteSpace(setupDownloadUrl))
+                        {
+                            setupDownloadUrl = url;
+                            setupAssetName = name;
                         }
                     }
+                }
+
+                if (string.IsNullOrWhiteSpace(downloadUrl))
+                {
+                    downloadUrl = setupDownloadUrl;
+                    assetName = setupAssetName;
                 }
 
                 return new ReleaseInfo { Version = version, DownloadUrl = downloadUrl, AssetName = assetName };

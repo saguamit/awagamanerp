@@ -9122,7 +9122,45 @@ namespace Awagaman_ERP
                 break;
             }
         }
-        private void OpenDeliveryChallans_Click(object sender, RoutedEventArgs e) { DashboardView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; DeliveryChallanView.Visibility = Visibility.Visible; TrackingLedgerView.Visibility = Visibility.Collapsed; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; TabDeliveryChallans.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDashboard.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); if (PageTitle != null) PageTitle.Text = "Delivery Challan List"; VM.EnsurePageLoaded(); SyncAllChallanBillingFromLR(); UpdatePageUI(); }
+        private void OpenDeliveryChallans_Click(object sender, RoutedEventArgs e)
+        {
+            DashboardView.Visibility = Visibility.Collapsed;
+            LRLedgerView.Visibility = Visibility.Collapsed;
+            DeliveryChallanView.Visibility = Visibility.Visible;
+            TrackingLedgerView.Visibility = Visibility.Collapsed;
+            PartyLedgerView.Visibility = Visibility.Collapsed;
+            BillLedgerView.Visibility = Visibility.Collapsed;
+            VehicleLedgerView.Visibility = Visibility.Collapsed;
+            CBSLedgerView.Visibility = Visibility.Collapsed;
+            TabDeliveryChallans.Style = (Style)FindResource("ActiveTabButtonStyle");
+            TabDashboard.Style = (Style)FindResource("TabButtonStyle");
+            TabLRLedger.Style = (Style)FindResource("TabButtonStyle");
+            TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle");
+            TabPartyLedger.Style = (Style)FindResource("TabButtonStyle");
+            TabBillLedger.Style = (Style)FindResource("TabButtonStyle");
+            TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle");
+            TabCBSLedger.Style = (Style)FindResource("TabButtonStyle");
+            if (PageTitle != null) PageTitle.Text = "Delivery Challan List";
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                if (!VM.HasLoadedPage && RecordCountText != null)
+                    RecordCountText.Text = "Loading challans...";
+
+                VM.EnsurePageLoadedAsync(
+                    () => UpdatePageUI(),
+                    ex =>
+                    {
+                        AppLogger.LogException(nameof(OpenDeliveryChallans_Click), ex);
+                        if (RecordCountText != null) RecordCountText.Text = "Unable to load challans";
+                    });
+                return;
+            }
+
+            VM.EnsurePageLoaded();
+            SyncAllChallanBillingFromLR();
+            UpdatePageUI();
+        }
         private void OpenTrackingLedger_Click(object sender, RoutedEventArgs e) { DashboardView.Visibility = Visibility.Collapsed; DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; if (TrackingLedgerView.DataContext == null) TrackingLedgerView.DataContext = TrackingVM; if (TrackingLedgerGrid != null) TrackingLedgerGrid.ItemsSource = TrackingVM.Entries; if (TrackingVM != null && TrackingVM.Entries.Count == 0) TrackingVM.LoadData(); TabTrackingLedger.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDashboard.Style = (Style)FindResource("TabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count; if (PageTitle != null) PageTitle.Text = "Tracking Ledger"; }
         private void OpenTrackingEntryForm_Click(object sender, RoutedEventArgs e) { var entry = TrackingLedgerGrid?.SelectedItem as TrackingEntry; if (entry == null) { MessageBox.Show("Select a tracking entry to edit.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information); return; } var form = new TrackingEntryFormWindow(entry); form.Owner = this; form.Closed += (_, __) => { TrackingVM.UpdateEntry(entry); var repo = new TrackingRepository(); var reports = repo.GetReportingTracks(entry.Id); if (reports.Count > 0) entry.LatestReport = $"{reports[reports.Count - 1].ReportDateTime:dd-MMM HH:mm} - {reports[reports.Count - 1].Remarks}"; RefreshDashboard(); }; form.Show(); }
         private async void AppVersionText_MouseLeftButtonUp(object sender, MouseButtonEventArgs e) { await App.CheckForUpdatesOnDemandAsync(); }
