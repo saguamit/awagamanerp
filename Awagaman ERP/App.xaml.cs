@@ -312,39 +312,34 @@ namespace Awagaman_ERP
                 string setupDownloadUrl = null;
                 string setupAssetName = null;
 
-                var assetsBlock = MatchValue(json, "\"assets\"\\s*:\\s*\\[(.*)\\]\\s*,\\s*\"assets_url\"", RegexOptions.Singleline);
-                if (!string.IsNullOrWhiteSpace(assetsBlock))
+                var assetMatches = Regex.Matches(json, "\"name\"\\s*:\\s*\"([^\"]+)\".*?\"browser_download_url\"\\s*:\\s*\"([^\"]+)\"", RegexOptions.Singleline);
+                foreach (Match assetMatch in assetMatches)
                 {
-                    var assetMatches = Regex.Matches(assetsBlock, "\\{(.*?)\\}", RegexOptions.Singleline);
-                    foreach (Match assetMatch in assetMatches)
+                    var name = assetMatch.Groups[1].Value;
+                    var url = assetMatch.Groups[2].Value;
+                    if (string.IsNullOrWhiteSpace(name) ||
+                        string.IsNullOrWhiteSpace(url) ||
+                        !(name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)))
                     {
-                        var assetJson = assetMatch.Value;
-                        var name = MatchValue(assetJson, "\"name\"\\s*:\\s*\"([^\"]+)\"");
-                        var url = MatchValue(assetJson, "\"browser_download_url\"\\s*:\\s*\"([^\"]+)\"");
-                        if (string.IsNullOrWhiteSpace(name) ||
-                            string.IsNullOrWhiteSpace(url) ||
-                            !(name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)))
-                        {
-                            continue;
-                        }
+                        continue;
+                    }
 
-                        if (name.IndexOf("update", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            downloadUrl = url;
-                            assetName = name;
-                            break;
-                        }
+                    if (name.IndexOf("update", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        downloadUrl = url;
+                        assetName = name;
+                        break;
+                    }
 
-                        if (name.IndexOf("setup", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            setupDownloadUrl = url;
-                            setupAssetName = name;
-                        }
-                        else if (string.IsNullOrWhiteSpace(setupDownloadUrl))
-                        {
-                            setupDownloadUrl = url;
-                            setupAssetName = name;
-                        }
+                    if (name.IndexOf("setup", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        setupDownloadUrl = url;
+                        setupAssetName = name;
+                    }
+                    else if (string.IsNullOrWhiteSpace(setupDownloadUrl))
+                    {
+                        setupDownloadUrl = url;
+                        setupAssetName = name;
                     }
                 }
 
