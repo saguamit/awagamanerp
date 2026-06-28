@@ -863,18 +863,30 @@ namespace Awagaman_ERP
                 }
             }
 
-            return expandedPending.Take(limit).ToList();
+            return limit > 0 ? expandedPending.Take(limit).ToList() : expandedPending;
+        }
+
+        private static void ReplaceCollectionItems<T>(ObservableCollection<T> items, IEnumerable<T> source)
+        {
+            items.Clear();
+            foreach (var item in source)
+            {
+                items.Add(item);
+            }
         }
 
         private void ShowPendingBookingsWindow()
         {
-            var items = new ObservableCollection<ChallanEntry>(LoadPendingBookingItems(200));
-            if (items.Count == 0)
+            const int pageSize = 200;
+            var allItems = LoadPendingBookingItems(0);
+            if (allItems.Count == 0)
             {
                 MessageBox.Show("No pending LR challans found.", "New Bookings", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
+            var currentPage = 1;
+            var items = new ObservableCollection<ChallanEntry>();
             var win = new Window
             {
                 Title = "Pending LR to Create",
@@ -911,23 +923,64 @@ namespace Awagaman_ERP
             });
             header.Children.Add(titleBlock);
 
+            var rightPanel = new StackPanel
+            {
+                Orientation = Orientation.Vertical,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+
             var countBadge = new Border
             {
                 Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F3E8FF")),
                 CornerRadius = new CornerRadius(999),
                 Padding = new Thickness(12, 6, 12, 6),
-                VerticalAlignment = VerticalAlignment.Center
+                HorizontalAlignment = HorizontalAlignment.Right
             };
             var countText = new TextBlock
             {
-                Text = $"{items.Count} Pending",
+                Text = string.Empty,
                 Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#6D28D9")),
                 FontSize = 11,
                 FontWeight = FontWeights.Bold
             };
             countBadge.Child = countText;
-            Grid.SetColumn(countBadge, 1);
-            header.Children.Add(countBadge);
+
+            var pagerPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            var prevButton = new Button
+            {
+                Content = "< Prev",
+                Width = 72,
+                Height = 28,
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            var pageText = new TextBlock
+            {
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#475569")),
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            var nextButton = new Button
+            {
+                Content = "Next >",
+                Width = 72,
+                Height = 28
+            };
+            pagerPanel.Children.Add(prevButton);
+            pagerPanel.Children.Add(pageText);
+            pagerPanel.Children.Add(nextButton);
+
+            rightPanel.Children.Add(countBadge);
+            rightPanel.Children.Add(pagerPanel);
+            Grid.SetColumn(rightPanel, 1);
+            header.Children.Add(rightPanel);
             Grid.SetRow(header, 0);
             root.Children.Add(header);
 
@@ -955,7 +1008,7 @@ namespace Awagaman_ERP
                 {
                     var row = (buttonSender as System.Windows.Controls.Button)?.Tag as ChallanEntry;
                     if (row == null) return;
-                    OpenLRFormFromChallan(row, () => RefreshPendingBookingWindowRows(items, countText, win), win);
+                    OpenLRFormFromChallan(row, reload, win);
                     buttonArgs.Handled = true;
                 })
             });
@@ -973,10 +1026,53 @@ namespace Awagaman_ERP
             {
                 if (grid.SelectedItem is ChallanEntry entry)
                 {
-                    OpenLRFormFromChallan(entry, () => RefreshPendingBookingWindowRows(items, countText, win), win);
+                    OpenLRFormFromChallan(entry, reload, win);
                 }
             };
 
+            void reload()
+            {
+                allItems = LoadPendingBookingItems(0);
+                var totalCount = allItems.Count;
+                if (totalCount == 0)
+                {
+                    win.Close();
+                    return;
+                }
+
+                var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
+                if (currentPage > totalPages)
+                {
+                    currentPage = totalPages;
+                }
+
+                var pageItems = allItems.Skip((currentPage - 1) * pageSize).Take(pageSize).ToList();
+                ReplaceCollectionItems(items, pageItems);
+
+                var start = ((currentPage - 1) * pageSize) + 1;
+                var end = start + pageItems.Count - 1;
+                countText.Text = $"Showing {start}-{end} of {totalCount}";
+                pageText.Text = $"Page {currentPage} / {totalPages}";
+                prevButton.IsEnabled = currentPage > 1;
+                nextButton.IsEnabled = currentPage < totalPages;
+            }
+
+            prevButton.Click += (s, e) =>
+            {
+                if (currentPage <= 1) return;
+                currentPage--;
+                reload();
+            };
+
+            nextButton.Click += (s, e) =>
+            {
+                var totalPages = Math.Max(1, (int)Math.Ceiling(allItems.Count / (double)pageSize));
+                if (currentPage >= totalPages) return;
+                currentPage++;
+                reload();
+            };
+
+            reload();
             win.Content = root;
             win.Show();
         }
@@ -1011,19 +1107,22 @@ namespace Awagaman_ERP
                     To = lr.To,
                     VehicleNo = lr.VehicleNo
                 })
-                .Take(limit)
+                .Take(limit > 0 ? limit : int.MaxValue)
                 .ToList();
         }
 
         private void ShowPendingBillsWindow()
         {
-            var items = new ObservableCollection<LREntry>(LoadPendingBillItems(200));
-            if (items.Count == 0)
+            const int pageSize = 200;
+            var allItems = LoadPendingBillItems(0);
+            if (allItems.Count == 0)
             {
                 MessageBox.Show("No pending LR entries found for billing.", "Pending Bills", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
+            var currentPage = 1;
+            var items = new ObservableCollection<LREntry>();
             var win = new Window
             {
                 Title = "Pending Bills",
@@ -1060,23 +1159,64 @@ namespace Awagaman_ERP
             });
             header.Children.Add(titleBlock);
 
+            var rightPanel = new StackPanel
+            {
+                Orientation = Orientation.Vertical,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+
             var countBadge = new Border
             {
                 Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFEDD5")),
                 CornerRadius = new CornerRadius(999),
                 Padding = new Thickness(12, 6, 12, 6),
-                VerticalAlignment = VerticalAlignment.Center
+                HorizontalAlignment = HorizontalAlignment.Right
             };
             var countText = new TextBlock
             {
-                Text = $"{items.Count} Pending",
+                Text = string.Empty,
                 Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#B45309")),
                 FontSize = 11,
                 FontWeight = FontWeights.Bold
             };
             countBadge.Child = countText;
-            Grid.SetColumn(countBadge, 1);
-            header.Children.Add(countBadge);
+
+            var pagerPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            var prevButton = new Button
+            {
+                Content = "< Prev",
+                Width = 72,
+                Height = 28,
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            var pageText = new TextBlock
+            {
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#475569")),
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            var nextButton = new Button
+            {
+                Content = "Next >",
+                Width = 72,
+                Height = 28
+            };
+            pagerPanel.Children.Add(prevButton);
+            pagerPanel.Children.Add(pageText);
+            pagerPanel.Children.Add(nextButton);
+
+            rightPanel.Children.Add(countBadge);
+            rightPanel.Children.Add(pagerPanel);
+            Grid.SetColumn(rightPanel, 1);
+            header.Children.Add(rightPanel);
             Grid.SetRow(header, 0);
             root.Children.Add(header);
 
@@ -1104,7 +1244,7 @@ namespace Awagaman_ERP
                 {
                     var row = (buttonSender as System.Windows.Controls.Button)?.Tag as LREntry;
                     if (row == null) return;
-                    OpenBillFormFromPendingLr(row, () => RefreshPendingBillWindowRows(items, countText, win), win);
+                    OpenBillFormFromPendingLr(row, reload, win);
                     buttonArgs.Handled = true;
                 })
             });
@@ -1120,10 +1260,53 @@ namespace Awagaman_ERP
             {
                 if (grid.SelectedItem is LREntry lr)
                 {
-                    OpenBillFormFromPendingLr(lr, () => RefreshPendingBillWindowRows(items, countText, win), win);
+                    OpenBillFormFromPendingLr(lr, reload, win);
                 }
             };
 
+            void reload()
+            {
+                allItems = LoadPendingBillItems(0);
+                var totalCount = allItems.Count;
+                if (totalCount == 0)
+                {
+                    win.Close();
+                    return;
+                }
+
+                var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
+                if (currentPage > totalPages)
+                {
+                    currentPage = totalPages;
+                }
+
+                var pageItems = allItems.Skip((currentPage - 1) * pageSize).Take(pageSize).ToList();
+                ReplaceCollectionItems(items, pageItems);
+
+                var start = ((currentPage - 1) * pageSize) + 1;
+                var end = start + pageItems.Count - 1;
+                countText.Text = $"Showing {start}-{end} of {totalCount}";
+                pageText.Text = $"Page {currentPage} / {totalPages}";
+                prevButton.IsEnabled = currentPage > 1;
+                nextButton.IsEnabled = currentPage < totalPages;
+            }
+
+            prevButton.Click += (s, e) =>
+            {
+                if (currentPage <= 1) return;
+                currentPage--;
+                reload();
+            };
+
+            nextButton.Click += (s, e) =>
+            {
+                var totalPages = Math.Max(1, (int)Math.Ceiling(allItems.Count / (double)pageSize));
+                if (currentPage >= totalPages) return;
+                currentPage++;
+                reload();
+            };
+
+            reload();
             win.Content = root;
             win.Show();
         }
