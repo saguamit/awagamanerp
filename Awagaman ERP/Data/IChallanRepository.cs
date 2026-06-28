@@ -12,6 +12,8 @@ namespace Awagaman_ERP.Data
         int GetTotalCount();
         int GetTotalCount(string searchFilter);
         int GetTotalCountAdvanced(string challanNo, string lrNo, string from, string to);
+        decimal GetTotalDue(string searchFilter = "");
+        decimal GetTotalDueAdvanced(string challanNo, string lrNo, string from, string to);
         int GetMaxSr();
         ChallanEntry FindByChallanNumber(string challanNumber);
         HashSet<int> GetChallanIdsWithComments();

@@ -110,6 +110,88 @@ namespace Awagaman_ERP.Data
             }
         }
 
+        public decimal GetTotalFreight(string searchFilter = "")
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                var query = "api/lr/summary";
+                if (!string.IsNullOrWhiteSpace(searchFilter))
+                {
+                    query += $"?search={RemoteApiClient.UrlEncode(searchFilter)}";
+                }
+
+                try
+                {
+                    return RemoteApiClient.Get<RemoteLRSummary>(query)?.TotalFreight ?? 0m;
+                }
+                catch
+                {
+                    return GetAllRemoteSafe()
+                        .Where(e => MatchesSearch(e, searchFilter))
+                        .Sum(e => e?.TotalFreight ?? 0m);
+                }
+            }
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = connection.CreateCommand())
+            {
+                if (string.IsNullOrWhiteSpace(searchFilter))
+                {
+                    command.CommandText = "SELECT COALESCE(SUM(TotalFreight), 0) FROM LREntries;";
+                }
+                else
+                {
+                    command.CommandText = @"SELECT COALESCE(SUM(TotalFreight), 0) FROM LREntries
+WHERE LRNo LIKE @f OR ConsignorName LIKE @f OR ConsigneeName LIKE @f OR VehicleNo LIKE @f OR BillNo LIKE @f OR CHNo LIKE @f;";
+                    command.Parameters.AddWithValue("@f", $"%{searchFilter}%");
+                }
+
+                connection.Open();
+                return Convert.ToDecimal(command.ExecuteScalar() ?? 0m);
+            }
+        }
+
+        public decimal GetTotalBalance(string searchFilter = "")
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                var query = "api/lr/summary";
+                if (!string.IsNullOrWhiteSpace(searchFilter))
+                {
+                    query += $"?search={RemoteApiClient.UrlEncode(searchFilter)}";
+                }
+
+                try
+                {
+                    return RemoteApiClient.Get<RemoteLRSummary>(query)?.TotalBalance ?? 0m;
+                }
+                catch
+                {
+                    return GetAllRemoteSafe()
+                        .Where(e => MatchesSearch(e, searchFilter))
+                        .Sum(e => e?.Bal ?? 0m);
+                }
+            }
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = connection.CreateCommand())
+            {
+                if (string.IsNullOrWhiteSpace(searchFilter))
+                {
+                    command.CommandText = "SELECT COALESCE(SUM((NEFT + CASH - TDS + Ded)), 0) FROM LREntries;";
+                }
+                else
+                {
+                    command.CommandText = @"SELECT COALESCE(SUM((NEFT + CASH - TDS + Ded)), 0) FROM LREntries
+WHERE LRNo LIKE @f OR ConsignorName LIKE @f OR ConsigneeName LIKE @f OR VehicleNo LIKE @f OR BillNo LIKE @f OR CHNo LIKE @f;";
+                    command.Parameters.AddWithValue("@f", $"%{searchFilter}%");
+                }
+
+                connection.Open();
+                return Convert.ToDecimal(command.ExecuteScalar() ?? 0m);
+            }
+        }
+
         public int GetMaxSr()
         {
             if (BackendSettings.UseRemoteApi)
@@ -515,6 +597,26 @@ LRNo {dir}, Sr, Id";
             return !string.IsNullOrWhiteSpace(value) &&
                    !string.IsNullOrWhiteSpace(filter) &&
                    value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool MatchesSearch(LREntry entry, string searchFilter)
+        {
+            if (entry == null)
+            {
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(searchFilter))
+            {
+                return true;
+            }
+
+            return Contains(entry.LRNo, searchFilter) ||
+                   Contains(entry.ConsignorName, searchFilter) ||
+                   Contains(entry.ConsigneeName, searchFilter) ||
+                   Contains(entry.VehicleNo, searchFilter) ||
+                   Contains(entry.BillNo, searchFilter) ||
+                   Contains(entry.CHNo, searchFilter);
         }
     }
 }

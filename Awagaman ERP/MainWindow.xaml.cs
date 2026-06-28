@@ -30,7 +30,9 @@ namespace Awagaman_ERP
         private System.Windows.Threading.DispatcherTimer _searchTimer;
         private System.Windows.Threading.DispatcherTimer _challanFilterTimer;
         private System.Windows.Threading.DispatcherTimer _remoteSyncTimer;
+        private System.Windows.Threading.DispatcherTimer _connectionStatusTimer;
         private readonly System.Windows.Threading.DispatcherTimer _dashboardRefreshTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        private bool _connectionStatusCheckInProgress;
         private TextBox _activeSearchBox;
         private ContextMenu _lrColumnsMenu;
         private bool _onlyDueFilterEnabled;
@@ -114,7 +116,11 @@ namespace Awagaman_ERP
             LogException("StartupTrace", new Exception("MainWindow ctor begin"));
             InitializeComponent();
             _dashboardRefreshTimer.Tick += DashboardRefreshTimer_Tick;
-            Closed += (s, e) => _dashboardRefreshTimer.Stop();
+            Closed += (s, e) =>
+            {
+                _dashboardRefreshTimer.Stop();
+                _connectionStatusTimer?.Stop();
+            };
             LogException("StartupTrace", new Exception("MainWindow InitializeComponent complete"));
             try
             {
@@ -236,6 +242,58 @@ namespace Awagaman_ERP
                 _remoteSyncTimer.Interval = TimeSpan.FromSeconds(12);
                 _remoteSyncTimer.Tick += RemoteSyncTimer_Tick;
                 _remoteSyncTimer.Start();
+            }
+
+            StartConnectionStatusMonitor();
+        }
+
+        private void StartConnectionStatusMonitor()
+        {
+            SetConnectionStatus(false, "Checking connection...");
+            _connectionStatusTimer = new System.Windows.Threading.DispatcherTimer();
+            _connectionStatusTimer.Interval = TimeSpan.FromSeconds(30);
+            _connectionStatusTimer.Tick += (s, e) => UpdateConnectionStatusAsync();
+            _connectionStatusTimer.Start();
+            UpdateConnectionStatusAsync();
+        }
+
+        private void UpdateConnectionStatusAsync()
+        {
+            if (_connectionStatusCheckInProgress) return;
+            _connectionStatusCheckInProgress = true;
+            Task.Run(() =>
+            {
+                var connected = BackendSettings.UseRemoteApi ? IsRemoteApiHealthy() : HasInternetConnection();
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    SetConnectionStatus(connected, connected ? "Connected" : "Not connected");
+                    _connectionStatusCheckInProgress = false;
+                }));
+            });
+        }
+
+        private void SetConnectionStatus(bool connected, string tooltip)
+        {
+            if (ConnectionStatusDot == null) return;
+            ConnectionStatusDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(connected ? "#16A34A" : "#DC2626"));
+            var parent = ConnectionStatusDot.Parent as FrameworkElement;
+            if (parent != null) parent.ToolTip = tooltip;
+        }
+
+        private static bool HasInternetConnection()
+        {
+            try
+            {
+                using (var client = new System.Net.Http.HttpClient())
+                {
+                    client.Timeout = TimeSpan.FromSeconds(5);
+                    var response = client.GetAsync("https://www.google.com/generate_204").GetAwaiter().GetResult();
+                    return response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NoContent;
+                }
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -831,7 +889,6 @@ namespace Awagaman_ERP
             var root = new Grid { Margin = new Thickness(16) };
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var header = new Grid { Margin = new Thickness(0, 0, 0, 12) };
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -912,38 +969,11 @@ namespace Awagaman_ERP
             Grid.SetRow(grid, 1);
             root.Children.Add(grid);
 
-            var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
-            var openBtn = new Button
-            {
-                Content = "Create LR",
-                Width = 110,
-                Height = 30,
-                Margin = new Thickness(0, 0, 8, 0),
-                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#6D28D9")),
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0)
-            };
-            var closeBtn = new Button { Content = "Close", Width = 90, Height = 30, IsCancel = true };
-            footer.Children.Add(openBtn);
-            footer.Children.Add(closeBtn);
-            Grid.SetRow(footer, 2);
-            root.Children.Add(footer);
-
-            openBtn.Click += (openSender, openArgs) =>
-            {
-                if (!(grid.SelectedItem is ChallanEntry entry))
-                {
-                    MessageBox.Show(win, "Select a pending challan row first.", "New Bookings", MessageBoxButton.OK, MessageBoxImage.Information);
-                    return;
-                }
-                OpenLRFormFromChallan(entry, () => RefreshPendingBookingWindowRows(items, countText, win), win);
-            };
-
             grid.MouseDoubleClick += (mouseSender, mouseArgs) =>
             {
-                if (grid.SelectedItem is ChallanEntry)
+                if (grid.SelectedItem is ChallanEntry entry)
                 {
-                    openBtn.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    OpenLRFormFromChallan(entry, () => RefreshPendingBookingWindowRows(items, countText, win), win);
                 }
             };
 
@@ -1008,7 +1038,6 @@ namespace Awagaman_ERP
             var root = new Grid { Margin = new Thickness(16) };
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var header = new Grid { Margin = new Thickness(0, 0, 0, 12) };
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1087,39 +1116,11 @@ namespace Awagaman_ERP
             Grid.SetRow(grid, 1);
             root.Children.Add(grid);
 
-            var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
-            var createBtn = new Button
-            {
-                Content = "Create Bill",
-                Width = 110,
-                Height = 30,
-                Margin = new Thickness(0, 0, 8, 0),
-                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D97706")),
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0)
-            };
-            var closeBtn = new Button { Content = "Close", Width = 90, Height = 30, IsCancel = true };
-            footer.Children.Add(createBtn);
-            footer.Children.Add(closeBtn);
-            Grid.SetRow(footer, 2);
-            root.Children.Add(footer);
-
-            createBtn.Click += (createSender, createArgs) =>
-            {
-                if (!(grid.SelectedItem is LREntry lr))
-                {
-                    MessageBox.Show(win, "Select a pending LR row first.", "Pending Bills", MessageBoxButton.OK, MessageBoxImage.Information);
-                    return;
-                }
-
-                OpenBillFormFromPendingLr(lr, () => RefreshPendingBillWindowRows(items, countText, win), win);
-            };
-
             grid.MouseDoubleClick += (gridSender, gridArgs) =>
             {
-                if (grid.SelectedItem is LREntry)
+                if (grid.SelectedItem is LREntry lr)
                 {
-                    createBtn.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    OpenBillFormFromPendingLr(lr, () => RefreshPendingBillWindowRows(items, countText, win), win);
                 }
             };
 
@@ -1223,12 +1224,28 @@ namespace Awagaman_ERP
                 TabCBSLedger.Style = (Style)FindResource("TabButtonStyle");
                 if (PageTitle != null) PageTitle.Text = "Bill Ledger";
 
-                BillVM.EnsurePageLoaded();
                 BillLedgerView.DataContext = BillVM;
                 BillLedgerView.Visibility = Visibility.Visible;
                 LoadBillColumnSettings();
                 if (!string.IsNullOrWhiteSpace(BillVM?.GetSortColumn()))
                     ApplyBillSort(BillVM.GetSortColumn(), BillVM.IsCurrentSortAscending);
+
+                if (BackendSettings.UseRemoteApi)
+                {
+                    if (!BillVM.HasLoadedPage && BillRecordCountText != null)
+                        BillRecordCountText.Text = "Loading bills...";
+
+                    BillVM.EnsurePageLoadedAsync(
+                        () => BillUpdatePageUI(),
+                        ex =>
+                        {
+                            AppLogger.LogException(nameof(OpenBillLedger_Click), ex);
+                            if (BillRecordCountText != null) BillRecordCountText.Text = "Unable to load bills";
+                        });
+                    return;
+                }
+
+                BillVM.EnsurePageLoaded();
                 BillUpdatePageUI();
             }
             catch (Exception ex) { MessageBox.Show("Error: " + ex.Message, "Bill Ledger Error", MessageBoxButton.OK, MessageBoxImage.Error); }
@@ -2403,9 +2420,9 @@ namespace Awagaman_ERP
             if (CBSRecordsTextBlock != null)
                 CBSRecordsTextBlock.Text = $"Records: {count}";
             if (CBSBankNetTextBlock != null)
-                CBSBankNetTextBlock.Text = $"â‚¹ {bankNet:N2}";
+                CBSBankNetTextBlock.Text = $"Rs. {bankNet:N2}";
             if (CBSCashNetTextBlock != null)
-                CBSCashNetTextBlock.Text = $"â‚¹ {cashNet:N2}";
+                CBSCashNetTextBlock.Text = $"Rs. {cashNet:N2}";
         }
 
         private void CBSSearchBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -3285,7 +3302,7 @@ namespace Awagaman_ERP
                 rangeBar.Children.Add(new TextBlock { Text = "To", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
                 var toDatePicker = new DatePicker { Width = 130, Margin = new Thickness(0, 0, 10, 0) };
                 rangeBar.Children.Add(toDatePicker);
-                var periodBtn = new Button { Content = "Period â–¼", Height = 26, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(10, 0, 10, 0) };
+                var periodBtn = new Button { Content = "Period v", Height = 26, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(10, 0, 10, 0) };
                 var clearRangeBtn = new Button { Content = "Clear", Height = 26, Padding = new Thickness(10, 0, 10, 0) };
                 var addEntryBtn = new Button { Content = "+ Entry", Height = 26, Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(10, 0, 10, 0), Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#00B08B")), Foreground = Brushes.White, BorderThickness = new Thickness(0) };
                 AutomationProperties.SetAutomationId(addEntryBtn, "CBSSummaryAddEntryButton");
@@ -4148,7 +4165,7 @@ namespace Awagaman_ERP
 
             if (hasNumbers)
             {
-                CBSSelectedSumTextBlock.Text = $"Selected: â‚¹ {total:N2}";
+                CBSSelectedSumTextBlock.Text = $"Selected: Rs. {total:N2}";
                 CBSSelectedSumTextBlock.Visibility = Visibility.Visible;
             }
             else
@@ -4437,7 +4454,7 @@ namespace Awagaman_ERP
             if (target != null)
             {
                 target.SortDirection = ascending ? ListSortDirection.Ascending : ListSortDirection.Descending;
-                target.Header = NormalizeHeaderForSort((target.Header ?? string.Empty).ToString()) + (ascending ? " \u25B2" : " \u25BC");
+                target.Header = NormalizeHeaderForSort((target.Header ?? string.Empty).ToString()) + (ascending ? " ^" : " v");
             }
 
             var cv = CollectionViewSource.GetDefaultView(CBSGrid.ItemsSource);
@@ -4580,7 +4597,7 @@ namespace Awagaman_ERP
                 if (target != null)
                 {
                     target.SortDirection = _cbsSortAscending ? ListSortDirection.Ascending : ListSortDirection.Descending;
-                    target.Header = NormalizeHeaderForSort((target.Header ?? string.Empty).ToString()) + (_cbsSortAscending ? " \u25B2" : " \u25BC");
+                    target.Header = NormalizeHeaderForSort((target.Header ?? string.Empty).ToString()) + (_cbsSortAscending ? " ^" : " v");
                 }
             }
         }
@@ -4594,7 +4611,7 @@ namespace Awagaman_ERP
             public decimal Advance { get; set; }
             public decimal BalancePaid { get; set; }
             public decimal Due { get; set; }
-            public string Display => $"{ChallanNo} | LH â‚¹{LorryHire:N2} | Adv â‚¹{Advance:N2} | Due â‚¹{Due:N2}";
+            public string Display => $"{ChallanNo} | LH Rs.{LorryHire:N2} | Adv Rs.{Advance:N2} | Due Rs.{Due:N2}";
         }
 
         private List<string> LoadDueBrokers()
@@ -4678,7 +4695,7 @@ namespace Awagaman_ERP
                 Grid.SetRow(modeBox, 2); Grid.SetColumn(modeBox, 1); root.Children.Add(modeBox);
 
                 var dueLabel = new TextBlock { Text = "Current Due", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
-                var dueText = new TextBlock { Text = "â‚¹ 0.00", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 8) };
+                var dueText = new TextBlock { Text = "Rs. 0.00", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 8) };
                 Grid.SetRow(dueLabel, 3); Grid.SetColumn(dueLabel, 0); root.Children.Add(dueLabel);
                 Grid.SetRow(dueText, 3); Grid.SetColumn(dueText, 1); root.Children.Add(dueText);
 
@@ -4693,7 +4710,7 @@ namespace Awagaman_ERP
                 Grid.SetRow(advCashBox, 5); Grid.SetColumn(advCashBox, 1); root.Children.Add(advCashBox);
 
                 var advTotalLabel = new TextBlock { Text = "Advance Total", Margin = new Thickness(0, 0, 8, 8), VerticalAlignment = VerticalAlignment.Center };
-                var advTotalText = new TextBlock { Text = "â‚¹ 0.00", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 8) };
+                var advTotalText = new TextBlock { Text = "Rs. 0.00", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 8) };
                 Grid.SetRow(advTotalLabel, 6); Grid.SetColumn(advTotalLabel, 0); root.Children.Add(advTotalLabel);
                 Grid.SetRow(advTotalText, 6); Grid.SetColumn(advTotalText, 1); root.Children.Add(advTotalText);
 
@@ -4719,7 +4736,7 @@ namespace Awagaman_ERP
 
                 var detailsText = new TextBlock
                 {
-                    Text = "Detention: â‚¹ 0.00    Hamali: â‚¹ 0.00    Deduction: â‚¹ 0.00    Less TDS: â‚¹ 0.00",
+                    Text = "Detention: Rs. 0.00    Hamali: Rs. 0.00    Deduction: Rs. 0.00    Less TDS: Rs. 0.00",
                     Foreground = System.Windows.Media.Brushes.Gray,
                     Margin = new Thickness(0, 2, 0, 8)
                 };
@@ -4764,14 +4781,14 @@ namespace Awagaman_ERP
                     challanBox.ItemsSource = rows;
                     challanBox.SelectedIndex = rows.Count > 0 ? 0 : -1;
                     paidToBox.Text = broker;
-                    dueText.Text = rows.Count > 0 ? $"â‚¹ {rows[0].Due:N2}" : "â‚¹ 0.00";
+                    dueText.Text = rows.Count > 0 ? $"Rs. {rows[0].Due:N2}" : "Rs. 0.00";
                 };
 
                 Action refreshAdvanceTotal = () =>
                 {
                     var advNeft = ParseDecimal(advNeftBox.Text);
                     var advCash = ParseDecimal(advCashBox.Text);
-                    advTotalText.Text = $"â‚¹ {(advNeft + advCash):N2}";
+                    advTotalText.Text = $"Rs. {(advNeft + advCash):N2}";
                 };
                 Action refreshModeVisibility = () =>
                 {
@@ -4790,7 +4807,7 @@ namespace Awagaman_ERP
                 challanBox.SelectionChanged += (_, __) =>
                 {
                     var row = challanBox.SelectedItem as DueChallanOption;
-                    dueText.Text = row != null ? $"â‚¹ {row.Due:N2}" : "â‚¹ 0.00";
+                    dueText.Text = row != null ? $"Rs. {row.Due:N2}" : "Rs. 0.00";
                     if (row != null)
                     {
                         var challan = _challanRepo.FindById(row.Id);
@@ -4801,7 +4818,7 @@ namespace Awagaman_ERP
                     }
                     else
                     {
-                        detailsText.Text = "Detention: â‚¹ 0.00    Hamali: â‚¹ 0.00    Deduction: â‚¹ 0.00    Less TDS: â‚¹ 0.00";
+                        detailsText.Text = "Detention: Rs. 0.00    Hamali: Rs. 0.00    Deduction: Rs. 0.00    Less TDS: Rs. 0.00";
                     }
                 };
                 advNeftBox.TextChanged += (_, __) => refreshAdvanceTotal();
@@ -4893,6 +4910,25 @@ namespace Awagaman_ERP
         private void BillNextPage_Click(object sender, RoutedEventArgs e) { BillVM?.GoToNextPage(); BillUpdatePageUI(); BillVM?.PreCacheNextPage(); }
         private void BillFirstPage_Click(object sender, RoutedEventArgs e) { BillVM?.GoToFirstPage(); BillUpdatePageUI(); BillVM?.PreCacheNextPage(); }
         private void BillLastPage_Click(object sender, RoutedEventArgs e) { BillVM?.GoToLastPage(); BillUpdatePageUI(); BillVM?.PreCacheNextPage(); }
+        private void LRPrevPage_Click(object sender, RoutedEventArgs e) { LRVM?.GoToPreviousPage(); LRUpdatePageUI(); LRVM?.PreCacheNextPage(); }
+        private void LRNextPage_Click(object sender, RoutedEventArgs e) { LRVM?.GoToNextPage(); LRUpdatePageUI(); LRVM?.PreCacheNextPage(); }
+
+        private void ChallanPrevPage_Click(object sender, RoutedEventArgs e)
+        {
+            if (VM == null) return;
+            VM.GoToPreviousPage();
+            UpdatePageUI();
+            VM.PreCacheNextPage();
+        }
+
+        private void ChallanNextPage_Click(object sender, RoutedEventArgs e)
+        {
+            if (VM == null) return;
+            VM.GoToNextPage();
+            UpdatePageUI();
+            VM.PreCacheNextPage();
+        }
+
         private class PendingBillOption
         {
             public string BillNo { get; set; }
@@ -4903,8 +4939,8 @@ namespace Awagaman_ERP
             public decimal TDS { get; set; }
             public decimal DED { get; set; }
             public decimal Due => Total - RCVD - TDS - DED;
-            public string LRDisplay => $"{BillNo}  |  Due: â‚¹ {Due:N2}";
-            public string BillWithDue => $"{BillNo}  |  LR: {LRNos}  |  Due: â‚¹ {Due:N2}";
+            public string LRDisplay => $"{BillNo}  |  Due: Rs. {Due:N2}";
+            public string BillWithDue => $"{BillNo}  |  LR: {LRNos}  |  Due: Rs. {Due:N2}";
         }
 
         private class PartyDueSummaryOption
@@ -5460,9 +5496,9 @@ namespace Awagaman_ERP
             summaryGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
             summaryGrid.Children.Add(MakeSummaryTile("Receipt Count", receipts.Count.ToString(), "#1D4ED8", 0));
-            summaryGrid.Children.Add(MakeSummaryTile("Received Total", $"â‚¹ {totalReceived:N2}", "#0F766E", 1));
-            summaryGrid.Children.Add(MakeSummaryTile("TDS + Ded", $"â‚¹ {(totalTds + totalDed):N2}", "#B45309", 2));
-            summaryGrid.Children.Add(MakeSummaryTile("Due After Last Receipt", $"â‚¹ {dueAfter:N2}", "#DC2626", 3));
+            summaryGrid.Children.Add(MakeSummaryTile("Received Total", $"Rs. {totalReceived:N2}", "#0F766E", 1));
+            summaryGrid.Children.Add(MakeSummaryTile("TDS + Ded", $"Rs. {(totalTds + totalDed):N2}", "#B45309", 2));
+            summaryGrid.Children.Add(MakeSummaryTile("Due After Last Receipt", $"Rs. {dueAfter:N2}", "#DC2626", 3));
             summary.Child = summaryGrid;
             Grid.SetRow(summary, 1);
             root.Children.Add(summary);
@@ -5597,7 +5633,7 @@ namespace Awagaman_ERP
                 };
                 partyGrid.Columns.Add(new DataGridTextColumn { Header = "Party Name", Binding = new Binding("Party"), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
                 partyGrid.Columns.Add(new DataGridTextColumn { Header = "Bills", Binding = new Binding("Bills"), Width = 90 });
-                partyGrid.Columns.Add(new DataGridTextColumn { Header = "Due Amount", Binding = new Binding("Due") { StringFormat = "â‚¹ {0:N2}" }, Width = 160 });
+                partyGrid.Columns.Add(new DataGridTextColumn { Header = "Due Amount", Binding = new Binding("Due") { StringFormat = "Rs. {0:N2}" }, Width = 160 });
                 Grid.SetRow(partyGrid, 1);
                 root.Children.Add(partyGrid);
 
@@ -5617,7 +5653,7 @@ namespace Awagaman_ERP
                 billGrid.Columns.Add(new DataGridTextColumn { Header = "LR No(s)", Binding = new Binding("LRNos"), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
                 billGrid.Columns.Add(new DataGridTextColumn { Header = "From", Binding = new Binding("From"), Width = 140 });
                 billGrid.Columns.Add(new DataGridTextColumn { Header = "To", Binding = new Binding("To"), Width = 140 });
-                billGrid.Columns.Add(new DataGridTextColumn { Header = "Due Amount", Binding = new Binding("Due") { StringFormat = "â‚¹ {0:N2}" }, Width = 160 });
+                billGrid.Columns.Add(new DataGridTextColumn { Header = "Due Amount", Binding = new Binding("Due") { StringFormat = "Rs. {0:N2}" }, Width = 160 });
                 Grid.SetRow(billGrid, 1);
                 root.Children.Add(billGrid);
 
@@ -6085,7 +6121,7 @@ namespace Awagaman_ERP
                 });
                 valueText = new TextBlock
                 {
-                    Text = "â‚¹ 0.00",
+                    Text = "Rs. 0.00",
                     FontSize = 18,
                     FontWeight = FontWeights.Bold,
                     Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(accent)),
@@ -6215,24 +6251,24 @@ namespace Awagaman_ERP
                     var fastest = paymentRows.OrderBy(x => x.AvgDaysToPay).FirstOrDefault(x => x.Bills > 0);
                     var slowest = paymentRows.OrderByDescending(x => x.AvgDaysToPay).FirstOrDefault(x => x.Bills > 0);
 
-                    fastestValue.Text = fastest == null ? "â‚¹ 0.00" : fastest.Party;
+                    fastestValue.Text = fastest == null ? "Rs. 0.00" : fastest.Party;
                     fastestHint.Text = fastest == null ? "No paid bills in selected range" : $"Avg days: {fastest.AvgDaysToPay:N1}";
-                    slowestValue.Text = slowest == null ? "â‚¹ 0.00" : slowest.Party;
+                    slowestValue.Text = slowest == null ? "Rs. 0.00" : slowest.Party;
                     slowestHint.Text = slowest == null ? "No paid bills in selected range" : $"Avg days: {slowest.AvgDaysToPay:N1}";
                 }
                 else
                 {
-                    fastestValue.Text = "â‚¹ 0.00";
+                    fastestValue.Text = "Rs. 0.00";
                     fastestHint.Text = "No data";
-                    slowestValue.Text = "â‚¹ 0.00";
+                    slowestValue.Text = "Rs. 0.00";
                     slowestHint.Text = "No data";
                 }
 
-                collectionsValue.Text = $"â‚¹ {profit.Collections:N2}";
+                collectionsValue.Text = $"Rs. {profit.Collections:N2}";
                 collectionsHint.Text = $"{profit.CollectionCount} receipt(s)";
-                expenseValue.Text = $"â‚¹ {profit.Expenses:N2}";
+                expenseValue.Text = $"Rs. {profit.Expenses:N2}";
                 expenseHint.Text = $"{expenseRows.Count} expense account(s)";
-                profitValue.Text = $"â‚¹ {profit.Profit:N2}";
+                profitValue.Text = $"Rs. {profit.Profit:N2}";
                 profitHint.Text = $"{dueRows.Count} overdue bill(s) in range";
             }
 
@@ -6437,9 +6473,9 @@ namespace Awagaman_ERP
                 {
                     grid.Columns.Add(new DataGridTextColumn { Header = "Party", Binding = new Binding("Party"), Width = new DataGridLength(2, DataGridLengthUnitType.Star) });
                     grid.Columns.Add(new DataGridTextColumn { Header = "Bills", Binding = new Binding("Bills"), Width = 80 });
-                    grid.Columns.Add(new DataGridTextColumn { Header = "Total Billed", Binding = new Binding("TotalBilled") { StringFormat = "â‚¹ {0:N2}" }, Width = 120 });
-                    grid.Columns.Add(new DataGridTextColumn { Header = "Received", Binding = new Binding("TotalReceived") { StringFormat = "â‚¹ {0:N2}" }, Width = 120 });
-                    grid.Columns.Add(new DataGridTextColumn { Header = "Pending", Binding = new Binding("PendingAmount") { StringFormat = "â‚¹ {0:N2}" }, Width = 120 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Total Billed", Binding = new Binding("TotalBilled") { StringFormat = "Rs. {0:N2}" }, Width = 120 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Received", Binding = new Binding("TotalReceived") { StringFormat = "Rs. {0:N2}" }, Width = 120 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Pending", Binding = new Binding("PendingAmount") { StringFormat = "Rs. {0:N2}" }, Width = 120 });
                     grid.Columns.Add(new DataGridTextColumn { Header = "Avg Days", Binding = new Binding("AvgDaysToPay") { StringFormat = "N1" }, Width = 90 });
                     grid.Columns.Add(new DataGridTextColumn { Header = "On Time", Binding = new Binding("OnTimeBills"), Width = 80 });
                     grid.Columns.Add(new DataGridTextColumn { Header = "Late", Binding = new Binding("LateBills"), Width = 80 });
@@ -6457,11 +6493,11 @@ namespace Awagaman_ERP
                 grid =>
                 {
                     grid.Columns.Add(new DataGridTextColumn { Header = "Account", Binding = new Binding("AccountName"), Width = new DataGridLength(2, DataGridLengthUnitType.Star) });
-                    grid.Columns.Add(new DataGridTextColumn { Header = "Bank Dr", Binding = new Binding("BankDr") { StringFormat = "â‚¹ {0:N2}" }, Width = 110 });
-                    grid.Columns.Add(new DataGridTextColumn { Header = "Bank Cr", Binding = new Binding("BankCr") { StringFormat = "â‚¹ {0:N2}" }, Width = 110 });
-                    grid.Columns.Add(new DataGridTextColumn { Header = "Cash Dr", Binding = new Binding("CashDr") { StringFormat = "â‚¹ {0:N2}" }, Width = 110 });
-                    grid.Columns.Add(new DataGridTextColumn { Header = "Cash Cr", Binding = new Binding("CashCr") { StringFormat = "â‚¹ {0:N2}" }, Width = 110 });
-                    grid.Columns.Add(new DataGridTextColumn { Header = "Net", Binding = new Binding("Net") { StringFormat = "â‚¹ {0:N2}" }, Width = 120 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Bank Dr", Binding = new Binding("BankDr") { StringFormat = "Rs. {0:N2}" }, Width = 110 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Bank Cr", Binding = new Binding("BankCr") { StringFormat = "Rs. {0:N2}" }, Width = 110 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Cash Dr", Binding = new Binding("CashDr") { StringFormat = "Rs. {0:N2}" }, Width = 110 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Cash Cr", Binding = new Binding("CashCr") { StringFormat = "Rs. {0:N2}" }, Width = 110 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Net", Binding = new Binding("Net") { StringFormat = "Rs. {0:N2}" }, Width = 120 });
                 });
         }
 
@@ -6477,9 +6513,9 @@ namespace Awagaman_ERP
                     grid.Columns.Add(new DataGridTextColumn { Header = "Party", Binding = new Binding("Party"), Width = new DataGridLength(2, DataGridLengthUnitType.Star) });
                     grid.Columns.Add(new DataGridTextColumn { Header = "Bill No.", Binding = new Binding("BillNo"), Width = 130 });
                     grid.Columns.Add(new DataGridTextColumn { Header = "Bill Date", Binding = new Binding("BillDate") { StringFormat = "dd-MMM-yyyy" }, Width = 120 });
-                    grid.Columns.Add(new DataGridTextColumn { Header = "Total", Binding = new Binding("Total") { StringFormat = "â‚¹ {0:N2}" }, Width = 120 });
-                    grid.Columns.Add(new DataGridTextColumn { Header = "Received", Binding = new Binding("Received") { StringFormat = "â‚¹ {0:N2}" }, Width = 120 });
-                    grid.Columns.Add(new DataGridTextColumn { Header = "Due", Binding = new Binding("Due") { StringFormat = "â‚¹ {0:N2}" }, Width = 120 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Total", Binding = new Binding("Total") { StringFormat = "Rs. {0:N2}" }, Width = 120 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Received", Binding = new Binding("Received") { StringFormat = "Rs. {0:N2}" }, Width = 120 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Due", Binding = new Binding("Due") { StringFormat = "Rs. {0:N2}" }, Width = 120 });
                     grid.Columns.Add(new DataGridTextColumn { Header = "Age (Days)", Binding = new Binding("AgeDays"), Width = 90 });
                     grid.Columns.Add(new DataGridTextColumn { Header = "Status", Binding = new Binding("Status"), Width = 100 });
                 });
@@ -6502,7 +6538,7 @@ namespace Awagaman_ERP
                 grid =>
                 {
                     grid.Columns.Add(new DataGridTextColumn { Header = "Metric", Binding = new Binding("Metric"), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
-                    grid.Columns.Add(new DataGridTextColumn { Header = "Amount", Binding = new Binding("Amount") { StringFormat = "â‚¹ {0:N2}" }, Width = 160 });
+                    grid.Columns.Add(new DataGridTextColumn { Header = "Amount", Binding = new Binding("Amount") { StringFormat = "Rs. {0:N2}" }, Width = 160 });
                     grid.Columns.Add(new DataGridTextColumn { Header = "Notes", Binding = new Binding("Notes"), Width = new DataGridLength(2, DataGridLengthUnitType.Star) });
                 });
         }
@@ -6690,7 +6726,7 @@ namespace Awagaman_ERP
         private static decimal ParseDec(string text)
         {
             if (string.IsNullOrWhiteSpace(text)) return 0m;
-            var t = text.Replace("â‚¹", "").Replace(",", "").Trim();
+            var t = text.Replace("Rs.", "").Replace(",", "").Trim();
             return decimal.TryParse(t, out var v) ? v : 0m;
         }
 
@@ -6805,6 +6841,12 @@ namespace Awagaman_ERP
         private void UpdateBillVisibleSummaryFromView(ICollectionView cv)
         {
             if (BillVM == null || cv == null) return;
+            if (_billHeaderFilters.Count == 0)
+            {
+                if (BillRecordCountText != null) BillRecordCountText.Text = $"Records: {BillVM.FilteredEntriesCount}";
+                return;
+            }
+
             var visible = cv.Cast<object>().OfType<BillEntry>().ToList();
             BillVM.FilteredEntriesCount = visible.Count;
             BillVM.FilteredTotalDue = visible.Sum(x => x.Due);
@@ -6832,11 +6874,11 @@ namespace Awagaman_ERP
             bool ascending = !sameColumn || !(BillVM?.IsCurrentSortAscending ?? true);
             foreach (var c in BillLedgerGrid.Columns)
             {
-                string h = (c.Header?.ToString() ?? "").Replace(" â–²", "").Replace(" â–¼", "");
+                string h = (c.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", "");
                 c.Header = h; c.SortDirection = null;
             }
             col.SortDirection = ascending ? System.ComponentModel.ListSortDirection.Ascending : System.ComponentModel.ListSortDirection.Descending;
-            col.Header = col.Header?.ToString() + (ascending ? " â–²" : " â–¼");
+            col.Header = col.Header?.ToString() + (ascending ? " ^" : " v");
             BillVM?.SetSort(propName, ascending);
             SaveBillColumnSettings();
         }
@@ -7104,7 +7146,7 @@ namespace Awagaman_ERP
             if (target != null)
             {
                 target.SortDirection = ascending ? ListSortDirection.Ascending : ListSortDirection.Descending;
-                target.Header = NormalizeHeaderForSort(target.Header?.ToString() ?? string.Empty) + (ascending ? " \u25B2" : " \u25BC");
+                target.Header = NormalizeHeaderForSort(target.Header?.ToString() ?? string.Empty) + (ascending ? " ^" : " v");
             }
             BillVM.SetSort(propName, ascending);
             ApplyBillHeaderFilterIndicators();
@@ -7277,7 +7319,7 @@ namespace Awagaman_ERP
             _billColumnsMenu = new ContextMenu();
             foreach (var col in BillLedgerGrid.Columns)
             {
-                var h = (col.Header?.ToString() ?? "").Replace(" â–²", "").Replace(" â–¼", "");
+                var h = (col.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", "");
                 if (string.IsNullOrEmpty(h)) continue;
                 var c = col;
                 var item = new System.Windows.Controls.MenuItem { Header = h, IsCheckable = true, IsChecked = c.Visibility == Visibility.Visible, StaysOpenOnClick = true };
@@ -7299,7 +7341,7 @@ namespace Awagaman_ERP
                 lines.Add($"_SortAscending:{BillVM?.IsCurrentSortAscending}");
                 foreach (var col in BillLedgerGrid.Columns)
                 {
-                    var h = (col.Header?.ToString() ?? "").Replace(" â–²", "").Replace(" â–¼", "").Trim();
+                    var h = (col.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", "").Trim();
                     if (!string.IsNullOrEmpty(h)) lines.Add(col.Visibility == Visibility.Visible ? $"1:{h}:{(int)col.Width.DisplayValue}" : $"0:{h}:{(int)col.Width.DisplayValue}");
                 }
                 var dir = System.IO.Path.GetDirectoryName(BillSettingsPath);
@@ -7326,7 +7368,7 @@ namespace Awagaman_ERP
                         var h = parts[1];
                         foreach (var col in BillLedgerGrid.Columns)
                         {
-                            var ch = (col.Header?.ToString() ?? "").Replace(" â–²", "").Replace(" â–¼", "").Trim();
+                            var ch = (col.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", "").Trim();
                             if (string.Equals(ch, h, StringComparison.OrdinalIgnoreCase))
                             {
                                 col.Visibility = vis ? Visibility.Visible : Visibility.Collapsed;
@@ -7336,7 +7378,12 @@ namespace Awagaman_ERP
                         }
                     }
                 }
-                BillVM?.SetSort(sortCol, sortAsc);
+                if (BillVM != null &&
+                    (!string.Equals(BillVM.GetSortColumn(), sortCol ?? string.Empty, StringComparison.OrdinalIgnoreCase) ||
+                     BillVM.IsCurrentSortAscending != sortAsc))
+                {
+                    BillVM.SetSort(sortCol, sortAsc);
+                }
             }
             catch { }
         }
@@ -7622,7 +7669,7 @@ namespace Awagaman_ERP
         private static decimal ParseDecimal(string value)
         {
             if (string.IsNullOrWhiteSpace(value)) return 0m;
-            value = value.Replace("â‚¹", "").Replace(",", "").Replace(" ", "").Trim();
+            value = value.Replace("Rs.", "").Replace(",", "").Replace(" ", "").Trim();
             return decimal.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var result) ? result : 0m;
         }
 
@@ -7658,32 +7705,108 @@ namespace Awagaman_ERP
         private void ApplyTrackingSearch(string filter) { if (TrackingVM == null || TrackingLedgerGrid == null) return; var cv = CollectionViewSource.GetDefaultView(TrackingLedgerGrid.ItemsSource); if (cv == null) return; if (string.IsNullOrEmpty(filter)) cv.Filter = null; else cv.Filter = (obj) => { if (obj is TrackingEntry te) { if (te.ChallanNo?.ToLower().Contains(filter) == true || te.VehicleNo?.ToLower().Contains(filter) == true || te.From?.ToLower().Contains(filter) == true || te.To?.ToLower().Contains(filter) == true || te.DriverMobile?.ToLower().Contains(filter) == true || te.Status?.ToLower().Contains(filter) == true) return true; } return false; }; }
         private void StatusFilterCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) { ApplyTrackingFilter(); }
         private void ApplyTrackingFilter() { if (TrackingVM == null || TrackingLedgerGrid == null) return; var cv = CollectionViewSource.GetDefaultView(TrackingLedgerGrid.ItemsSource); if (cv == null) return; string search = TrackingSearchBox.Text?.ToLower().Trim() ?? ""; string status = (StatusFilterCombo?.SelectedItem as ComboBoxItem)?.Content?.ToString(); bool filterByStatus = !string.IsNullOrEmpty(status) && status != "All Status"; bool filterBySearch = !string.IsNullOrEmpty(search); if (!filterByStatus && !filterBySearch) { cv.Filter = null; TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count; return; } cv.Filter = (obj) => { if (obj is TrackingEntry te) { if (filterByStatus && te.Status != status) return false; if (filterBySearch && (te.ChallanNo?.ToLower().Contains(search) == true || te.VehicleNo?.ToLower().Contains(search) == true || te.From?.ToLower().Contains(search) == true || te.To?.ToLower().Contains(search) == true || te.DriverMobile?.ToLower().Contains(search) == true || te.Status?.ToLower().Contains(search) == true)) return true; return !filterBySearch; } return false; }; }
-        private void RestoreSortIndicator() { if (VM == null || LedgerGrid == null) return; string colName = VM.GetSortColumn(); if (string.IsNullOrEmpty(colName)) return; foreach (var c in LedgerGrid.Columns) { string prop = (c as DataGridTextColumn)?.Binding is System.Windows.Data.Binding b ? b.Path?.Path : (c as DataGridTemplateColumn)?.SortMemberPath; if (string.IsNullOrEmpty(prop)) continue; string header = (c.Header?.ToString() ?? "").Replace(" â–²", "").Replace(" â–¼", ""); if (prop.Equals(colName, StringComparison.OrdinalIgnoreCase)) { c.SortDirection = VM.IsCurrentSortAscending ? System.ComponentModel.ListSortDirection.Ascending : System.ComponentModel.ListSortDirection.Descending; c.Header = header + (VM.IsCurrentSortAscending ? " â–²" : " â–¼"); } else { c.Header = header; c.SortDirection = null; } } }
-        private void UpdatePageUI() { if (VM == null) return; if (RecordCountText != null) RecordCountText.Text = $"Records: {VM.FilteredEntriesCount}"; RefreshFilteredSummary(); ApplyChallanDueFilter(); }
+        private void RestoreSortIndicator() { if (VM == null || LedgerGrid == null) return; string colName = VM.GetSortColumn(); if (string.IsNullOrEmpty(colName)) return; foreach (var c in LedgerGrid.Columns) { string prop = (c as DataGridTextColumn)?.Binding is System.Windows.Data.Binding b ? b.Path?.Path : (c as DataGridTemplateColumn)?.SortMemberPath; if (string.IsNullOrEmpty(prop)) continue; string header = (c.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", ""); if (prop.Equals(colName, StringComparison.OrdinalIgnoreCase)) { c.SortDirection = VM.IsCurrentSortAscending ? System.ComponentModel.ListSortDirection.Ascending : System.ComponentModel.ListSortDirection.Descending; c.Header = header + (VM.IsCurrentSortAscending ? " ^" : " v"); } else { c.Header = header; c.SortDirection = null; } } }
+        private void UpdatePageUI()
+        {
+            if (VM == null) return;
+
+            RefreshFilteredSummary();
+
+            if (RecordCountText != null)
+                RecordCountText.Text = $"Records: {VM.FilteredEntriesCount}";
+
+            if (ChallanPageInfoText != null)
+                ChallanPageInfoText.Text = VM.PageInfo;
+
+            if (ChallanPrevPageButton != null)
+                ChallanPrevPageButton.IsEnabled = VM.CanGoPrevious;
+
+            if (ChallanNextPageButton != null)
+                ChallanNextPageButton.IsEnabled = VM.CanGoNext;
+
+            ApplyChallanDueFilter();
+        }
         private void RefreshFilteredSummary()
         {
             if (VM == null) return;
+
+            if (!_onlyDueFilterEnabled && _challanHeaderFilters.Count == 0)
+            {
+                if (SearchedTotalDueTextBlock != null)
+                {
+                    SearchedTotalDueTextBlock.Text = $"Total Due: Rs. {VM.FilteredTotalDue:N2}";
+                    SearchedTotalDueTextBlock.Visibility = Visibility.Visible;
+                }
+                return;
+            }
+
+            var rows = VM.GetFilteredEntriesForSummary();
+
+            if (_onlyDueFilterEnabled || _challanHeaderFilters.Count > 0)
+            {
+                rows = rows.Where(ChallanMatchesVisibleFilters);
+            }
+
+            var summaryRows = rows.ToList();
+            VM.FilteredEntriesCount = summaryRows.Count;
+            VM.FilteredTotalDue = summaryRows.Sum(entry => entry?.Due ?? 0m);
+
             if (LedgerGrid != null)
             {
                 var cv = CollectionViewSource.GetDefaultView(LedgerGrid.ItemsSource);
                 if (cv != null)
-                {
-                    var visible = cv.Cast<object>().OfType<ChallanEntry>().ToList();
-                    VM.FilteredEntriesCount = visible.Count;
-                    VM.FilteredTotalDue = visible.Sum(entry => entry?.Due ?? 0m);
-                }
-                else
-                {
-                    VM.FilteredEntriesCount = VM.PagedEntries.Count;
-                    VM.FilteredTotalDue = VM.PagedEntries.Sum(entry => entry?.Due ?? 0m);
-                }
+                    RefreshCollectionViewSafely(cv);
             }
-            else
+
+            if (SearchedTotalDueTextBlock != null)
             {
-                VM.FilteredEntriesCount = VM.PagedEntries.Count;
-                VM.FilteredTotalDue = VM.PagedEntries.Sum(entry => entry?.Due ?? 0m);
+                SearchedTotalDueTextBlock.Text = $"Total Due: Rs. {VM.FilteredTotalDue:N2}";
+                SearchedTotalDueTextBlock.Visibility = Visibility.Visible;
             }
-            if (SearchedTotalDueTextBlock != null) SearchedTotalDueTextBlock.Visibility = Visibility.Collapsed;
+        }
+
+        private bool ChallanMatchesVisibleFilters(ChallanEntry ce)
+        {
+            if (ce == null) return false;
+            if (_onlyDueFilterEnabled && ce.Due <= 0m) return false;
+
+            foreach (var kv in _challanHeaderFilters)
+            {
+                var selectedSet = kv.Value;
+                if (selectedSet == null || selectedSet.Count == 0) continue;
+                switch (NormalizeChallanHeaderName(kv.Key))
+                {
+                    case "LR No.":
+                        {
+                            var tokens = (ce.LRNumber ?? string.Empty)
+                                .Split(new[] { ',', ';', ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries)
+                                .Select(t => t.Trim())
+                                .Where(t => !string.IsNullOrWhiteSpace(t));
+                            if (!tokens.Any(t => selectedSet.Contains(t))) return false;
+                        }
+                        break;
+                    case "Agent/Broker":
+                        if (!selectedSet.Contains((ce.BrokerName ?? string.Empty).Trim())) return false;
+                        break;
+                    case "From":
+                        if (!selectedSet.Contains((ce.From ?? string.Empty).Trim())) return false;
+                        break;
+                    case "To":
+                        if (!selectedSet.Contains((ce.To ?? string.Empty).Trim())) return false;
+                        break;
+                    case "Lorry Hire":
+                        if (!selectedSet.Contains(ce.LorryHire.ToString("N2"))) return false;
+                        break;
+                    case "Balance":
+                        if (!selectedSet.Contains(ce.Balance.ToString("N2"))) return false;
+                        break;
+                    case "Due":
+                        if (!selectedSet.Contains(ce.Due.ToString("N2"))) return false;
+                        break;
+                }
+            }
+
+            return true;
         }
         private void ApplyChallanDueFilter()
         {
@@ -8057,7 +8180,7 @@ namespace Awagaman_ERP
             {
                 target.SortDirection = ascending ? ListSortDirection.Ascending : ListSortDirection.Descending;
                 var clean = NormalizeChallanHeaderName(target.Header?.ToString() ?? string.Empty);
-                target.Header = clean + (ascending ? " â–²" : " â–¼");
+                target.Header = clean + (ascending ? " ^" : " v");
             }
 
             VM.SetSort(propName, ascending);
@@ -8143,8 +8266,8 @@ namespace Awagaman_ERP
             foreach (var col in LedgerGrid.Columns)
             {
                 var headerName = NormalizeChallanHeaderName((col.Header ?? string.Empty).ToString())
-                    .Replace(" â–²", string.Empty)
-                    .Replace(" â–¼", string.Empty)
+                    .Replace(" ^", string.Empty)
+                    .Replace(" v", string.Empty)
                     .Trim();
                 var hasFilter = _challanHeaderFilters.TryGetValue(headerName, out var selectedSet) && selectedSet != null && selectedSet.Count > 0;
                 col.HeaderStyle = hasFilter ? _challanFilteredHeaderStyle : null;
@@ -8153,17 +8276,75 @@ namespace Awagaman_ERP
         private static string NormalizeChallanHeaderName(string header)
         {
             var h = (header ?? string.Empty).Trim();
-            h = h.Replace(" â–²", string.Empty)
-                 .Replace(" â–¼", string.Empty)
-                 .Replace(" Ã¢â€“Â²", string.Empty)
-                 .Replace(" Ã¢â€“Â¼", string.Empty)
+            h = h.Replace(" ^", string.Empty)
+                 .Replace(" v", string.Empty)
+                 .Replace(" ^", string.Empty)
+                 .Replace(" v", string.Empty)
                  .Trim();
             return h;
         }
 
-        private void LRUpdatePageUI() { if (LRVM == null) return; if (LRRecordCountText != null) LRRecordCountText.Text = $"Records: {LRVM.FilteredEntriesCount}"; LRRefreshFilteredSummary(); if (_lrHeaderFilters.Count > 0) ApplyLRHeaderFilter(); }
-        private void LRRefreshFilteredSummary() { if (LRVM == null) return; if (LRSearchedRecordsTextBlock != null) LRSearchedRecordsTextBlock.Text = $"Records: {LRVM.FilteredEntriesCount}"; if (LRSearchedTotalDueTextBlock != null) { LRSearchedTotalDueTextBlock.Text = $"Filtered Balance: â‚¹ {LRVM.FilteredTotalBalance:N2}"; LRSearchedTotalDueTextBlock.Visibility = Visibility.Visible; } }
-        private void LedgerGrid_SelectedCellsChanged(object sender, SelectedCellsChangedEventArgs e) { if (LedgerGrid.SelectedCells.Count < 2) { SelectedSumTextBlock.Visibility = Visibility.Collapsed; return; } decimal totalSum = 0; bool hasNumbers = false; var cache = new Dictionary<string, System.Reflection.PropertyInfo>(); foreach (var cellInfo in LedgerGrid.SelectedCells) { var item = cellInfo.Item; var column = cellInfo.Column as DataGridBoundColumn; if (column?.Binding is System.Windows.Data.Binding binding) { var path = binding.Path.Path; if (!cache.TryGetValue(path, out var prop)) { prop = item.GetType().GetProperty(path); cache[path] = prop; } if (prop != null) { var val = prop.GetValue(item); if (val is decimal || val is int || val is long || val is double) { totalSum += Convert.ToDecimal(val); hasNumbers = true; } } } } if (hasNumbers) { SelectedSumTextBlock.Text = $"Selected Sum: â‚¹ {totalSum:N2}"; SelectedSumTextBlock.Visibility = Visibility.Visible; } else SelectedSumTextBlock.Visibility = Visibility.Collapsed; }
+        private void LRUpdatePageUI()
+        {
+            if (LRVM == null) return;
+            LRRefreshFilteredSummary();
+            if (LRRecordCountText != null) LRRecordCountText.Text = $"Records: {LRVM.FilteredEntriesCount}";
+            if (LRPageInfoText != null) LRPageInfoText.Text = LRVM.PageInfo;
+            if (LRPrevPageButton != null) LRPrevPageButton.IsEnabled = LRVM.CanGoPrevious;
+            if (LRNextPageButton != null) LRNextPageButton.IsEnabled = LRVM.CanGoNext;
+            if (_lrHeaderFilters.Count > 0) ApplyLRHeaderFilter();
+        }
+
+        private void LRRefreshFilteredSummary()
+        {
+            if (LRVM == null) return;
+
+            if (_lrHeaderFilters.Count == 0)
+            {
+                if (LRSearchedRecordsTextBlock != null) LRSearchedRecordsTextBlock.Text = $"Records: {LRVM.FilteredEntriesCount}";
+                if (LRSearchedTotalDueTextBlock != null)
+                {
+                    LRSearchedTotalDueTextBlock.Text = $"Filtered Balance: Rs. {LRVM.FilteredTotalBalance:N2}";
+                    LRSearchedTotalDueTextBlock.Visibility = Visibility.Visible;
+                }
+                return;
+            }
+
+            var rows = LRVM.GetFilteredEntriesForSummary();
+            if (_lrHeaderFilters.Count > 0)
+            {
+                rows = rows.Where(LRMatchesVisibleFilters).ToList();
+            }
+
+            LRVM.FilteredEntriesCount = rows.Count;
+            LRVM.FilteredTotalFreight = rows.Sum(entry => entry?.TotalFreight ?? 0m);
+            LRVM.FilteredTotalBalance = rows.Sum(entry => entry?.Bal ?? 0m);
+
+            if (LRSearchedRecordsTextBlock != null) LRSearchedRecordsTextBlock.Text = $"Records: {LRVM.FilteredEntriesCount}";
+            if (LRSearchedTotalDueTextBlock != null)
+            {
+                LRSearchedTotalDueTextBlock.Text = $"Filtered Balance: Rs. {LRVM.FilteredTotalBalance:N2}";
+                LRSearchedTotalDueTextBlock.Visibility = Visibility.Visible;
+            }
+        }
+
+        private bool LRMatchesVisibleFilters(LREntry entry)
+        {
+            if (entry == null)
+            {
+                return false;
+            }
+
+            foreach (var kv in _lrHeaderFilters)
+            {
+                if (kv.Value == null || kv.Value.Count == 0) continue;
+                var value = GetLRHeaderCellValue(entry, kv.Key);
+                if (!kv.Value.Contains(value)) return false;
+            }
+
+            return true;
+        }
+        private void LedgerGrid_SelectedCellsChanged(object sender, SelectedCellsChangedEventArgs e) { if (LedgerGrid.SelectedCells.Count < 2) { SelectedSumTextBlock.Visibility = Visibility.Collapsed; return; } decimal totalSum = 0; bool hasNumbers = false; var cache = new Dictionary<string, System.Reflection.PropertyInfo>(); foreach (var cellInfo in LedgerGrid.SelectedCells) { var item = cellInfo.Item; var column = cellInfo.Column as DataGridBoundColumn; if (column?.Binding is System.Windows.Data.Binding binding) { var path = binding.Path.Path; if (!cache.TryGetValue(path, out var prop)) { prop = item.GetType().GetProperty(path); cache[path] = prop; } if (prop != null) { var val = prop.GetValue(item); if (val is decimal || val is int || val is long || val is double) { totalSum += Convert.ToDecimal(val); hasNumbers = true; } } } } if (hasNumbers) { SelectedSumTextBlock.Text = $"Selected Sum: Rs. {totalSum:N2}"; SelectedSumTextBlock.Visibility = Visibility.Visible; } else SelectedSumTextBlock.Visibility = Visibility.Collapsed; }
         private void LedgerGrid_BeginningEdit(object sender, DataGridBeginningEditEventArgs e)
         {
             var entry = e?.Row?.Item as ChallanEntry;
@@ -8584,8 +8765,8 @@ namespace Awagaman_ERP
                 }
             }, nameof(LedgerGrid_CellEditEnding));
         }
-        private void LedgerGrid_Sorting(object sender, DataGridSortingEventArgs e) { e.Handled = true; var col = e.Column; string propName = (col as DataGridTextColumn)?.Binding is System.Windows.Data.Binding b ? b.Path?.Path : (col as DataGridTemplateColumn)?.SortMemberPath; if (string.IsNullOrEmpty(propName) || col.CanUserSort == false) return; bool sameColumn = VM?.GetSortColumn() == propName; bool ascending = !sameColumn || !(VM?.IsCurrentSortAscending ?? true); foreach (var c in LedgerGrid.Columns) { string h = (c.Header?.ToString() ?? "").Replace(" â–²", "").Replace(" â–¼", ""); c.Header = h; c.SortDirection = null; } col.SortDirection = ascending ? System.ComponentModel.ListSortDirection.Ascending : System.ComponentModel.ListSortDirection.Descending; col.Header = col.Header?.ToString() + (ascending ? " â–²" : " â–¼"); VM?.SetSort(propName, ascending); }
-        private void LRLedgerGrid_SelectedCellsChanged(object sender, SelectedCellsChangedEventArgs e) { if (LRLedgerGrid.SelectedCells.Count < 2) { LRSelectedSumTextBlock.Visibility = Visibility.Collapsed; return; } decimal totalSum = 0; bool hasNumbers = false; var cache = new Dictionary<string, System.Reflection.PropertyInfo>(); foreach (var cellInfo in LRLedgerGrid.SelectedCells) { var item = cellInfo.Item; var column = cellInfo.Column as DataGridBoundColumn; if (column?.Binding is System.Windows.Data.Binding binding) { var path = binding.Path.Path; if (!cache.TryGetValue(path, out var prop)) { prop = item.GetType().GetProperty(path); cache[path] = prop; } if (prop != null) { var val = prop.GetValue(item); if (val is decimal || val is int || val is long || val is double) { totalSum += Convert.ToDecimal(val); hasNumbers = true; } } } } if (hasNumbers) { LRSelectedSumTextBlock.Text = $"Selected: â‚¹ {totalSum:N2}"; LRSelectedSumTextBlock.Visibility = Visibility.Visible; } else LRSelectedSumTextBlock.Visibility = Visibility.Collapsed; }
+        private void LedgerGrid_Sorting(object sender, DataGridSortingEventArgs e) { e.Handled = true; var col = e.Column; string propName = (col as DataGridTextColumn)?.Binding is System.Windows.Data.Binding b ? b.Path?.Path : (col as DataGridTemplateColumn)?.SortMemberPath; if (string.IsNullOrEmpty(propName) || col.CanUserSort == false) return; bool sameColumn = VM?.GetSortColumn() == propName; bool ascending = !sameColumn || !(VM?.IsCurrentSortAscending ?? true); foreach (var c in LedgerGrid.Columns) { string h = (c.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", ""); c.Header = h; c.SortDirection = null; } col.SortDirection = ascending ? System.ComponentModel.ListSortDirection.Ascending : System.ComponentModel.ListSortDirection.Descending; col.Header = col.Header?.ToString() + (ascending ? " ^" : " v"); VM?.SetSort(propName, ascending); }
+        private void LRLedgerGrid_SelectedCellsChanged(object sender, SelectedCellsChangedEventArgs e) { if (LRLedgerGrid.SelectedCells.Count < 2) { LRSelectedSumTextBlock.Visibility = Visibility.Collapsed; return; } decimal totalSum = 0; bool hasNumbers = false; var cache = new Dictionary<string, System.Reflection.PropertyInfo>(); foreach (var cellInfo in LRLedgerGrid.SelectedCells) { var item = cellInfo.Item; var column = cellInfo.Column as DataGridBoundColumn; if (column?.Binding is System.Windows.Data.Binding binding) { var path = binding.Path.Path; if (!cache.TryGetValue(path, out var prop)) { prop = item.GetType().GetProperty(path); cache[path] = prop; } if (prop != null) { var val = prop.GetValue(item); if (val is decimal || val is int || val is long || val is double) { totalSum += Convert.ToDecimal(val); hasNumbers = true; } } } } if (hasNumbers) { LRSelectedSumTextBlock.Text = $"Selected: Rs. {totalSum:N2}"; LRSelectedSumTextBlock.Visibility = Visibility.Visible; } else LRSelectedSumTextBlock.Visibility = Visibility.Collapsed; }
         private void LRLedgerGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
         {
             if (e.EditAction != DataGridEditAction.Commit) return;
@@ -8921,7 +9102,7 @@ namespace Awagaman_ERP
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Distinct(StringComparer.OrdinalIgnoreCase);
         }
-        private void LRLedgerGrid_Sorting(object sender, DataGridSortingEventArgs e) { e.Handled = true; var col = e.Column; string propName = (col as DataGridTextColumn)?.Binding is System.Windows.Data.Binding b ? b.Path?.Path : (col as DataGridTemplateColumn)?.SortMemberPath; if (string.IsNullOrEmpty(propName) || col.CanUserSort == false) return; bool sameColumn = LRVM?.GetSortColumn() == propName; bool ascending = !sameColumn || !(LRVM?.IsCurrentSortAscending ?? true); foreach (var c in LRLedgerGrid.Columns) { string h = (c.Header?.ToString() ?? "").Replace(" â–²", "").Replace(" â–¼", ""); c.Header = h; c.SortDirection = null; } col.SortDirection = ascending ? System.ComponentModel.ListSortDirection.Ascending : System.ComponentModel.ListSortDirection.Descending; col.Header = col.Header?.ToString() + (ascending ? " â–²" : " â–¼"); LRVM?.SetSort(propName, ascending); SaveLRColumnSettings(); }
+        private void LRLedgerGrid_Sorting(object sender, DataGridSortingEventArgs e) { e.Handled = true; var col = e.Column; string propName = (col as DataGridTextColumn)?.Binding is System.Windows.Data.Binding b ? b.Path?.Path : (col as DataGridTemplateColumn)?.SortMemberPath; if (string.IsNullOrEmpty(propName) || col.CanUserSort == false) return; bool sameColumn = LRVM?.GetSortColumn() == propName; bool ascending = !sameColumn || !(LRVM?.IsCurrentSortAscending ?? true); foreach (var c in LRLedgerGrid.Columns) { string h = (c.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", ""); c.Header = h; c.SortDirection = null; } col.SortDirection = ascending ? System.ComponentModel.ListSortDirection.Ascending : System.ComponentModel.ListSortDirection.Descending; col.Header = col.Header?.ToString() + (ascending ? " ^" : " v"); LRVM?.SetSort(propName, ascending); SaveLRColumnSettings(); }
         private static string NormalizeLrKey(string value)
         {
             return new string((value ?? string.Empty).Where(c => !char.IsWhiteSpace(c)).ToArray()).Trim();
@@ -9230,7 +9411,7 @@ namespace Awagaman_ERP
             {
                 target.SortDirection = ascending ? ListSortDirection.Ascending : ListSortDirection.Descending;
                 var clean = NormalizeChallanHeaderName(target.Header?.ToString() ?? string.Empty);
-                target.Header = clean + (ascending ? " Ã¢â€“Â²" : " Ã¢â€“Â¼");
+                target.Header = clean + (ascending ? " ^" : " v");
             }
 
             LRVM.SetSort(propName, ascending);
@@ -9282,7 +9463,7 @@ namespace Awagaman_ERP
             if (target != null)
             {
                 target.SortDirection = ascending ? ListSortDirection.Ascending : ListSortDirection.Descending;
-                target.Header = NormalizeHeaderForSort(target.Header?.ToString() ?? string.Empty) + (ascending ? " \u25B2" : " \u25BC");
+                target.Header = NormalizeHeaderForSort(target.Header?.ToString() ?? string.Empty) + (ascending ? " ^" : " v");
             }
 
             LRVM.SetSort(propName, ascending);
@@ -9294,12 +9475,8 @@ namespace Awagaman_ERP
             var h = (header ?? string.Empty).Trim();
             return h.Replace(" \u25B2", string.Empty)
                     .Replace(" \u25BC", string.Empty)
-                    .Replace(" â–²", string.Empty)
-                    .Replace(" â–¼", string.Empty)
-                    .Replace(" Ã¢â€“Â²", string.Empty)
-                    .Replace(" Ã¢â€“Â¼", string.Empty)
-                    .Replace(" ÃƒÂ¢Ã¢â‚¬â€œÃ‚Â²", string.Empty)
-                    .Replace(" ÃƒÂ¢Ã¢â‚¬â€œÃ‚Â¼", string.Empty)
+                    .Replace(" ^", string.Empty)
+                    .Replace(" v", string.Empty)
                     .Trim();
         }
 
@@ -9427,9 +9604,6 @@ namespace Awagaman_ERP
         private void UpdateLRVisibleSummaryFromView(ICollectionView cv)
         {
             if (LRVM == null || cv == null) return;
-            var visibleRows = cv.Cast<object>().OfType<LREntry>().ToList();
-            LRVM.FilteredEntriesCount = visibleRows.Count;
-            LRVM.FilteredTotalBalance = visibleRows.Sum(x => x.Bal);
             LRRefreshFilteredSummary();
         }
 
@@ -9655,7 +9829,7 @@ namespace Awagaman_ERP
             {
                 foreach (var c in LRLedgerGrid.Columns)
                 {
-                    string h = (c.Header?.ToString() ?? "").Replace(" â–²", "").Replace(" â–¼", "");
+                    string h = (c.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", "");
                     c.Header = h;
                     c.SortDirection = null;
                 }
@@ -9665,7 +9839,7 @@ namespace Awagaman_ERP
                 if (lrCol != null)
                 {
                     lrCol.SortDirection = System.ComponentModel.ListSortDirection.Descending;
-                    lrCol.Header = (lrCol.Header?.ToString() ?? "LR No.") + " â–¼";
+                    lrCol.Header = (lrCol.Header?.ToString() ?? "LR No.") + " v";
                 }
             }
 
@@ -9697,7 +9871,7 @@ namespace Awagaman_ERP
             if (LRLedgerGrid == null || string.IsNullOrWhiteSpace(headerName)) return;
             foreach (var col in LRLedgerGrid.Columns)
             {
-                var h = (col.Header?.ToString() ?? "").Replace(" â–²", "").Replace(" â–¼", "").Trim();
+                var h = (col.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", "").Trim();
                 if (!string.Equals(h, headerName, StringComparison.OrdinalIgnoreCase)) continue;
                 col.Visibility = Visibility.Visible;
                 if (col.Width.DisplayValue < minWidth) col.Width = new DataGridLength(minWidth);
@@ -9807,8 +9981,49 @@ namespace Awagaman_ERP
         private void ImportLR_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select LR Import File" }; if (dialog.ShowDialog() != true) return; try { var lines = System.IO.File.ReadAllLines(dialog.FileName); if (lines.Length < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = SplitCsvLine(lines[0]); var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new LRRepository(); int imported = 0, errors = 0; var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = lines.Length - 1; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; var importProgress = BeginImportProgress("Importing LR", lines.Length - 1); try { for (int i = 1; i < lines.Length; i++) { try {                         var parts = SplitCsvLine(lines[i]); var entry = new LREntry(); entry.LRNo = GetCol(parts, colMap, "LRNo") ?? GetCol(parts, colMap, "LRNO") ?? GetCol(parts, colMap, "LR"); entry.Date = ParseDate(GetCol(parts, colMap, "Date") ?? GetCol(parts, colMap, "DATE")); entry.ConsignorName = GetCol(parts, colMap, "ConsignorName") ?? GetCol(parts, colMap, "Consignor"); entry.ConsignorAddress = GetCol(parts, colMap, "ConsignorAddress"); entry.ConsignorGST = GetCol(parts, colMap, "ConsignorGST"); entry.ConsigneeName = GetCol(parts, colMap, "ConsigneeName") ?? GetCol(parts, colMap, "Consignee"); entry.ConsigneeAddress = GetCol(parts, colMap, "ConsigneeAddress"); entry.ConsigneeGST = GetCol(parts, colMap, "ConsigneeGST"); entry.From = GetCol(parts, colMap, "From") ?? GetCol(parts, colMap, "FROM"); entry.To = GetCol(parts, colMap, "To") ?? GetCol(parts, colMap, "TO"); entry.VehicleNo = GetCol(parts, colMap, "VehicleNo") ?? GetCol(parts, colMap, "Vehicle"); entry.VehicleType = GetCol(parts, colMap, "VehicleType") ?? GetCol(parts, colMap, "Type"); entry.SizeL = ParseDecimal(GetCol(parts, colMap, "L") ?? GetCol(parts, colMap, "SizeL")); entry.SizeW = ParseDecimal(GetCol(parts, colMap, "W") ?? GetCol(parts, colMap, "SizeW")); entry.SizeH = ParseDecimal(GetCol(parts, colMap, "H") ?? GetCol(parts, colMap, "SizeH")); entry.ActualWeight = ParseDecimal(GetCol(parts, colMap, "ActualWeight") ?? GetCol(parts, colMap, "Actual Weight")); entry.ChargedWeight = ParseDecimal(GetCol(parts, colMap, "ChargedWeight") ?? GetCol(parts, colMap, "Charged Weight")); int.TryParse(GetCol(parts, colMap, "PKG"), out int pkg); entry.PKG = pkg; entry.PkgType = GetCol(parts, colMap, "PkgType") ?? GetCol(parts, colMap, "PackageType") ?? GetCol(parts, colMap, "Pkg Type"); entry.Description = GetCol(parts, colMap, "Description"); entry.Invoice = GetCol(parts, colMap, "Invoice"); entry.Value = GetCol(parts, colMap, "Value"); entry.CHNo = GetCol(parts, colMap, "CHNo") ?? GetCol(parts, colMap, "CHNO") ?? GetCol(parts, colMap, "ChallanNo"); entry.TotalFreight = ParseDecimal(GetCol(parts, colMap, "TotalFreight") ?? GetCol(parts, colMap, "Freight")); entry.Hamali = ParseDecimal(GetCol(parts, colMap, "Hamali")); entry.Detention = ParseDecimal(GetCol(parts, colMap, "Detention")); entry.Others = ParseDecimal(GetCol(parts, colMap, "Others") ?? GetCol(parts, colMap, "Other") ?? GetCol(parts, colMap, "OTHR")); entry.StCharge = ParseDecimal(GetCol(parts, colMap, "StCharge") ?? GetCol(parts, colMap, "St. Charge") ?? GetCol(parts, colMap, "StChargeAmount")); entry.NEFT = ParseDecimal(GetCol(parts, colMap, "NEFT")); entry.CASH = ParseDecimal(GetCol(parts, colMap, "CASH")); entry.TDS = ParseDecimal(GetCol(parts, colMap, "TDS")); entry.Ded = ParseDecimal(GetCol(parts, colMap, "Ded") ?? GetCol(parts, colMap, "DED")); entry.BillNo = GetCol(parts, colMap, "BillNo") ?? GetCol(parts, colMap, "BILLNO"); entry.BillDate = ParseNullableDate(GetCol(parts, colMap, "BillDate")); entry.BILL = ParseDecimal(GetCol(parts, colMap, "BILL")); entry.BillParty = GetCol(parts, colMap, "BillParty"); entry.Broker = GetCol(parts, colMap, "Broker"); entry.FrtType = GetCol(parts, colMap, "FrtType") ?? GetCol(parts, colMap, "FrtType"); entry.PayType = GetCol(parts, colMap, "PayType") ?? GetCol(parts, colMap, "ToPayToBeBilled") ?? GetCol(parts, colMap, "To Pay/To Be Billed"); entry.Comm = ParseDecimal(GetCol(parts, colMap, "Comm")); entry.Paid = GetCol(parts, colMap, "Paid"); repo.Upsert(entry); imported++; } catch (Exception ex) { AppLogger.LogException(nameof(ImportLR_Click), ex); errors++; } if (progress != null) progress.Value = i; if (status != null) status.Text = $"Importing {i}/{lines.Length - 1}"; UpdateImportProgress(importProgress, i, lines.Length - 1, imported, errors); } } finally { importProgress.Dispose(); } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) { status.Text = string.Empty; status.Visibility = Visibility.Collapsed; } LRVM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); LRUpdatePageUI(); MessageBox.Show($"Import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
         private void ShowLRColumnsMenu_Click(object sender, RoutedEventArgs e) { if (!(sender is System.Windows.Controls.Button button)) return; _lrColumnsMenu = BuildLRColumnsMenu(); _lrColumnsMenu.PlacementTarget = button; _lrColumnsMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom; _lrColumnsMenu.IsOpen = true; }
         private static string LRSettingsPath => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Awagaman ERP", "lr_column_settings.json");
-        private void SaveLRColumnSettings() { try { var lines = new List<string>(); lines.Add($"_SortColumn:{LRVM?.GetSortColumn() ?? ""}"); lines.Add($"_SortAscending:{LRVM?.IsCurrentSortAscending}"); foreach (var col in LRLedgerGrid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" â–²", "").Replace(" â–¼", "").Trim(); if (!string.IsNullOrEmpty(h)) lines.Add(col.Visibility == Visibility.Visible ? $"1:{h}:{(int)col.Width.DisplayValue}" : $"0:{h}:{(int)col.Width.DisplayValue}"); } var dir = System.IO.Path.GetDirectoryName(LRSettingsPath); if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir); System.IO.File.WriteAllText(LRSettingsPath, string.Join("\n", lines)); } catch { } }
-        private void LoadLRColumnSettings() { try { var path = LRSettingsPath; if (!System.IO.File.Exists(path)) return; string sortCol = ""; bool sortAsc = true; foreach (var line in System.IO.File.ReadAllLines(path)) { if (line.StartsWith("_SortColumn:")) { sortCol = line.Substring("_SortColumn:".Length); continue; } if (line.StartsWith("_SortAscending:")) { bool.TryParse(line.Substring("_SortAscending:".Length), out sortAsc); continue; } var parts = line.Split(':'); if (parts.Length >= 2) { bool vis = parts[0] == "1"; var h = parts[1]; foreach (var col in LRLedgerGrid.Columns) { var ch = (col.Header?.ToString() ?? "").Replace(" â–²", "").Replace(" â–¼", "").Trim(); if (string.Equals(ch, h, StringComparison.OrdinalIgnoreCase)) { col.Visibility = vis ? Visibility.Visible : Visibility.Collapsed; if (parts.Length >= 3 && double.TryParse(parts[2], out double w) && w > 10) col.Width = new DataGridLength(w); break; } } } } LRVM?.SetSort(sortCol, sortAsc); } catch { } }
+        private void SaveLRColumnSettings() { try { var lines = new List<string>(); lines.Add($"_SortColumn:{LRVM?.GetSortColumn() ?? ""}"); lines.Add($"_SortAscending:{LRVM?.IsCurrentSortAscending}"); foreach (var col in LRLedgerGrid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", "").Trim(); if (!string.IsNullOrEmpty(h)) lines.Add(col.Visibility == Visibility.Visible ? $"1:{h}:{(int)col.Width.DisplayValue}" : $"0:{h}:{(int)col.Width.DisplayValue}"); } var dir = System.IO.Path.GetDirectoryName(LRSettingsPath); if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir); System.IO.File.WriteAllText(LRSettingsPath, string.Join("\n", lines)); } catch { } }
+        private void LoadLRColumnSettings()
+        {
+            try
+            {
+                var path = LRSettingsPath;
+                if (!System.IO.File.Exists(path)) return;
+                string sortCol = "";
+                bool sortAsc = true;
+                foreach (var line in System.IO.File.ReadAllLines(path))
+                {
+                    if (line.StartsWith("_SortColumn:")) { sortCol = line.Substring("_SortColumn:".Length); continue; }
+                    if (line.StartsWith("_SortAscending:")) { bool.TryParse(line.Substring("_SortAscending:".Length), out sortAsc); continue; }
+                    var parts = line.Split(':');
+                    if (parts.Length >= 2)
+                    {
+                        bool vis = parts[0] == "1";
+                        var h = parts[1];
+                        foreach (var col in LRLedgerGrid.Columns)
+                        {
+                            var ch = (col.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", "").Trim();
+                            if (string.Equals(ch, h, StringComparison.OrdinalIgnoreCase))
+                            {
+                                col.Visibility = vis ? Visibility.Visible : Visibility.Collapsed;
+                                if (parts.Length >= 3 && double.TryParse(parts[2], out double w) && w > 10) col.Width = new DataGridLength(w);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (LRVM != null)
+                {
+                    var currentSort = LRVM.GetSortColumn() ?? string.Empty;
+                    if (!string.Equals(currentSort, sortCol ?? string.Empty, StringComparison.OrdinalIgnoreCase) ||
+                        LRVM.IsCurrentSortAscending != sortAsc)
+                    {
+                        LRVM.SetSort(sortCol, sortAsc);
+                    }
+                }
+            }
+            catch { }
+        }
         private void ImportChallan_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select Challan Import File" }; if (dialog.ShowDialog() != true) return; if (dialog.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) || dialog.FileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase)) { MessageBox.Show("Please export your Excel file as CSV first.", "Format Not Supported", MessageBoxButton.OK, MessageBoxImage.Information); return; } try { var lines = System.IO.File.ReadAllLines(dialog.FileName); if (lines.Length < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = SplitCsvLine(lines[0]); var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new ChallanRepository(); int imported = 0, errors = 0; int maxSr = repo.GetMaxSr(); var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = lines.Length - 1; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; var importProgress = BeginImportProgress("Importing Challans", lines.Length - 1); try { for (int i = 1; i < lines.Length; i++) { try { var parts = SplitCsvLine(lines[i]); var importedChallanNo = GetFirstCol(parts, colMap, "ChallanNumber", "ChallanNo", "CHALLANNO", "CHNo", "CHNO", "ChNo", "CH", "Challan", "CNo", "CNNo", "C/NNo", "BiltyNo", "BuiltyNo"); if (string.IsNullOrWhiteSpace(importedChallanNo)) throw new InvalidOperationException("Missing Challan No / Challan Number value in import row."); var entry = new ChallanEntry { Sr = ++maxSr, ChallanNumber = importedChallanNo, Date = ParseDate(GetCol(parts, colMap, "Date") ?? GetCol(parts, colMap, "DATE")), LRNumber = GetCol(parts, colMap, "LRNumber") ?? GetCol(parts, colMap, "LRNumber") ?? GetCol(parts, colMap, "LRNO"), BrokerName = GetCol(parts, colMap, "BrokerName") ?? GetCol(parts, colMap, "Broker"), From = GetCol(parts, colMap, "From") ?? GetCol(parts, colMap, "FROM"), To = GetCol(parts, colMap, "To") ?? GetCol(parts, colMap, "TO"), VehicleNumber = GetCol(parts, colMap, "VehicleNumber") ?? GetCol(parts, colMap, "VehicleNo") ?? GetCol(parts, colMap, "VEHICLENO"), VehicleType = GetCol(parts, colMap, "VehicleType"), DriverName = GetCol(parts, colMap, "DriverName") ?? GetCol(parts, colMap, "Driver"), DriverMobile = GetCol(parts, colMap, "DriverMobile") ?? GetCol(parts, colMap, "DriverMobile"), EngineNo = GetCol(parts, colMap, "EngineNo"), LicenceNo = GetCol(parts, colMap, "LicenceNo"), PolicyNo = GetCol(parts, colMap, "PolicyNo"), ChassisNo = GetCol(parts, colMap, "ChassisNo"), OwnerName = GetCol(parts, colMap, "OwnerName") ?? GetCol(parts, colMap, "Owner"), PAN = GetCol(parts, colMap, "PAN"), LorryHire = ParseDecimal(GetCol(parts, colMap, "LorryHire") ?? GetCol(parts, colMap, "LorryHire")), LessTDS = ParseDecimal(GetCol(parts, colMap, "LessTDS")), AdvanceAmount = ParseDecimal(GetCol(parts, colMap, "AdvanceAmount") ?? GetCol(parts, colMap, "Advance")), AdvanceNEFT = ParseDecimal(GetCol(parts, colMap, "AdvanceNEFT")), AdvanceCash = ParseDecimal(GetCol(parts, colMap, "AdvanceCash")), AdvanceDate = ParseNullableDate(GetCol(parts, colMap, "AdvanceDate")), Detention = ParseDecimal(GetCol(parts, colMap, "Detention")), Hamali = ParseDecimal(GetCol(parts, colMap, "Hamali")), Deduction = ParseDecimal(GetCol(parts, colMap, "Deduction")), BalancePaidNEFT = ParseDecimal(GetCol(parts, colMap, "BalancePaidNEFT")), BalancePaidCash = ParseDecimal(GetCol(parts, colMap, "BalancePaidCash")), BalancePaidDate = ParseNullableDate(GetCol(parts, colMap, "BalancePaidDate")), PaidTo = GetCol(parts, colMap, "PaidTo"), Remarks = GetCol(parts, colMap, "Remarks"), BillAmount = ParseDecimal(GetCol(parts, colMap, "BillAmount")), Margin = ParseDecimal(GetCol(parts, colMap, "Margin")) }; entry.SuppressCalculations = true; entry.RecalculateBalance(); repo.Upsert(entry); imported++; } catch (Exception ex) { AppLogger.LogException(nameof(ImportChallan_Click), ex); errors++; } if (progress != null) progress.Value = i; if (status != null) status.Text = $"Importing {i}/{lines.Length - 1}"; UpdateImportProgress(importProgress, i, lines.Length - 1, imported, errors); } } finally { importProgress.Dispose(); } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) { status.Text = string.Empty; status.Visibility = Visibility.Collapsed; } VM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); UpdatePageUI(); RefreshDashboard(); MessageBox.Show($"Challan import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
         private void EditSelected_Click(object sender, RoutedEventArgs e)
         {
@@ -10029,10 +10244,10 @@ namespace Awagaman_ERP
         }
         private void LoadGridSettings() { try { var path = GridSettingsPath; if (!System.IO.File.Exists(path)) return; var json = System.IO.File.ReadAllText(path); var data = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json); if (data == null) return; if (data.TryGetValue("ChallanRowHeight", out var v) && LedgerGrid != null) LedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("LRRowHeight", out v) && LRLedgerGrid != null) LRLedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("TrackingRowHeight", out v) && TrackingLedgerGrid != null) TrackingLedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("BillRowHeight", out v) && BillLedgerGrid != null) BillLedgerGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("CBSRowHeight", out v) && CBSGrid != null) CBSGrid.RowHeight = Convert.ToDouble(v); if (data.TryGetValue("CBSSortColumn", out v)) _cbsSortColumn = Convert.ToString(v) ?? string.Empty; if (data.TryGetValue("CBSSortAscending", out v)) _cbsSortAscending = Convert.ToBoolean(v); RestoreColumnWidthsFromDict(LedgerGrid, "Challan", data); RestoreColumnWidthsFromDict(LRLedgerGrid, "LR", data); RestoreColumnWidthsFromDict(TrackingLedgerGrid, "Tracking", data); RestoreColumnWidthsFromDict(BillLedgerGrid, "Bill", data); RestoreColumnWidthsFromDict(CBSGrid, "CBS", data); } catch { } }
         private void SaveGridSettings() { try { var data = new Dictionary<string, object>(); if (LedgerGrid != null) { data["ChallanRowHeight"] = LedgerGrid.RowHeight; SaveColumnWidthsToDict(LedgerGrid, "Challan", data); } if (LRLedgerGrid != null) { data["LRRowHeight"] = LRLedgerGrid.RowHeight; SaveColumnWidthsToDict(LRLedgerGrid, "LR", data); } if (TrackingLedgerGrid != null) { data["TrackingRowHeight"] = TrackingLedgerGrid.RowHeight; SaveColumnWidthsToDict(TrackingLedgerGrid, "Tracking", data); } if (BillLedgerGrid != null) { data["BillRowHeight"] = BillLedgerGrid.RowHeight; SaveColumnWidthsToDict(BillLedgerGrid, "Bill", data); } if (CBSGrid != null) { data["CBSRowHeight"] = CBSGrid.RowHeight; SaveColumnWidthsToDict(CBSGrid, "CBS", data); } data["CBSSortColumn"] = _cbsSortColumn ?? string.Empty; data["CBSSortAscending"] = _cbsSortAscending; var dir = System.IO.Path.GetDirectoryName(GridSettingsPath); if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir); System.IO.File.WriteAllText(GridSettingsPath, new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(data)); } catch { } }
-        private void SaveColumnWidthsToDict(DataGrid grid, string prefix, Dictionary<string, object> data) { foreach (var col in grid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" â–²", "").Replace(" â–¼", "").Trim(); if (!string.IsNullOrEmpty(h)) data[$"{prefix}_W_{h}"] = col.Width.DisplayValue; } }
-        private void RestoreColumnWidthsFromDict(DataGrid grid, string prefix, Dictionary<string, object> data) { if (grid == null || data == null) return; foreach (var col in grid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" â–²", "").Replace(" â–¼", "").Trim(); if (string.IsNullOrEmpty(h)) continue; var key = $"{prefix}_W_{h}"; if (data.TryGetValue(key, out var val) && val != null) { double w = Convert.ToDouble(val); if (w > 10) col.Width = new DataGridLength(w); } } }
+        private void SaveColumnWidthsToDict(DataGrid grid, string prefix, Dictionary<string, object> data) { foreach (var col in grid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", "").Trim(); if (!string.IsNullOrEmpty(h)) data[$"{prefix}_W_{h}"] = col.Width.DisplayValue; } }
+        private void RestoreColumnWidthsFromDict(DataGrid grid, string prefix, Dictionary<string, object> data) { if (grid == null || data == null) return; foreach (var col in grid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", "").Trim(); if (string.IsNullOrEmpty(h)) continue; var key = $"{prefix}_W_{h}"; if (data.TryGetValue(key, out var val) && val != null) { double w = Convert.ToDouble(val); if (w > 10) col.Width = new DataGridLength(w); } } }
         private static string GridSettingsPath => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Awagaman ERP", "grid_settings.json");
-        private ContextMenu BuildLRColumnsMenu() { var menu = new ContextMenu(); foreach (var col in LRLedgerGrid.Columns) { var header = (col.Header?.ToString() ?? "").Replace(" â–²", "").Replace(" â–¼", ""); if (string.IsNullOrEmpty(header)) continue; var column = col; var item = new System.Windows.Controls.MenuItem { Header = header, IsCheckable = true, IsChecked = column.Visibility == Visibility.Visible, StaysOpenOnClick = true }; item.Click += (_, __) => { column.Visibility = item.IsChecked ? Visibility.Visible : Visibility.Collapsed; SaveLRColumnSettings(); }; menu.Items.Add(item); } return menu; }
+        private ContextMenu BuildLRColumnsMenu() { var menu = new ContextMenu(); foreach (var col in LRLedgerGrid.Columns) { var header = (col.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", ""); if (string.IsNullOrEmpty(header)) continue; var column = col; var item = new System.Windows.Controls.MenuItem { Header = header, IsCheckable = true, IsChecked = column.Visibility == Visibility.Visible, StaysOpenOnClick = true }; item.Click += (_, __) => { column.Visibility = item.IsChecked ? Visibility.Visible : Visibility.Collapsed; SaveLRColumnSettings(); }; menu.Items.Add(item); } return menu; }
         private void OpenLRFormatPreview(LREntry entry)
         {
             if (entry == null) return;
@@ -11267,7 +11482,7 @@ namespace Awagaman_ERP
                 var closeRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
                 var resetBtn = new Button { Content = "Reset", Width = 90, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
                 var saveBtn = new Button { Content = "Save", Width = 90, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
-                var actionsBtn = new Button { Content = "Actions â–¾", Width = 110, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
+                var actionsBtn = new Button { Content = "Actions v", Width = 110, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
                 var closeBtn = new Button { Content = "Close", Width = 90, Height = 30 };
                 Action doPrint = () =>
                 {
@@ -11453,9 +11668,9 @@ namespace Awagaman_ERP
                 editTop.Children.Add(italicCheck);
                 editTop.Children.Add(new TextBlock { Text = "Align", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
                 var alignPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0) };
-                var alignLeftBtn = new Button { Content = "â‰¡", Width = 30, Height = 26, Margin = new Thickness(0, 0, 4, 0), ToolTip = "Left Align" };
-                var alignCenterBtn = new Button { Content = "â‰£", Width = 30, Height = 26, Margin = new Thickness(0, 0, 4, 0), ToolTip = "Center Align" };
-                var alignRightBtn = new Button { Content = "â˜°", Width = 30, Height = 26, ToolTip = "Right Align" };
+                var alignLeftBtn = new Button { Content = "Left", Width = 48, Height = 26, Margin = new Thickness(0, 0, 4, 0), ToolTip = "Left Align" };
+                var alignCenterBtn = new Button { Content = "Center", Width = 58, Height = 26, Margin = new Thickness(0, 0, 4, 0), ToolTip = "Center Align" };
+                var alignRightBtn = new Button { Content = "Right", Width = 52, Height = 26, ToolTip = "Right Align" };
                 alignPanel.Children.Add(alignLeftBtn);
                 alignPanel.Children.Add(alignCenterBtn);
                 alignPanel.Children.Add(alignRightBtn);
@@ -13552,7 +13767,7 @@ namespace Awagaman_ERP
                 footer.HorizontalAlignment = HorizontalAlignment.Left;
                 footer.Width = billTableWidth;
             }
-            footer.Children.Add(new TextBlock { Text = "Enclâ€¦â€¦â€¦â€¦Ack / ment", FontSize = 12 });
+            footer.Children.Add(new TextBlock { Text = "Encl........Ack / ment", FontSize = 12 });
             var sign = new TextBlock { Text = "For Awagaman Trans Logistics", FontSize = 13, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Right };
             Grid.SetColumn(sign, 1);
             footer.Children.Add(sign);

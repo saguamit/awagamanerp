@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
@@ -82,7 +82,7 @@ namespace Awagaman_ERP.ViewModels
         public bool CanGoFirst => CurrentPage > 1;
         public bool CanGoLast => CurrentPage < TotalPages;
 
-        public string PageInfo => $"Page {CurrentPage} of {Math.Max(1, TotalPages)}";
+        public string PageInfo => $"Page {CurrentPage}";
         public bool HasLoadedPage => _pageLoaded && !_countDirty;
 
         public decimal TotalDue => Entries.Sum(entry => entry?.Due ?? 0m);
@@ -199,7 +199,7 @@ namespace Awagaman_ERP.ViewModels
         {
             _repository = repository ?? new ChallanRepository();
             if (BackendSettings.UseRemoteApi)
-                _pageSize = 100;
+                _pageSize = 300;
             AddCommand = new RelayCommand(_ => AddEntry(), _ => CanAdd());
             Entries.CollectionChanged += Entries_CollectionChanged;
             LoadColumnSettings();
@@ -344,6 +344,12 @@ namespace Awagaman_ERP.ViewModels
                     _countDirty = false;
                 }
 
+                decimal totalDue = _hasAdvancedFilter
+                    ? _repository.GetTotalDueAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo)
+                    : string.IsNullOrEmpty(_searchFilter)
+                        ? _repository.GetTotalDue()
+                        : _repository.GetTotalDue(_searchFilter);
+
                 List<ChallanEntry> items;
                 if (_hasAdvancedFilter)
                 {
@@ -380,7 +386,8 @@ namespace Awagaman_ERP.ViewModels
                     _nextPageCache = null;
                 }
 
-                FilteredEntriesCount = PagedEntries.Count;
+                FilteredEntriesCount = _totalCount;
+                FilteredTotalDue = totalDue;
                 OnPropertyChanged(nameof(PageInfo));
                 OnPropertyChanged(nameof(TotalCount));
                 OnPropertyChanged(nameof(TotalPages));
@@ -408,6 +415,7 @@ namespace Awagaman_ERP.ViewModels
         private class PageLoadResult
         {
             public int TotalCount;
+            public decimal TotalDue;
             public int CurrentPage;
             public List<ChallanEntry> Items;
             public HashSet<int> CommentIds;
@@ -466,6 +474,13 @@ namespace Awagaman_ERP.ViewModels
                 }
 
                 if (hasAdvancedFilter)
+                    result.TotalDue = _repository.GetTotalDueAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo);
+                else if (string.IsNullOrEmpty(searchFilter))
+                    result.TotalDue = _repository.GetTotalDue();
+                else
+                    result.TotalDue = _repository.GetTotalDue(searchFilter);
+
+                if (hasAdvancedFilter)
                 {
                     result.Items = _repository.SearchAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, requestedPage, requestedPageSize, sortColumn, sortAscending);
                     if (!result.Items.Any() && requestedPage > 1)
@@ -516,7 +531,8 @@ namespace Awagaman_ERP.ViewModels
                         foreach (var entry in PagedEntries)
                             entry.HasComments = commentIds.Contains(entry.Id);
 
-                        FilteredEntriesCount = PagedEntries.Count;
+                        FilteredEntriesCount = _totalCount;
+                        FilteredTotalDue = result.TotalDue;
                         OnPropertyChanged(nameof(CurrentPage));
                         OnPropertyChanged(nameof(PageInfo));
                         OnPropertyChanged(nameof(TotalCount));
@@ -720,15 +736,17 @@ namespace Awagaman_ERP.ViewModels
                 string fCN = _filterChallanNo, fLR = _filterLRNo, fFrom = _filterFrom, fTo = _filterTo;
                 bool hasFilter = !string.IsNullOrEmpty(_searchFilter);
                 string filter = _searchFilter;
+                string sortColumn = _sortColumn;
+                bool sortAscending = _sortAscending;
                 System.Threading.Tasks.Task.Run(() =>
                 {
                     List<ChallanEntry> data;
                     if (hasAdvanced)
-                        data = _repository.SearchAdvanced(fCN, fLR, fFrom, fTo, nextPage, ps);
+                        data = _repository.SearchAdvanced(fCN, fLR, fFrom, fTo, nextPage, ps, sortColumn, sortAscending);
                     else if (hasFilter)
-                        data = _repository.Search(filter, nextPage, ps);
+                        data = _repository.Search(filter, nextPage, ps, sortColumn, sortAscending);
                     else
-                        data = _repository.GetPage(nextPage, ps);
+                        data = _repository.GetPage(nextPage, ps, sortColumn, sortAscending);
                     System.Windows.Application.Current.Dispatcher.Invoke(() => { _nextPageCache = data; });
                 });
             }
@@ -781,7 +799,7 @@ namespace Awagaman_ERP.ViewModels
             }
 
             _totalCount = Math.Max(_totalCount + 1, PagedEntries.Count);
-            FilteredEntriesCount = PagedEntries.Count;
+            FilteredEntriesCount = _totalCount;
             _countDirty = true;
             _nextPageCache = null;
             _prevPageCache = null;
@@ -853,7 +871,7 @@ namespace Awagaman_ERP.ViewModels
             }
 
             _totalCount = Math.Max(0, _totalCount - 1);
-            FilteredEntriesCount = PagedEntries.Count;
+            FilteredEntriesCount = _totalCount;
             _countDirty = true;
             _nextPageCache = null;
             _prevPageCache = null;
@@ -896,7 +914,7 @@ namespace Awagaman_ERP.ViewModels
                 OnPropertyChanged(nameof(CanGoNext));
                 OnPropertyChanged(nameof(CanGoFirst));
                 OnPropertyChanged(nameof(CanGoLast));
-                FilteredEntriesCount = PagedEntries.Count;
+                FilteredEntriesCount = _totalCount;
             }
             else
             {
@@ -929,7 +947,47 @@ namespace Awagaman_ERP.ViewModels
             OnPropertyChanged(nameof(CanGoNext));
             OnPropertyChanged(nameof(CanGoFirst));
             OnPropertyChanged(nameof(CanGoLast));
-            FilteredEntriesCount = PagedEntries.Count;
+            FilteredEntriesCount = _totalCount;
+        }
+
+        public IEnumerable<ChallanEntry> GetFilteredEntriesForSummary()
+        {
+            IEnumerable<ChallanEntry> rows = _repository.GetAll() ?? Enumerable.Empty<ChallanEntry>();
+
+            if (_hasAdvancedFilter)
+            {
+                if (!string.IsNullOrWhiteSpace(_filterChallanNo))
+                    rows = rows.Where(e => ContainsText(e?.ChallanNumber, _filterChallanNo));
+                if (!string.IsNullOrWhiteSpace(_filterLRNo))
+                    rows = rows.Where(e => ContainsText(e?.LRNumber, _filterLRNo));
+                if (!string.IsNullOrWhiteSpace(_filterFrom))
+                    rows = rows.Where(e => ContainsText(e?.From, _filterFrom));
+                if (!string.IsNullOrWhiteSpace(_filterTo))
+                    rows = rows.Where(e => ContainsText(e?.To, _filterTo));
+            }
+            else if (!string.IsNullOrWhiteSpace(_searchFilter))
+            {
+                var search = _searchFilter;
+                rows = rows.Where(e =>
+                    ContainsText(e?.ChallanNumber, search) ||
+                    ContainsText(e?.LRNumber, search) ||
+                    ContainsText(e?.VehicleNumber, search) ||
+                    ContainsText(e?.VehicleType, search) ||
+                    ContainsText(e?.DriverName, search) ||
+                    ContainsText(e?.BrokerName, search) ||
+                    ContainsText(e?.From, search) ||
+                    ContainsText(e?.To, search) ||
+                    ContainsText(e?.OwnerName, search));
+            }
+
+            return rows;
+        }
+
+        private static bool ContainsText(string value, string filter)
+        {
+            return !string.IsNullOrWhiteSpace(value) &&
+                   !string.IsNullOrWhiteSpace(filter) &&
+                   value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }

@@ -550,6 +550,42 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
         return new PagedResult<ChallanEntry> { Items = items, TotalCount = total };
     }
 
+    public async Task<ChallanSummaryResult> GetChallansSummaryAsync(
+        string? search,
+        string? challanNo = null,
+        string? lrNo = null,
+        string? from = null,
+        string? to = null)
+    {
+        var whereParts = new List<string>();
+        var parameters = new DynamicParameters();
+
+        var q = (search ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            whereParts.Add(@"(
+                challan_number ILIKE @search OR lr_number ILIKE @search OR vehicle_number ILIKE @search OR
+                vehicle_type ILIKE @search OR driver_name ILIKE @search OR broker_name ILIKE @search OR
+                from_location ILIKE @search OR to_location ILIKE @search OR owner_name ILIKE @search)");
+            parameters.Add("search", $"%{q}%");
+        }
+
+        AddLikeFilter(whereParts, parameters, "challan_number", "challanNo", challanNo);
+        AddLikeFilter(whereParts, parameters, "lr_number", "lrNo", lrNo);
+        AddLikeFilter(whereParts, parameters, "from_location", "from", from);
+        AddLikeFilter(whereParts, parameters, "to_location", "to", to);
+
+        var where = whereParts.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", whereParts);
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM challans {where};", parameters);
+        var due = await conn.ExecuteScalarAsync<decimal>($@"SELECT COALESCE(SUM(
+            (lorry_hire - less_tds - advance_amount + detention + hamali + deduction) - balance_paid_neft - balance_paid_cash
+        ), 0) FROM challans {where};", parameters);
+        return new ChallanSummaryResult { TotalCount = total, TotalDue = due };
+    }
+
     public Task<int> GetMaxChallanSrAsync() =>
         ExecuteScalarIntAsync("SELECT COALESCE(MAX(sr), 0) FROM challans;", new { });
 
@@ -662,6 +698,26 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
         return new PagedResult<LREntry> { Items = items, TotalCount = total };
     }
 
+    public async Task<LRSummaryResult> GetLREntriesSummaryAsync(string? search)
+    {
+        var parameters = new DynamicParameters();
+        var where = string.Empty;
+        var q = (search ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            where = @"WHERE lrno ILIKE @search OR consignor_name ILIKE @search OR consignee_name ILIKE @search OR
+                vehicle_no ILIKE @search OR bill_no ILIKE @search OR chno ILIKE @search";
+            parameters.Add("search", $"%{q}%");
+        }
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM lr_entries {where};", parameters);
+        var freight = await conn.ExecuteScalarAsync<decimal>($"SELECT COALESCE(SUM(total_freight), 0) FROM lr_entries {where};", parameters);
+        var balance = await conn.ExecuteScalarAsync<decimal>($"SELECT COALESCE(SUM((neft + cash - tds + ded)), 0) FROM lr_entries {where};", parameters);
+        return new LRSummaryResult { TotalCount = total, TotalFreight = freight, TotalBalance = balance };
+    }
+
     public Task<LREntry?> GetLREntryAsync(int id) =>
         QuerySingleOrDefaultAsync<LREntry>(@"SELECT
             id, sr, lrno AS LRNo, date, consignor_name AS ConsignorName, consignor_address AS ConsignorAddress, consignor_gst AS ConsignorGST,
@@ -751,6 +807,38 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
         var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM bills {where};", parameters);
         var items = (await conn.QueryAsync<BillEntry>($"{select} {where} ORDER BY {orderBy} LIMIT @limit OFFSET @offset;", parameters)).ToList();
         return new PagedResult<BillEntry> { Items = items, TotalCount = total };
+    }
+
+    public async Task<BillSummaryResult> GetBillsSummaryAsync(string? search, string? party = null, bool dueOnly = false)
+    {
+        var parameters = new DynamicParameters();
+        var whereParts = new List<string>();
+        var q = (search ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            whereParts.Add(@"(
+                bill_no ILIKE @search OR party ILIKE @search OR lr_no ILIKE @search OR
+                from_loc ILIKE @search OR to_loc ILIKE @search OR mr ILIKE @search OR remarks ILIKE @search)");
+            parameters.Add("search", $"%{q}%");
+        }
+
+        AddLikeFilter(whereParts, parameters, "party", "party", party);
+        if (dueOnly)
+        {
+            whereParts.Add("(freight + detention + hml + othr + st_charge - rcvd - tds - ded) > 0");
+        }
+
+        var where = whereParts.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", whereParts);
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        const string dueExpr = "(freight + detention + hml + othr + st_charge - rcvd - tds - ded)";
+        return await conn.QuerySingleAsync<BillSummaryResult>(
+            $@"SELECT
+                    COUNT(*)::int AS TotalCount,
+                    COALESCE(SUM({dueExpr}), 0)::numeric AS TotalDue
+               FROM bills
+               {where};",
+            parameters);
     }
 
     public Task<BillEntry?> GetBillAsync(int id) =>

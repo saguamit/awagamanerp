@@ -157,6 +157,23 @@ challans.MapGet("/page", async (
         return Results.Problem(ex.ToString(), statusCode: 500);
     }
 });
+challans.MapGet("/summary", async (
+    string? search,
+    string? challanNo,
+    string? lrNo,
+    string? from,
+    string? to,
+    AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetChallansSummaryAsync(search, challanNo, lrNo, from, to));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
 challans.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
 {
     try
@@ -232,6 +249,17 @@ lrs.MapGet("/page", async (int page, int pageSize, string? search, string? sort,
         return Results.Problem(ex.ToString(), statusCode: 500);
     }
 });
+lrs.MapGet("/summary", async (string? search, AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetLREntriesSummaryAsync(search));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
 lrs.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
 {
     var item = await repo.GetLREntryAsync(id);
@@ -260,6 +288,17 @@ bills.MapGet("/", async (AwagamanRepository repo) =>
     try
     {
         return Results.Ok(await repo.GetBillsAsync());
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
+bills.MapGet("/summary", async (string? search, string? party, bool? dueOnly, AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetBillsSummaryAsync(search, party, dueOnly ?? false));
     }
     catch (Exception ex)
     {

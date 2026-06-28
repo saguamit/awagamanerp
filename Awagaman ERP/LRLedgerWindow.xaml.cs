@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Awagaman_ERP.Models;
 using Awagaman_ERP.ViewModels;
 using MahApps.Metro.Controls;
@@ -227,7 +227,7 @@ namespace Awagaman_ERP
 
             if (hasNumbers)
             {
-                SelectedSumTextBlock.Text = $"Selected Sum: ₹ {totalSum:N2}";
+                SelectedSumTextBlock.Text = $"Selected Sum: Rs. {totalSum:N2}";
                 SelectedSumTextBlock.Visibility = Visibility.Visible;
             }
             else

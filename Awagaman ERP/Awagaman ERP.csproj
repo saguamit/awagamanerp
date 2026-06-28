@@ -120,6 +120,7 @@
     <Compile Include="Data\MasterDataCache.cs" />
     <Compile Include="Data\RemoteApiClient.cs" />
     <Compile Include="Data\RemotePagedResult.cs" />
+    <Compile Include="Data\RemoteSummaryModels.cs" />
     <Compile Include="Data\BillPrefixSettings.cs" />
     <Compile Include="Data\AppLogger.cs" />
     <Compile Include="ViewModels\ChallanViewModel.cs" />

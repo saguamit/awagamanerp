@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 using Awagaman_ERP.Data;
 using Awagaman_ERP.Models;
 
@@ -25,9 +26,11 @@ namespace Awagaman_ERP.ViewModels
         private int _filteredEntriesCount;
         private decimal _filteredTotalDue;
         private bool _isLoadingPage;
+        private bool _isLoadingPageAsync;
 
         public bool IsCurrentSortAscending => string.IsNullOrEmpty(_sortColumn) || _sortAscending;
         public string GetSortColumn() => _sortColumn;
+        public bool HasLoadedPage => _pageLoaded && !_countDirty && PagedEntries.Count > 0;
 
         public ObservableCollection<BillEntry> Entries { get; } = new ObservableCollection<BillEntry>();
         private ObservableCollection<BillEntry> _pagedEntries = new ObservableCollection<BillEntry>();
@@ -54,6 +57,7 @@ namespace Awagaman_ERP.ViewModels
                 LoadPage();
             }
         }
+
         public int TotalCount => _totalCount;
         public int TotalPages => Math.Max(1, (int)Math.Ceiling((double)_totalCount / PageSize));
         public bool CanGoPrevious => CurrentPage > 1;
@@ -67,6 +71,10 @@ namespace Awagaman_ERP.ViewModels
 
         public BillLedgerViewModel()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                _pageSize = 300;
+            }
         }
 
         public void LoadPage()
@@ -85,30 +93,26 @@ namespace Awagaman_ERP.ViewModels
                     _totalCount = string.IsNullOrEmpty(_searchFilter) ? _repository.GetTotalCount() : _repository.GetTotalCount(_searchFilter);
                     _countDirty = false;
                 }
+
                 List<BillEntry> items;
                 if (string.IsNullOrEmpty(_searchFilter))
+                {
                     items = _repository.GetPage(CurrentPage, PageSize, _sortColumn, _sortAscending);
+                }
                 else
                 {
                     items = _repository.Search(_searchFilter, CurrentPage, PageSize, _sortColumn, _sortAscending);
-                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.Search(_searchFilter, 1, PageSize, _sortColumn, _sortAscending); }
+                    if (!items.Any() && CurrentPage > 1)
+                    {
+                        CurrentPage = 1;
+                        items = _repository.Search(_searchFilter, 1, PageSize, _sortColumn, _sortAscending);
+                    }
                 }
+
                 PagedEntries = new ObservableCollection<BillEntry>(items);
-
-                // Assign group colors by BillNo
-                string[] colors = { "#FFFFFF", "#F0F0F0" };
-                int ci = 0;
-                string lastBillNo = null;
-                foreach (var e in PagedEntries)
-                {
-                    bool isNewGroup = e.BillNo != lastBillNo;
-                    if (isNewGroup) { lastBillNo = e.BillNo; ci = (ci + 1) % colors.Length; }
-                    e.GroupColor = colors[ci];
-                    e.BillNoDisplay = isNewGroup ? e.BillNo : string.Empty;
-                }
-
-                FilteredEntriesCount = PagedEntries.Count;
-                FilteredTotalDue = PagedEntries.Sum(e => e?.Due ?? 0);
+                ApplyGroupingAndDisplay(PagedEntries);
+                FilteredEntriesCount = _totalCount;
+                FilteredTotalDue = _repository.GetTotalDue(_searchFilter);
                 _pageLoaded = true;
             }
             catch (Exception ex)
@@ -129,16 +133,109 @@ namespace Awagaman_ERP.ViewModels
             }
         }
 
+        private class PageLoadResult
+        {
+            public int TotalCount;
+            public decimal TotalDue;
+            public int CurrentPage;
+            public List<BillEntry> Items;
+        }
+
+        public void EnsurePageLoadedAsync(Action afterLoad = null, Action<Exception> onError = null)
+        {
+            if (!BackendSettings.UseRemoteApi)
+            {
+                EnsurePageLoaded();
+                afterLoad?.Invoke();
+                return;
+            }
+
+            if (HasLoadedPage)
+            {
+                afterLoad?.Invoke();
+                return;
+            }
+
+            if (_isLoadingPageAsync)
+            {
+                return;
+            }
+
+            _isLoadingPageAsync = true;
+            var requestedPage = CurrentPage;
+            var requestedPageSize = PageSize;
+            var searchFilter = _searchFilter;
+            var sortColumn = _sortColumn;
+            var sortAscending = _sortAscending;
+            var countDirty = _countDirty;
+
+            Task.Run(() =>
+            {
+                return new PageLoadResult
+                {
+                    CurrentPage = requestedPage,
+                    TotalCount = countDirty ? _repository.GetTotalCount(searchFilter) : _totalCount,
+                    TotalDue = _repository.GetTotalDue(searchFilter),
+                    Items = string.IsNullOrEmpty(searchFilter)
+                        ? _repository.GetPage(requestedPage, requestedPageSize, sortColumn, sortAscending)
+                        : _repository.Search(searchFilter, requestedPage, requestedPageSize, sortColumn, sortAscending)
+                };
+            }).ContinueWith(task =>
+            {
+                _isLoadingPageAsync = false;
+
+                if (task.IsFaulted)
+                {
+                    var ex = task.Exception?.GetBaseException() ?? new Exception("Unable to load bill page.");
+                    onError?.Invoke(ex);
+                    return;
+                }
+
+                var result = task.Result;
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                {
+                    _totalCount = result.TotalCount;
+                    _countDirty = false;
+                    _currentPage = result.CurrentPage;
+                    PagedEntries = new ObservableCollection<BillEntry>(result.Items ?? new List<BillEntry>());
+                    ApplyGroupingAndDisplay(PagedEntries);
+                    FilteredEntriesCount = _totalCount;
+                    FilteredTotalDue = result.TotalDue;
+                    _pageLoaded = true;
+                    OnPropertyChanged(nameof(CurrentPage));
+                    OnPropertyChanged(nameof(TotalCount));
+                    OnPropertyChanged(nameof(TotalPages));
+                    OnPropertyChanged(nameof(PageInfo));
+                    OnPropertyChanged(nameof(CanGoPrevious));
+                    OnPropertyChanged(nameof(CanGoNext));
+                    OnPropertyChanged(nameof(CanGoFirst));
+                    OnPropertyChanged(nameof(CanGoLast));
+                    afterLoad?.Invoke();
+                });
+            });
+        }
+
         public void SetSearchFilter(string filter)
         {
             _searchFilter = (filter ?? "").Trim().ToLower();
-            _countDirty = true; _nextPageCache = null; _prevPageCache = null;
+            _countDirty = true;
+            _nextPageCache = null;
+            _prevPageCache = null;
             CurrentPage = 1;
         }
 
         public void SetSort(string column, bool ascending)
         {
-            _sortColumn = column ?? "";
+            var normalized = column ?? "";
+            if (string.Equals(_sortColumn ?? string.Empty, normalized, StringComparison.OrdinalIgnoreCase) &&
+                _sortAscending == ascending &&
+                !_countDirty &&
+                _pageLoaded)
+            {
+                return;
+            }
+
+            _sortColumn = normalized;
             _sortAscending = ascending;
             _countDirty = false;
             _nextPageCache = null;
@@ -163,6 +260,7 @@ namespace Awagaman_ERP.ViewModels
             {
                 PagedEntries = new ObservableCollection<BillEntry>(_nextPageCache);
                 MarkComments(PagedEntries);
+                ApplyGroupingAndDisplay(PagedEntries);
                 _nextPageCache = null;
                 OnPropertyChanged(nameof(CurrentPage));
                 OnPropertyChanged(nameof(PageInfo));
@@ -170,9 +268,14 @@ namespace Awagaman_ERP.ViewModels
                 OnPropertyChanged(nameof(CanGoNext));
                 OnPropertyChanged(nameof(CanGoFirst));
                 OnPropertyChanged(nameof(CanGoLast));
-                FilteredEntriesCount = PagedEntries.Count;
+                FilteredEntriesCount = _totalCount;
+                FilteredTotalDue = _repository.GetTotalDue(_searchFilter);
             }
-            else { OnPropertyChanged(nameof(CurrentPage)); LoadPage(); }
+            else
+            {
+                OnPropertyChanged(nameof(CurrentPage));
+                LoadPage();
+            }
         }
 
         public void GoToPreviousPage()
@@ -184,6 +287,7 @@ namespace Awagaman_ERP.ViewModels
             {
                 PagedEntries = new ObservableCollection<BillEntry>(_prevPageCache);
                 MarkComments(PagedEntries);
+                ApplyGroupingAndDisplay(PagedEntries);
                 _prevPageCache = null;
                 OnPropertyChanged(nameof(CurrentPage));
                 OnPropertyChanged(nameof(PageInfo));
@@ -191,9 +295,15 @@ namespace Awagaman_ERP.ViewModels
                 OnPropertyChanged(nameof(CanGoNext));
                 OnPropertyChanged(nameof(CanGoFirst));
                 OnPropertyChanged(nameof(CanGoLast));
-                FilteredEntriesCount = PagedEntries.Count;
+                FilteredEntriesCount = _totalCount;
+                FilteredTotalDue = _repository.GetTotalDue(_searchFilter);
             }
-            else { _nextPageCache = null; OnPropertyChanged(nameof(CurrentPage)); LoadPage(); }
+            else
+            {
+                _nextPageCache = null;
+                OnPropertyChanged(nameof(CurrentPage));
+                LoadPage();
+            }
         }
 
         public void GoToFirstPage() { CurrentPage = 1; }
@@ -203,15 +313,63 @@ namespace Awagaman_ERP.ViewModels
         {
             if (CurrentPage < TotalPages)
             {
-                int np = CurrentPage + 1, ps = PageSize;
-                bool hf = !string.IsNullOrEmpty(_searchFilter);
-                string f = _searchFilter, sc = _sortColumn;
-                bool sa = _sortAscending;
-                System.Threading.Tasks.Task.Run(() =>
+                int nextPage = CurrentPage + 1;
+                int pageSize = PageSize;
+                bool hasFilter = !string.IsNullOrEmpty(_searchFilter);
+                string filter = _searchFilter;
+                string sortColumn = _sortColumn;
+                bool sortAscending = _sortAscending;
+                Task.Run(() =>
                 {
-                    var data = hf ? _repository.Search(f, np, ps, sc, sa) : _repository.GetPage(np, ps, sc, sa);
+                    var data = hasFilter
+                        ? _repository.Search(filter, nextPage, pageSize, sortColumn, sortAscending)
+                        : _repository.GetPage(nextPage, pageSize, sortColumn, sortAscending);
                     System.Windows.Application.Current.Dispatcher.Invoke(() => _nextPageCache = data);
                 });
+            }
+        }
+
+        public List<BillEntry> GetFilteredEntriesForSummary()
+        {
+            var rows = _repository.GetAll();
+            if (string.IsNullOrWhiteSpace(_searchFilter))
+            {
+                return rows;
+            }
+
+            var filter = _searchFilter.Trim();
+            return rows.Where(entry =>
+                ContainsText(entry?.BillNo, filter) ||
+                ContainsText(entry?.Party, filter) ||
+                ContainsText(entry?.LRNo, filter) ||
+                ContainsText(entry?.From, filter) ||
+                ContainsText(entry?.To, filter) ||
+                ContainsText(entry?.MR, filter) ||
+                ContainsText(entry?.Remarks, filter))
+                .ToList();
+        }
+
+        private static bool ContainsText(string value, string filter) =>
+            !string.IsNullOrWhiteSpace(value) &&
+            !string.IsNullOrWhiteSpace(filter) &&
+            value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
+
+        private static void ApplyGroupingAndDisplay(IEnumerable<BillEntry> items)
+        {
+            string[] colors = { "#FFFFFF", "#F0F0F0" };
+            int colorIndex = 0;
+            string lastBillNo = null;
+            foreach (var entry in items ?? Enumerable.Empty<BillEntry>())
+            {
+                bool isNewGroup = entry.BillNo != lastBillNo;
+                if (isNewGroup)
+                {
+                    lastBillNo = entry.BillNo;
+                    colorIndex = (colorIndex + 1) % colors.Length;
+                }
+
+                entry.GroupColor = colors[colorIndex];
+                entry.BillNoDisplay = isNewGroup ? entry.BillNo : string.Empty;
             }
         }
 
@@ -220,8 +378,10 @@ namespace Awagaman_ERP.ViewModels
             try
             {
                 var ids = new CommentRepository().GetBillIdsWithComments();
-                foreach (var e in items)
-                    if (e != null) e.HasComments = ids.Contains(e.Id);
+                foreach (var entry in items)
+                {
+                    if (entry != null) entry.HasComments = ids.Contains(entry.Id);
+                }
             }
             catch (Exception ex)
             {

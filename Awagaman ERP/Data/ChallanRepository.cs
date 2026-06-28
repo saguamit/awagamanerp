@@ -303,6 +303,104 @@ namespace Awagaman_ERP.Data
             }
         }
 
+        public decimal GetTotalDue(string searchFilter = "")
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                var query = "api/challans/summary";
+                if (!string.IsNullOrWhiteSpace(searchFilter))
+                {
+                    query += $"?search={RemoteApiClient.UrlEncode(searchFilter)}";
+                }
+
+                try
+                {
+                    return RemoteApiClient.Get<RemoteChallanSummary>(query)?.TotalDue ?? 0m;
+                }
+                catch
+                {
+                    var rows = GetAllRemoteSafe();
+                    if (string.IsNullOrWhiteSpace(searchFilter))
+                    {
+                        return rows.Sum(x => x.Due);
+                    }
+
+                    return rows.Where(e =>
+                            Contains(e.ChallanNumber, searchFilter) ||
+                            Contains(e.LRNumber, searchFilter) ||
+                            Contains(e.VehicleNumber, searchFilter) ||
+                            Contains(e.VehicleType, searchFilter) ||
+                            Contains(e.DriverName, searchFilter) ||
+                            Contains(e.BrokerName, searchFilter) ||
+                            Contains(e.From, searchFilter) ||
+                            Contains(e.To, searchFilter) ||
+                            Contains(e.OwnerName, searchFilter))
+                        .Sum(x => x.Due);
+                }
+            }
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = connection.CreateCommand())
+            {
+                if (string.IsNullOrWhiteSpace(searchFilter))
+                {
+                    command.CommandText = @"SELECT COALESCE(SUM((LorryHire - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM Challans;";
+                }
+                else
+                {
+                    command.CommandText = @"SELECT COALESCE(SUM((LorryHire - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM Challans WHERE 
+                        ChallanNumber LIKE @filter OR LRNumber LIKE @filter OR VehicleNumber LIKE @filter 
+                        OR VehicleType LIKE @filter OR DriverName LIKE @filter OR BrokerName LIKE @filter 
+                        OR FromLocation LIKE @filter OR ToLocation LIKE @filter OR OwnerName LIKE @filter;";
+                    command.Parameters.AddWithValue("@filter", $"%{searchFilter}%");
+                }
+                connection.Open();
+                return Convert.ToDecimal(command.ExecuteScalar() ?? 0m);
+            }
+        }
+
+        public decimal GetTotalDueAdvanced(string challanNo, string lrNo, string from, string to)
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                var query = "api/challans/summary";
+                var parts = new List<string>();
+                if (!string.IsNullOrWhiteSpace(challanNo)) parts.Add($"challanNo={RemoteApiClient.UrlEncode(challanNo)}");
+                if (!string.IsNullOrWhiteSpace(lrNo)) parts.Add($"lrNo={RemoteApiClient.UrlEncode(lrNo)}");
+                if (!string.IsNullOrWhiteSpace(from)) parts.Add($"from={RemoteApiClient.UrlEncode(from)}");
+                if (!string.IsNullOrWhiteSpace(to)) parts.Add($"to={RemoteApiClient.UrlEncode(to)}");
+                if (parts.Count > 0) query += "?" + string.Join("&", parts);
+
+                try
+                {
+                    return RemoteApiClient.Get<RemoteChallanSummary>(query)?.TotalDue ?? 0m;
+                }
+                catch
+                {
+                    var rows = GetAllRemoteSafe().Where(e =>
+                        (string.IsNullOrWhiteSpace(challanNo) || Contains(e.ChallanNumber, challanNo)) &&
+                        (string.IsNullOrWhiteSpace(lrNo) || Contains(e.LRNumber, lrNo)) &&
+                        (string.IsNullOrWhiteSpace(from) || Contains(e.From, from)) &&
+                        (string.IsNullOrWhiteSpace(to) || Contains(e.To, to)));
+                    return rows.Sum(x => x.Due);
+                }
+            }
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = connection.CreateCommand())
+            {
+                var conditions = new List<string>();
+                if (!string.IsNullOrWhiteSpace(challanNo)) { conditions.Add("ChallanNumber LIKE @challanNo"); command.Parameters.AddWithValue("@challanNo", $"%{challanNo}%"); }
+                if (!string.IsNullOrWhiteSpace(lrNo)) { conditions.Add("LRNumber LIKE @lrNo"); command.Parameters.AddWithValue("@lrNo", $"%{lrNo}%"); }
+                if (!string.IsNullOrWhiteSpace(from)) { conditions.Add("FromLocation LIKE @from"); command.Parameters.AddWithValue("@from", $"%{from}%"); }
+                if (!string.IsNullOrWhiteSpace(to)) { conditions.Add("ToLocation LIKE @to"); command.Parameters.AddWithValue("@to", $"%{to}%"); }
+                string where = conditions.Count > 0 ? "WHERE " + string.Join(" AND ", conditions) : "";
+                command.CommandText = $"SELECT COALESCE(SUM((LorryHire - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM Challans {where};";
+                connection.Open();
+                return Convert.ToDecimal(command.ExecuteScalar() ?? 0m);
+            }
+        }
+
         public int GetMaxSr()
         {
             if (BackendSettings.UseRemoteApi)

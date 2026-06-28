@@ -172,7 +172,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                return GetRemotePage(1, 1, filter, string.Empty, true).TotalCount;
+                return GetRemoteSummary(filter).TotalCount;
             }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand(
@@ -189,7 +189,7 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                return GetRemotePage(1, 1, filter, string.Empty, true, party, dueOnly).TotalCount;
+                return GetRemoteSummary(filter, party, dueOnly).TotalCount;
             }
 
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
@@ -453,5 +453,79 @@ LRNo {d}, Sr, Id";
 
         private static bool Contains(string value, string filter)
             => !string.IsNullOrWhiteSpace(value) && !string.IsNullOrWhiteSpace(filter) && value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
+
+        public decimal GetTotalDue(string filter = "", string party = "", bool dueOnly = false)
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetRemoteSummary(filter, party, dueOnly).TotalDue;
+            }
+
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = c.CreateCommand())
+            {
+                var conditions = new List<string>();
+                if (!string.IsNullOrWhiteSpace(filter))
+                {
+                    conditions.Add("(BillNo LIKE @f OR Party LIKE @f OR LRNo LIKE @f OR FromLoc LIKE @f OR ToLoc LIKE @f OR MR LIKE @f OR Remarks LIKE @f)");
+                    cmd.Parameters.AddWithValue("@f", $"%{filter}%");
+                }
+                if (!string.IsNullOrWhiteSpace(party))
+                {
+                    conditions.Add("Party LIKE @party");
+                    cmd.Parameters.AddWithValue("@party", $"%{party.Trim()}%");
+                }
+                if (dueOnly)
+                {
+                    conditions.Add("(Freight+Detention+HML+OTHR+StCharge-RCVD-TDS-DED) > 0");
+                }
+
+                var where = conditions.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", conditions);
+                cmd.CommandText = $"SELECT COALESCE(SUM(Freight+Detention+HML+OTHR+StCharge-RCVD-TDS-DED), 0) FROM Bills {where};";
+                c.Open();
+                return Convert.ToDecimal(cmd.ExecuteScalar());
+            }
+        }
+
+        private static RemoteBillSummary GetRemoteSummary(string filter = "", string party = "", bool dueOnly = false)
+        {
+            var query = "api/bills/summary";
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(filter)) parts.Add($"search={RemoteApiClient.UrlEncode(filter)}");
+            if (!string.IsNullOrWhiteSpace(party)) parts.Add($"party={RemoteApiClient.UrlEncode(party)}");
+            if (dueOnly) parts.Add("dueOnly=true");
+            if (parts.Count > 0) query += "?" + string.Join("&", parts);
+
+            try
+            {
+                return RemoteApiClient.Get<RemoteBillSummary>(query);
+            }
+            catch
+            {
+                var rows = GetAllRemoteSafe().Where(e =>
+                    string.IsNullOrWhiteSpace(filter) ||
+                    Contains(e.BillNo, filter) ||
+                    Contains(e.Party, filter) ||
+                    Contains(e.LRNo, filter) ||
+                    Contains(e.From, filter) ||
+                    Contains(e.To, filter) ||
+                    Contains(e.MR, filter) ||
+                    Contains(e.Remarks, filter));
+                if (!string.IsNullOrWhiteSpace(party))
+                {
+                    rows = rows.Where(e => Contains(e.Party, party));
+                }
+                if (dueOnly)
+                {
+                    rows = rows.Where(e => e.Due > 0m);
+                }
+                var list = rows.ToList();
+                return new RemoteBillSummary
+                {
+                    TotalCount = list.Count,
+                    TotalDue = list.Sum(x => x?.Due ?? 0m)
+                };
+            }
+        }
     }
 }

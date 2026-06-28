@@ -640,7 +640,7 @@
                                     </StackPanel>
                                     <StackPanel Margin="0,0,40,0">
                                         <TextBlock Text="Total Due" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
-                                        <TextBlock Text="{Binding FilteredTotalDue, StringFormat=₹ {0:N2}}" FontSize="13" Foreground="#DC2626" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                                        <TextBlock Text="{Binding FilteredTotalDue, StringFormat=Rs. {0:N2}}" FontSize="13" Foreground="#DC2626" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
                                     </StackPanel>
                                 </StackPanel>
                                 <Button Grid.Column="1" Content="+ Generate Bill" Style="{StaticResource GreenButtonStyle}" Click="OpenBillForm_Click" />
@@ -653,7 +653,7 @@
                                 <Button Content="↻" Background="{StaticResource ThemeGreen}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="BillRefresh_Click" ToolTip="Clear Filters" />
                                 <Button Content="📂" Background="#1565C0" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ImportBill_Click" ToolTip="Import Bills from CSV" />
                                 <Button Content="?" Background="#374151" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenImportGuide_Click" ToolTip="Import column names" />
-                                <Button Content="₹" Background="#00897B" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenReceiveBillAmount_Click" ToolTip="Receive Bill Amount" />
+                                <Button Content="Rs." Background="#00897B" Foreground="White" BorderThickness="0" Width="34" Height="26" Margin="4,0" Cursor="Hand" Click="OpenReceiveBillAmount_Click" ToolTip="Receive Bill Amount" />
                                 <Button Content="🧾" Background="#6D4C41" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenBillReceiptHistory_Click" ToolTip="Bill Receipt History" />
                                 <Button Content="Σ" Background="#6D4C41" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenPartyBillSummary_Click" ToolTip="Party-wise Bill Due Summary" />
                                 <Button Content="⚙P" Background="#7C3AED" Foreground="White" BorderThickness="0" Width="30" Height="26" Margin="4,0" Cursor="Hand" Click="OpenBillPrefixSettings_Click" ToolTip="Bill Prefix Settings" />
@@ -751,7 +751,7 @@
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                     <TextBlock x:Name="BillRecordsTextBlock" Text="{Binding FilteredEntriesCount, StringFormat='Records: {0}'}" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextDark}" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="2" Text="{Binding FilteredTotalDue, StringFormat='Total Due: ₹ {0:N2}'}" FontSize="13" Foreground="#DC2626" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                                    <TextBlock Grid.Column="2" Text="{Binding FilteredTotalDue, StringFormat='Total Due: Rs. {0:N2}'}" FontSize="13" Foreground="#DC2626" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Right" />
                                 </Grid>
                             </Border>
                         </Grid>
@@ -1035,11 +1035,11 @@
                                     <TextBlock x:Name="CBSRecordsTextBlock" Text="Records: 0" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextDark}" VerticalAlignment="Center" />
                                     <StackPanel Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center">
                                         <TextBlock Text="Bank Net (Dr - Cr)" FontSize="11" Foreground="#64748B" HorizontalAlignment="Center" />
-                                        <TextBlock x:Name="CBSBankNetTextBlock" Text="₹ 0.00" FontSize="16" FontWeight="Bold" Foreground="#1D4ED8" HorizontalAlignment="Center" Margin="0,2,0,0" />
+                                        <TextBlock x:Name="CBSBankNetTextBlock" Text="Rs. 0.00" FontSize="16" FontWeight="Bold" Foreground="#1D4ED8" HorizontalAlignment="Center" Margin="0,2,0,0" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="3" HorizontalAlignment="Center" VerticalAlignment="Center">
                                         <TextBlock Text="Cash Net (Dr - Cr)" FontSize="11" Foreground="#64748B" HorizontalAlignment="Center" />
-                                        <TextBlock x:Name="CBSCashNetTextBlock" Text="₹ 0.00" FontSize="16" FontWeight="Bold" Foreground="#D97706" HorizontalAlignment="Center" Margin="0,2,0,0" />
+                                        <TextBlock x:Name="CBSCashNetTextBlock" Text="Rs. 0.00" FontSize="16" FontWeight="Bold" Foreground="#D97706" HorizontalAlignment="Center" Margin="0,2,0,0" />
                                     </StackPanel>
                                     <TextBlock x:Name="CBSSelectedSumTextBlock" Grid.Column="4" Text="" FontSize="13" FontWeight="Bold" Foreground="#10B981" VerticalAlignment="Center" HorizontalAlignment="Right" Visibility="Collapsed" />
                                 </Grid>
@@ -1095,7 +1095,7 @@
 
                                     <TextBlock Text="Total Due Amount" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
 
-                                    <TextBlock Text="{Binding FilteredTotalDue, StringFormat=₹ {0:N2}}" FontSize="13" Foreground="#DC2626" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                                    <TextBlock Text="{Binding FilteredTotalDue, StringFormat=Rs. {0:N2}}" FontSize="13" Foreground="#DC2626" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
 
                                 </StackPanel>
 
@@ -1103,7 +1103,7 @@
 
                                     <TextBlock Text="Total Margin" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
 
-                                    <TextBlock Text="₹ 30,357.63" FontSize="13" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                                    <TextBlock Text="Rs. 30,357.63" FontSize="13" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
 
                                 </StackPanel>
 
@@ -1111,7 +1111,7 @@
 
                                     <TextBlock Text="Total SGST" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
 
-                                    <TextBlock Text="₹ 0.00" FontSize="13" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                                    <TextBlock Text="Rs. 0.00" FontSize="13" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
 
                                 </StackPanel>
 
@@ -1119,7 +1119,7 @@
 
                                     <TextBlock Text="Total Amount" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
 
-                                    <TextBlock Text="{Binding TotalDue, StringFormat=₹ {0:N2}}" FontSize="13" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                                    <TextBlock Text="{Binding TotalDue, StringFormat=Rs. {0:N2}}" FontSize="13" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
 
                                 </StackPanel>
 
@@ -1167,7 +1167,7 @@
                             <Button Content="✎" Background="#FF9800" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="EditSelected_Click" ToolTip="Edit Selected" />
 
                             <Button Background="#7B1FA2" Foreground="White" BorderThickness="0" Width="80" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="MakeBuilty_Click" ToolTip="Create LR from selected Challan" FontSize="11">Make Builty</Button>
-                            <Button Content="₹" Background="#00897B" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="OpenChallanPay_Click" ToolTip="Pay Challan (Broker-wise)" />
+                            <Button Content="Rs." Background="#00897B" Foreground="White" BorderThickness="0" Width="34" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="OpenChallanPay_Click" ToolTip="Pay Challan (Broker-wise)" />
 
                             <Button Content="Import" Background="#1565C0" Foreground="White" BorderThickness="0" Width="58" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="ImportChallan_Click" ToolTip="Import Challans from CSV" />
                             <Button Content="?" Background="#374151" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="OpenImportGuide_Click" ToolTip="Import column names" />
@@ -1197,6 +1197,10 @@
                             <TextBlock Text="Show" FontSize="12" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" />
 
                             <TextBlock x:Name="RecordCountText" Text="Loading..." FontSize="12" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" />
+
+                            <Button x:Name="ChallanPrevPageButton" Content="Previous" Height="24" Padding="10,2" Margin="16,0,4,0" Background="#F3F4F6" BorderBrush="#D1D5DB" BorderThickness="1" Foreground="#374151" Cursor="Hand" Click="ChallanPrevPage_Click" ToolTip="Load previous challan page" />
+                            <TextBlock x:Name="ChallanPageInfoText" Text="Page 1" FontSize="12" Foreground="{StaticResource TextMuted}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="6,0" />
+                            <Button x:Name="ChallanNextPageButton" Content="Next" Height="24" Padding="10,2" Margin="4,0,0,0" Background="#F3F4F6" BorderBrush="#D1D5DB" BorderThickness="1" Foreground="#374151" Cursor="Hand" Click="ChallanNextPage_Click" ToolTip="Load next challan page" />
 
                             <ProgressBar x:Name="ImportProgressBar" Width="100" Height="14" Margin="16,0,0,0" Visibility="Collapsed" Minimum="0" Maximum="100" />
                             <TextBlock x:Name="ImportStatusText" Text="" FontSize="11" Foreground="#1565C0" VerticalAlignment="Center" Margin="8,0,0,0" Visibility="Collapsed" />
@@ -1527,7 +1531,7 @@
 
 
 
-                                    <TextBlock x:Name="SearchedTotalDueTextBlock" Grid.Column="2" Text="{Binding FilteredTotalDue, StringFormat='Total Due: ₹ {0:N2}'}" FontSize="13" Foreground="#DC2626" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Right" Visibility="Collapsed" />
+                                    <TextBlock x:Name="SearchedTotalDueTextBlock" Grid.Column="2" Text="{Binding FilteredTotalDue, StringFormat='Total Due: Rs. {0:N2}'}" FontSize="13" Foreground="#DC2626" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Right" Visibility="Collapsed" />
 
                                 </Grid>
 
@@ -1581,7 +1585,7 @@
 
                                         <TextBlock Text="Total Freight" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
 
-                                        <TextBlock Text="{Binding FilteredTotalFreight, StringFormat=₹ {0:N2}}" FontSize="13" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                                        <TextBlock Text="{Binding FilteredTotalFreight, StringFormat=Rs. {0:N2}}" FontSize="13" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
 
                                     </StackPanel>
 
@@ -1589,7 +1593,7 @@
 
                                         <TextBlock Text="Total Balance" FontSize="11" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center" />
 
-                                        <TextBlock Text="{Binding FilteredTotalBalance, StringFormat=₹ {0:N2}}" FontSize="13" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                                        <TextBlock Text="{Binding FilteredTotalBalance, StringFormat=Rs. {0:N2}}" FontSize="13" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
 
                                     </StackPanel>
 
@@ -1625,6 +1629,9 @@
                                 <Button Content="📋" Background="#00B08B" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="CreateBillFromLR_Click" ToolTip="Create Bill from selected LR" />
 
                                 <TextBlock x:Name="LRRecordCountText" Text="Loading..." FontSize="12" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="16,0,0,0" />
+                                <Button x:Name="LRPrevPageButton" Content="Previous" Width="72" Height="24" Margin="12,0,0,0" Padding="8,0" Click="LRPrevPage_Click" />
+                                <TextBlock x:Name="LRPageInfoText" Text="Page 1" FontSize="12" Foreground="{StaticResource TextMuted}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="6,0" />
+                                <Button x:Name="LRNextPageButton" Content="Next" Width="60" Height="24" Margin="6,0,0,0" Padding="8,0" Click="LRNextPage_Click" />
 
                             </StackPanel>
 
@@ -1894,7 +1901,7 @@
 
                                     <TextBlock x:Name="LRSelectedSumTextBlock" Grid.Column="1" Text="" FontSize="13" FontWeight="Bold" Foreground="#10B981" VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="Collapsed" />
 
-                                    <TextBlock x:Name="LRSearchedTotalDueTextBlock" Grid.Column="2" Text="{Binding FilteredTotalBalance, StringFormat='Filtered Balance: ₹ {0:N2}'}" FontSize="13" Foreground="#DC2626" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Right" Visibility="Collapsed" />
+                                    <TextBlock x:Name="LRSearchedTotalDueTextBlock" Grid.Column="2" Text="{Binding FilteredTotalBalance, StringFormat='Filtered Balance: Rs. {0:N2}'}" FontSize="13" Foreground="#DC2626" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Right" Visibility="Collapsed" />
 
                                 </Grid>
 
@@ -2014,6 +2021,10 @@
             </Border>
 
         </Grid>
+
+        <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,10,10,0" Panel.ZIndex="1000" Background="White" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="8" Padding="3" ToolTip="Checking connection...">
+            <Ellipse x:Name="ConnectionStatusDot" Width="10" Height="10" Fill="#DC2626" />
+        </Border>
 
         <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,10,6" Background="#F3F4F6" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="3" Padding="6,2">
             <TextBlock x:Name="AppVersionText" Text="v -" FontSize="11" Foreground="#6B7280" Cursor="Hand" ToolTip="Click to check for updates" MouseLeftButtonUp="AppVersionText_MouseLeftButtonUp" />

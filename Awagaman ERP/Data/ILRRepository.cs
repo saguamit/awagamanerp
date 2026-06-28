@@ -10,6 +10,8 @@ namespace Awagaman_ERP.Data
         List<LREntry> Search(string searchFilter, int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true);
         int GetTotalCount();
         int GetTotalCount(string searchFilter);
+        decimal GetTotalFreight(string searchFilter = "");
+        decimal GetTotalBalance(string searchFilter = "");
         int GetMaxSr();
         void Upsert(LREntry entry);
         void Delete(LREntry entry);

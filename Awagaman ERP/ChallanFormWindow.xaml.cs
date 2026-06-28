@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -283,7 +283,7 @@ namespace Awagaman_ERP
         private static bool IsZeroLike(string text)
         {
             if (string.IsNullOrWhiteSpace(text)) return true;
-            var cleaned = text.Replace("₹", "").Replace(",", "").Trim();
+            var cleaned = text.Replace("Rs.", "").Replace(",", "").Trim();
             if (decimal.TryParse(cleaned, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v))
             {
                 return v == 0m;

@@ -63,7 +63,7 @@ namespace Awagaman_ERP.ViewModels
         public int TotalPages => Math.Max(1, (int)Math.Ceiling((double)_totalCount / PageSize));
         public bool CanGoPrevious => CurrentPage > 1;
         public bool CanGoNext => CurrentPage < TotalPages;
-        public string PageInfo => $"Page {CurrentPage} of {Math.Max(1, TotalPages)}";
+        public string PageInfo => $"Page {CurrentPage}";
 
         private int _filteredEntriesCount;
         public int FilteredEntriesCount
@@ -89,6 +89,8 @@ namespace Awagaman_ERP.ViewModels
         public LRLedgerViewModel(ILRRepository repository = null)
         {
             _repository = repository ?? new LRRepository();
+            if (BackendSettings.UseRemoteApi)
+                _pageSize = 300;
             Entries.CollectionChanged += Entries_CollectionChanged;
         }
 
@@ -135,7 +137,9 @@ namespace Awagaman_ERP.ViewModels
                 }
                 else { _nextPageCache = null; }
 
-                FilteredEntriesCount = PagedEntries.Count;
+                FilteredEntriesCount = _totalCount;
+                FilteredTotalFreight = _repository.GetTotalFreight(_searchFilter);
+                FilteredTotalBalance = _repository.GetTotalBalance(_searchFilter);
                 OnPropertyChanged(nameof(PageInfo));
                 OnPropertyChanged(nameof(TotalCount));
                 OnPropertyChanged(nameof(TotalPages));
@@ -172,7 +176,7 @@ namespace Awagaman_ERP.ViewModels
                 OnPropertyChanged(nameof(PageInfo));
                 OnPropertyChanged(nameof(CanGoPrevious));
                 OnPropertyChanged(nameof(CanGoNext));
-                FilteredEntriesCount = PagedEntries.Count;
+                FilteredEntriesCount = _totalCount;
             }
             else { OnPropertyChanged(nameof(CurrentPage)); LoadPage(); }
         }
@@ -191,7 +195,7 @@ namespace Awagaman_ERP.ViewModels
                 OnPropertyChanged(nameof(PageInfo));
                 OnPropertyChanged(nameof(CanGoPrevious));
                 OnPropertyChanged(nameof(CanGoNext));
-                FilteredEntriesCount = PagedEntries.Count;
+                FilteredEntriesCount = _totalCount;
             }
             else { _nextPageCache = null; OnPropertyChanged(nameof(CurrentPage)); LoadPage(); }
         }
@@ -231,12 +235,40 @@ namespace Awagaman_ERP.ViewModels
 
         public void SetSort(string column, bool ascending)
         {
-            _sortColumn = column ?? "";
+            var normalized = column ?? "";
+            if (string.Equals(_sortColumn ?? string.Empty, normalized, StringComparison.OrdinalIgnoreCase) &&
+                _sortAscending == ascending &&
+                !_countDirty &&
+                _pageLoaded)
+            {
+                return;
+            }
+
+            _sortColumn = normalized;
             _sortAscending = ascending;
             _countDirty = false;
             _nextPageCache = null;
             _prevPageCache = null;
             LoadPage();
+        }
+
+        public List<LREntry> GetFilteredEntriesForSummary()
+        {
+            var rows = _repository.GetAll();
+            if (string.IsNullOrWhiteSpace(_searchFilter))
+            {
+                return rows;
+            }
+
+            var filter = _searchFilter.Trim();
+            return rows.Where(entry =>
+                ContainsText(entry?.LRNo, filter) ||
+                ContainsText(entry?.ConsignorName, filter) ||
+                ContainsText(entry?.ConsigneeName, filter) ||
+                ContainsText(entry?.VehicleNo, filter) ||
+                ContainsText(entry?.BillNo, filter) ||
+                ContainsText(entry?.CHNo, filter))
+                .ToList();
         }
 
         public int GetNextSr() => _repository.GetMaxSr() + 1;
@@ -328,6 +360,13 @@ namespace Awagaman_ERP.ViewModels
             field = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
             return true;
+        }
+
+        private static bool ContainsText(string value, string filter)
+        {
+            return !string.IsNullOrWhiteSpace(value) &&
+                   !string.IsNullOrWhiteSpace(filter) &&
+                   value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }
