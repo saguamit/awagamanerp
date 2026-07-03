@@ -28,6 +28,7 @@ public class ChallanEntry
     public DateTime? AdvanceDate { get; set; }
     public decimal Detention { get; set; }
     public decimal Hamali { get; set; }
+    public decimal Other { get; set; }
     public decimal Deduction { get; set; }
     public decimal BalancePaidNEFT { get; set; }
     public decimal BalancePaidCash { get; set; }
@@ -38,6 +39,11 @@ public class ChallanEntry
     public decimal Margin { get; set; }
     public decimal ImportedBalance { get; set; }
     public decimal ImportedDue { get; set; }
+    public int? SourcePurchaseId { get; set; }
+    public decimal LHS => LorryHire + Other;
     public decimal Balance => LorryHire - LessTDS - AdvanceAmount;
+    public decimal ChallanBalance => LHS - LessTDS - AdvanceAmount;
     public decimal Due => (Balance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash;
+    public decimal ChallanDue => (ChallanBalance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash;
+    public decimal ChallanMargin => BillAmount == 0m ? 0m : BillAmount - (LHS + Detention + Hamali);
 }

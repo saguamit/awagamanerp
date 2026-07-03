@@ -21,7 +21,7 @@ namespace Awagaman_ERP.Tests
             };
             mockRepo.Setup(r => r.GetAll()).Returns(entries);
             mockRepo.Setup(r => r.GetTotalCount()).Returns(2);
-            mockRepo.Setup(r => r.GetPage(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>())).Returns(entries);
+            mockRepo.Setup(r => r.GetPage(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>())).Returns(entries);
 
             var vm = new ChallanViewModel(mockRepo.Object);
 
@@ -34,7 +34,7 @@ namespace Awagaman_ERP.Tests
             var mockRepo = new Mock<IChallanRepository>();
             mockRepo.Setup(r => r.GetAll()).Returns(new List<ChallanEntry>());
             mockRepo.Setup(r => r.GetTotalCount()).Returns(2);
-            mockRepo.Setup(r => r.GetPage(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>())).Returns(new List<ChallanEntry>());
+            mockRepo.Setup(r => r.GetPage(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>())).Returns(new List<ChallanEntry>());
 
             var vm = new ChallanViewModel(mockRepo.Object);
             var entry1 = new ChallanEntry { LorryHire = 500m, LessTDS = 50m, AdvanceAmount = 100m };

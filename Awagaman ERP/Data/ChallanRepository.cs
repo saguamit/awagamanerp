@@ -12,22 +12,44 @@ namespace Awagaman_ERP.Data
 {
     public sealed class ChallanRepository : IChallanRepository
     {
+        private const string PurchaseTableName = "Challans";
+        private const string ChallanLedgerTableName = "ChallanLedgerEntries";
+
         public ChallanRepository()
         {
             AppDatabase.EnsureInitialized();
             MigrateLegacyXmlIfNeeded();
         }
 
+        public string LedgerMode { get; set; } = "Purchase";
+
+        private bool IsChallanLedgerMode =>
+            string.Equals(LedgerMode, "Challan", StringComparison.OrdinalIgnoreCase);
+
+        private string ActiveTableName => IsChallanLedgerMode ? ChallanLedgerTableName : PurchaseTableName;
+
+        private string AppendLedgerQuery(string route)
+        {
+            if (!IsChallanLedgerMode)
+            {
+                return route;
+            }
+
+            return route.Contains("?")
+                ? route + "&ledgerKind=challan"
+                : route + "?ledgerKind=challan";
+        }
+
         public List<ChallanEntry> GetAll()
         {
             if (BackendSettings.UseRemoteApi)
             {
-                return RemoteApiClient.GetList<ChallanEntry>("api/challans");
+                return RemoteApiClient.GetList<ChallanEntry>(AppendLedgerQuery("api/challans"));
             }
             var entries = new List<ChallanEntry>();
 
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
-            using (var command = new SQLiteCommand("SELECT * FROM Challans ORDER BY Sr, Id;", connection))
+            using (var command = new SQLiteCommand($"SELECT * FROM {ActiveTableName} ORDER BY Sr, Id;", connection))
             {
                 connection.Open();
                 using (var reader = command.ExecuteReader())
@@ -62,6 +84,7 @@ namespace Awagaman_ERP.Data
                             AdvanceDate = ParseNullableDate(reader["AdvanceDate"]),
                             Detention = GetDecimal(reader["Detention"]),
                             Hamali = GetDecimal(reader["Hamali"]),
+                            Other = reader["OtherAmount"] == DBNull.Value ? 0m : GetDecimal(reader["OtherAmount"]),
                             Deduction = GetDecimal(reader["Deduction"]),
                             BalancePaidNEFT = GetDecimal(reader["BalancePaidNEFT"]),
                             BalancePaidCash = GetDecimal(reader["BalancePaidCash"]),
@@ -81,18 +104,18 @@ namespace Awagaman_ERP.Data
             return entries;
         }
 
-        public List<ChallanEntry> GetPage(int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true)
+        public List<ChallanEntry> GetPage(int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true, bool useLhsDerived = false)
         {
             if (BackendSettings.UseRemoteApi)
             {
-                return GetRemotePage(pageNumber, pageSize, null, sortColumn, sortAscending).Items;
+                return GetRemotePage(pageNumber, pageSize, null, sortColumn, sortAscending, null, null, null, null, useLhsDerived).Items;
             }
             var entries = new List<ChallanEntry>();
             int offset = (pageNumber - 1) * pageSize;
-            string orderBy = BuildOrderBy(sortColumn, sortAscending);
+            string orderBy = BuildOrderBy(sortColumn, sortAscending, useLhsDerived);
 
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
-            using (var command = new SQLiteCommand($"SELECT * FROM Challans ORDER BY {orderBy} LIMIT @limit OFFSET @offset;", connection))
+            using (var command = new SQLiteCommand($"SELECT * FROM {ActiveTableName} ORDER BY {orderBy} LIMIT @limit OFFSET @offset;", connection))
             {
                 command.Parameters.AddWithValue("@limit", pageSize);
                 command.Parameters.AddWithValue("@offset", offset);
@@ -129,6 +152,7 @@ namespace Awagaman_ERP.Data
                             AdvanceDate = ParseNullableDate(reader["AdvanceDate"]),
                             Detention = GetDecimal(reader["Detention"]),
                             Hamali = GetDecimal(reader["Hamali"]),
+                            Other = reader["OtherAmount"] == DBNull.Value ? 0m : GetDecimal(reader["OtherAmount"]),
                             Deduction = GetDecimal(reader["Deduction"]),
                             BalancePaidNEFT = GetDecimal(reader["BalancePaidNEFT"]),
                             BalancePaidCash = GetDecimal(reader["BalancePaidCash"]),
@@ -145,11 +169,11 @@ namespace Awagaman_ERP.Data
             return entries;
         }
 
-        public List<ChallanEntry> Search(string searchFilter, int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true)
+        public List<ChallanEntry> Search(string searchFilter, int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true, bool useLhsDerived = false)
         {
             if (BackendSettings.UseRemoteApi)
             {
-                return GetRemotePage(pageNumber, pageSize, searchFilter, sortColumn, sortAscending).Items;
+                return GetRemotePage(pageNumber, pageSize, searchFilter, sortColumn, sortAscending, null, null, null, null, useLhsDerived).Items;
             }
             var entries = new List<ChallanEntry>();
             int offset = (pageNumber - 1) * pageSize;
@@ -157,8 +181,8 @@ namespace Awagaman_ERP.Data
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = connection.CreateCommand())
             {
-                var orderBy = BuildOrderBy(sortColumn, sortAscending);
-                command.CommandText = $@"SELECT * FROM Challans WHERE 
+                var orderBy = BuildOrderBy(sortColumn, sortAscending, useLhsDerived);
+                command.CommandText = $@"SELECT * FROM {ActiveTableName} WHERE 
                     ChallanNumber LIKE @filter OR LRNumber LIKE @filter OR VehicleNumber LIKE @filter 
                     OR VehicleType LIKE @filter OR DriverName LIKE @filter OR BrokerName LIKE @filter 
                     OR FromLocation LIKE @filter OR ToLocation LIKE @filter OR OwnerName LIKE @filter 
@@ -199,6 +223,7 @@ namespace Awagaman_ERP.Data
                             AdvanceDate = ParseNullableDate(reader["AdvanceDate"]),
                             Detention = GetDecimal(reader["Detention"]),
                             Hamali = GetDecimal(reader["Hamali"]),
+                            Other = reader["OtherAmount"] == DBNull.Value ? 0m : GetDecimal(reader["OtherAmount"]),
                             Deduction = GetDecimal(reader["Deduction"]),
                             BalancePaidNEFT = GetDecimal(reader["BalancePaidNEFT"]),
                             BalancePaidCash = GetDecimal(reader["BalancePaidCash"]),
@@ -215,25 +240,25 @@ namespace Awagaman_ERP.Data
             return entries;
         }
 
-        public List<ChallanEntry> SearchAdvanced(string challanNo, string lrNo, string from, string to, int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true)
+        public List<ChallanEntry> SearchAdvanced(string challanNo, string lrNo, string from, string to, int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true, bool useLhsDerived = false)
         {
             if (BackendSettings.UseRemoteApi)
             {
-                return GetRemotePage(pageNumber, pageSize, null, sortColumn, sortAscending, challanNo, lrNo, from, to).Items;
+                return GetRemotePage(pageNumber, pageSize, null, sortColumn, sortAscending, challanNo, lrNo, from, to, useLhsDerived).Items;
             }
             var entries = new List<ChallanEntry>();
             int offset = (pageNumber - 1) * pageSize;
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = connection.CreateCommand())
             {
-                var orderBy = BuildOrderBy(sortColumn, sortAscending);
+                var orderBy = BuildOrderBy(sortColumn, sortAscending, useLhsDerived);
                 var conditions = new List<string>();
                 if (!string.IsNullOrWhiteSpace(challanNo)) { conditions.Add("ChallanNumber LIKE @challanNo"); command.Parameters.AddWithValue("@challanNo", $"%{challanNo}%"); }
                 if (!string.IsNullOrWhiteSpace(lrNo)) { conditions.Add("LRNumber LIKE @lrNo"); command.Parameters.AddWithValue("@lrNo", $"%{lrNo}%"); }
                 if (!string.IsNullOrWhiteSpace(from)) { conditions.Add("FromLocation LIKE @from"); command.Parameters.AddWithValue("@from", $"%{from}%"); }
                 if (!string.IsNullOrWhiteSpace(to)) { conditions.Add("ToLocation LIKE @to"); command.Parameters.AddWithValue("@to", $"%{to}%"); }
                 string where = conditions.Count > 0 ? "WHERE " + string.Join(" AND ", conditions) : "";
-                command.CommandText = $"SELECT * FROM Challans {where} ORDER BY {orderBy} LIMIT @limit OFFSET @offset;";
+                command.CommandText = $"SELECT * FROM {ActiveTableName} {where} ORDER BY {orderBy} LIMIT @limit OFFSET @offset;";
                 command.Parameters.AddWithValue("@limit", pageSize);
                 command.Parameters.AddWithValue("@offset", offset);
                 connection.Open();
@@ -262,7 +287,7 @@ namespace Awagaman_ERP.Data
                 if (!string.IsNullOrWhiteSpace(from)) { conditions.Add("FromLocation LIKE @from"); command.Parameters.AddWithValue("@from", $"%{from}%"); }
                 if (!string.IsNullOrWhiteSpace(to)) { conditions.Add("ToLocation LIKE @to"); command.Parameters.AddWithValue("@to", $"%{to}%"); }
                 string where = conditions.Count > 0 ? "WHERE " + string.Join(" AND ", conditions) : "";
-                command.CommandText = $"SELECT COUNT(*) FROM Challans {where};";
+                command.CommandText = $"SELECT COUNT(*) FROM {ActiveTableName} {where};";
                 connection.Open();
                 return Convert.ToInt32(command.ExecuteScalar());
             }
@@ -288,11 +313,11 @@ namespace Awagaman_ERP.Data
             {
                 if (string.IsNullOrWhiteSpace(searchFilter))
                 {
-                    command.CommandText = "SELECT COUNT(*) FROM Challans;";
+                    command.CommandText = $"SELECT COUNT(*) FROM {ActiveTableName};";
                 }
                 else
                 {
-                    command.CommandText = @"SELECT COUNT(*) FROM Challans WHERE 
+                    command.CommandText = $@"SELECT COUNT(*) FROM {ActiveTableName} WHERE 
                         ChallanNumber LIKE @filter OR LRNumber LIKE @filter OR VehicleNumber LIKE @filter 
                         OR VehicleType LIKE @filter OR DriverName LIKE @filter OR BrokerName LIKE @filter 
                         OR FromLocation LIKE @filter OR ToLocation LIKE @filter OR OwnerName LIKE @filter;";
@@ -303,15 +328,18 @@ namespace Awagaman_ERP.Data
             }
         }
 
-        public decimal GetTotalDue(string searchFilter = "")
+        public decimal GetTotalDue(string searchFilter = "", bool useLhsDerived = false)
         {
             if (BackendSettings.UseRemoteApi)
             {
-                var query = "api/challans/summary";
+                var query = AppendLedgerQuery("api/challans/summary");
+                var parts = new List<string>();
                 if (!string.IsNullOrWhiteSpace(searchFilter))
                 {
-                    query += $"?search={RemoteApiClient.UrlEncode(searchFilter)}";
+                    parts.Add($"search={RemoteApiClient.UrlEncode(searchFilter)}");
                 }
+                if (useLhsDerived) parts.Add("useLhsDerived=true");
+                if (parts.Count > 0) query += "?" + string.Join("&", parts);
 
                 try
                 {
@@ -322,7 +350,7 @@ namespace Awagaman_ERP.Data
                     var rows = GetAllRemoteSafe();
                     if (string.IsNullOrWhiteSpace(searchFilter))
                     {
-                        return rows.Sum(x => x.Due);
+                        return rows.Sum(x => useLhsDerived ? x.ChallanDue : x.Due);
                     }
 
                     return rows.Where(e =>
@@ -335,7 +363,7 @@ namespace Awagaman_ERP.Data
                             Contains(e.From, searchFilter) ||
                             Contains(e.To, searchFilter) ||
                             Contains(e.OwnerName, searchFilter))
-                        .Sum(x => x.Due);
+                        .Sum(x => useLhsDerived ? x.ChallanDue : x.Due);
                 }
             }
 
@@ -344,11 +372,18 @@ namespace Awagaman_ERP.Data
             {
                 if (string.IsNullOrWhiteSpace(searchFilter))
                 {
-                    command.CommandText = @"SELECT COALESCE(SUM((LorryHire - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM Challans;";
+                    command.CommandText = useLhsDerived
+                        ? $@"SELECT COALESCE(SUM(((LorryHire + OtherAmount) - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM {ActiveTableName};"
+                        : $@"SELECT COALESCE(SUM((LorryHire - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM {ActiveTableName};";
                 }
                 else
                 {
-                    command.CommandText = @"SELECT COALESCE(SUM((LorryHire - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM Challans WHERE 
+                    command.CommandText = useLhsDerived
+                        ? $@"SELECT COALESCE(SUM(((LorryHire + OtherAmount) - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM {ActiveTableName} WHERE 
+                        ChallanNumber LIKE @filter OR LRNumber LIKE @filter OR VehicleNumber LIKE @filter 
+                        OR VehicleType LIKE @filter OR DriverName LIKE @filter OR BrokerName LIKE @filter 
+                        OR FromLocation LIKE @filter OR ToLocation LIKE @filter OR OwnerName LIKE @filter;"
+                        : $@"SELECT COALESCE(SUM((LorryHire - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM {ActiveTableName} WHERE 
                         ChallanNumber LIKE @filter OR LRNumber LIKE @filter OR VehicleNumber LIKE @filter 
                         OR VehicleType LIKE @filter OR DriverName LIKE @filter OR BrokerName LIKE @filter 
                         OR FromLocation LIKE @filter OR ToLocation LIKE @filter OR OwnerName LIKE @filter;";
@@ -359,16 +394,17 @@ namespace Awagaman_ERP.Data
             }
         }
 
-        public decimal GetTotalDueAdvanced(string challanNo, string lrNo, string from, string to)
+        public decimal GetTotalDueAdvanced(string challanNo, string lrNo, string from, string to, bool useLhsDerived = false)
         {
             if (BackendSettings.UseRemoteApi)
             {
-                var query = "api/challans/summary";
+                var query = AppendLedgerQuery("api/challans/summary");
                 var parts = new List<string>();
                 if (!string.IsNullOrWhiteSpace(challanNo)) parts.Add($"challanNo={RemoteApiClient.UrlEncode(challanNo)}");
                 if (!string.IsNullOrWhiteSpace(lrNo)) parts.Add($"lrNo={RemoteApiClient.UrlEncode(lrNo)}");
                 if (!string.IsNullOrWhiteSpace(from)) parts.Add($"from={RemoteApiClient.UrlEncode(from)}");
                 if (!string.IsNullOrWhiteSpace(to)) parts.Add($"to={RemoteApiClient.UrlEncode(to)}");
+                if (useLhsDerived) parts.Add("useLhsDerived=true");
                 if (parts.Count > 0) query += "?" + string.Join("&", parts);
 
                 try
@@ -382,7 +418,7 @@ namespace Awagaman_ERP.Data
                         (string.IsNullOrWhiteSpace(lrNo) || Contains(e.LRNumber, lrNo)) &&
                         (string.IsNullOrWhiteSpace(from) || Contains(e.From, from)) &&
                         (string.IsNullOrWhiteSpace(to) || Contains(e.To, to)));
-                    return rows.Sum(x => x.Due);
+                    return rows.Sum(x => useLhsDerived ? x.ChallanDue : x.Due);
                 }
             }
 
@@ -395,7 +431,9 @@ namespace Awagaman_ERP.Data
                 if (!string.IsNullOrWhiteSpace(from)) { conditions.Add("FromLocation LIKE @from"); command.Parameters.AddWithValue("@from", $"%{from}%"); }
                 if (!string.IsNullOrWhiteSpace(to)) { conditions.Add("ToLocation LIKE @to"); command.Parameters.AddWithValue("@to", $"%{to}%"); }
                 string where = conditions.Count > 0 ? "WHERE " + string.Join(" AND ", conditions) : "";
-                command.CommandText = $"SELECT COALESCE(SUM((LorryHire - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM Challans {where};";
+                command.CommandText = useLhsDerived
+                    ? $"SELECT COALESCE(SUM(((LorryHire + OtherAmount) - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM {ActiveTableName} {where};"
+                    : $"SELECT COALESCE(SUM((LorryHire - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM {ActiveTableName} {where};";
                 connection.Open();
                 return Convert.ToDecimal(command.ExecuteScalar() ?? 0m);
             }
@@ -408,7 +446,7 @@ namespace Awagaman_ERP.Data
                 return GetAllRemoteSafe().Select(x => x.Sr).DefaultIfEmpty(0).Max();
             }
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
-            using (var command = new SQLiteCommand("SELECT COALESCE(MAX(Sr), 0) FROM Challans;", connection))
+            using (var command = new SQLiteCommand($"SELECT COALESCE(MAX(Sr), 0) FROM {ActiveTableName};", connection))
             {
                 connection.Open();
                 return Convert.ToInt32(command.ExecuteScalar());
@@ -423,7 +461,7 @@ namespace Awagaman_ERP.Data
                 return GetAllRemoteSafe().Find(e => string.Equals((e.ChallanNumber ?? string.Empty).Trim(), challanNumber.Trim(), StringComparison.OrdinalIgnoreCase));
             }
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
-            using (var command = new SQLiteCommand("SELECT * FROM Challans WHERE LOWER(ChallanNumber) = LOWER(@num) LIMIT 1;", connection))
+            using (var command = new SQLiteCommand($"SELECT * FROM {ActiveTableName} WHERE LOWER(ChallanNumber) = LOWER(@num) LIMIT 1;", connection))
             {
                 command.Parameters.AddWithValue("@num", challanNumber.Trim());
                 connection.Open();
@@ -441,7 +479,7 @@ namespace Awagaman_ERP.Data
                 return GetAllRemoteSafe().Find(e => e.Id == id);
             }
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
-            using (var command = new SQLiteCommand("SELECT * FROM Challans WHERE Id = @id LIMIT 1;", connection))
+            using (var command = new SQLiteCommand($"SELECT * FROM {ActiveTableName} WHERE Id = @id LIMIT 1;", connection))
             {
                 command.Parameters.AddWithValue("@id", id);
                 connection.Open();
@@ -449,6 +487,40 @@ namespace Awagaman_ERP.Data
                     if (reader.Read()) return MapReader(reader);
             }
             return null;
+        }
+
+        public List<ChallanEntry> GetByChallanNumbers(IEnumerable<string> challanNumbers)
+        {
+            var keys = (challanNumbers ?? Enumerable.Empty<string>())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (keys.Count == 0)
+            {
+                return new List<ChallanEntry>();
+            }
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                try
+                {
+                    return RemoteApiClient.Post<List<ChallanEntry>>(AppendLedgerQuery("api/challans/by-numbers"), keys) ?? new List<ChallanEntry>();
+                }
+                catch
+                {
+                    var fallbackLookup = new HashSet<string>(keys, StringComparer.OrdinalIgnoreCase);
+                    return GetAllRemoteSafe()
+                        .Where(x => x != null && fallbackLookup.Contains((x.ChallanNumber ?? string.Empty).Trim()))
+                        .ToList();
+                }
+            }
+
+            var lookup = new HashSet<string>(keys, StringComparer.OrdinalIgnoreCase);
+            return GetAll()
+                .Where(x => x != null && lookup.Contains((x.ChallanNumber ?? string.Empty).Trim()))
+                .ToList();
         }
 
         public HashSet<int> GetChallanIdsWithComments()
@@ -475,13 +547,14 @@ namespace Awagaman_ERP.Data
             {
                 try
                 {
+                    var createRoute = AppendLedgerQuery("api/challans");
                     if (entry.Id <= 0)
                     {
-                        entry.Id = RemoteApiClient.PostAndReadInt("api/challans", entry);
+                        entry.Id = RemoteApiClient.PostAndReadInt(createRoute, entry);
                     }
                     else
                     {
-                        RemoteApiClient.Put($"api/challans/{entry.Id}", entry);
+                        RemoteApiClient.Put(AppendLedgerQuery($"api/challans/{entry.Id}"), entry);
                     }
                 }
                 catch (Exception)
@@ -508,30 +581,71 @@ namespace Awagaman_ERP.Data
             {
                 connection.Open();
 
-                if (entry.Id <= 0)
+                if (IsChallanLedgerMode)
                 {
-                    command.CommandText = @"
-INSERT INTO Challans (
+                    SaveToLocalTable(connection, command, ChallanLedgerTableName, entry, includeSourcePurchaseId: true);
+                }
+                else
+                {
+                    SaveToLocalTable(connection, command, PurchaseTableName, entry, includeSourcePurchaseId: false);
+                    SyncLocalChallanMirror(connection, entry);
+                }
+            }
+
+            try
+            {
+                new VehicleRepository().UpsertFromChallan(entry);
+            }
+            catch { }
+        }
+
+        private static void SaveToLocalTable(SQLiteConnection connection, SQLiteCommand command, string tableName, ChallanEntry entry, bool includeSourcePurchaseId)
+        {
+            command.Parameters.Clear();
+
+            if (entry.Id <= 0)
+            {
+                command.CommandText = includeSourcePurchaseId
+                    ? $@"
+INSERT INTO {tableName} (
+    SourcePurchaseId, Sr, ChallanNumber, Date, LRNumber, BrokerName, FromLocation, ToLocation, VehicleNumber, VehicleType,
+    DriverName, DriverMobile, EngineNo, LicenceNo, PolicyNo, ChassisNo, OwnerName, PAN,
+    LorryHire, LessTDS, AdvanceAmount, AdvanceNEFT, AdvanceCash, AdvanceDate,
+    Detention, Hamali, OtherAmount, Deduction, BalancePaidNEFT, BalancePaidCash, BalancePaidDate,
+    PaidTo, Remarks, BillAmount, Margin
+) VALUES (
+    @SourcePurchaseId, @Sr, @ChallanNumber, @Date, @LRNumber, @BrokerName, @FromLocation, @ToLocation, @VehicleNumber, @VehicleType,
+    @DriverName, @DriverMobile, @EngineNo, @LicenceNo, @PolicyNo, @ChassisNo, @OwnerName, @PAN,
+    @LorryHire, @LessTDS, @AdvanceAmount, @AdvanceNEFT, @AdvanceCash, @AdvanceDate,
+    @Detention, @Hamali, @OtherAmount, @Deduction, @BalancePaidNEFT, @BalancePaidCash, @BalancePaidDate,
+    @PaidTo, @Remarks, @BillAmount, @Margin
+);
+SELECT last_insert_rowid();"
+                    : $@"
+INSERT INTO {tableName} (
     Sr, ChallanNumber, Date, LRNumber, BrokerName, FromLocation, ToLocation, VehicleNumber, VehicleType,
     DriverName, DriverMobile, EngineNo, LicenceNo, PolicyNo, ChassisNo, OwnerName, PAN,
     LorryHire, LessTDS, AdvanceAmount, AdvanceNEFT, AdvanceCash, AdvanceDate,
-    Detention, Hamali, Deduction, BalancePaidNEFT, BalancePaidCash, BalancePaidDate,
+    Detention, Hamali, OtherAmount, Deduction, BalancePaidNEFT, BalancePaidCash, BalancePaidDate,
     PaidTo, Remarks, BillAmount, Margin
 ) VALUES (
     @Sr, @ChallanNumber, @Date, @LRNumber, @BrokerName, @FromLocation, @ToLocation, @VehicleNumber, @VehicleType,
     @DriverName, @DriverMobile, @EngineNo, @LicenceNo, @PolicyNo, @ChassisNo, @OwnerName, @PAN,
     @LorryHire, @LessTDS, @AdvanceAmount, @AdvanceNEFT, @AdvanceCash, @AdvanceDate,
-    @Detention, @Hamali, @Deduction, @BalancePaidNEFT, @BalancePaidCash, @BalancePaidDate,
+    @Detention, @Hamali, @OtherAmount, @Deduction, @BalancePaidNEFT, @BalancePaidCash, @BalancePaidDate,
     @PaidTo, @Remarks, @BillAmount, @Margin
 );
 SELECT last_insert_rowid();";
-                    AddParameters(command, entry);
-                    entry.Id = Convert.ToInt32((long)command.ExecuteScalar());
-                }
-                else
-                {
-                    command.CommandText = @"
-UPDATE Challans SET
+
+                AddParameters(command, entry, includeSourcePurchaseId);
+                entry.Id = Convert.ToInt32((long)command.ExecuteScalar());
+            }
+            else
+            {
+                command.CommandText = includeSourcePurchaseId
+                    ? $@"
+UPDATE {tableName} SET
+    SourcePurchaseId = @SourcePurchaseId,
     Sr = @Sr,
     ChallanNumber = @ChallanNumber,
     Date = @Date,
@@ -557,6 +671,44 @@ UPDATE Challans SET
     AdvanceDate = @AdvanceDate,
     Detention = @Detention,
     Hamali = @Hamali,
+    OtherAmount = @OtherAmount,
+    Deduction = @Deduction,
+    BalancePaidNEFT = @BalancePaidNEFT,
+    BalancePaidCash = @BalancePaidCash,
+    BalancePaidDate = @BalancePaidDate,
+    PaidTo = @PaidTo,
+    Remarks = @Remarks,
+    BillAmount = @BillAmount,
+    Margin = @Margin
+WHERE Id = @Id;"
+                    : $@"
+UPDATE {tableName} SET
+    Sr = @Sr,
+    ChallanNumber = @ChallanNumber,
+    Date = @Date,
+    LRNumber = @LRNumber,
+    BrokerName = @BrokerName,
+    FromLocation = @FromLocation,
+    ToLocation = @ToLocation,
+    VehicleNumber = @VehicleNumber,
+    VehicleType = @VehicleType,
+    DriverName = @DriverName,
+    DriverMobile = @DriverMobile,
+    EngineNo = @EngineNo,
+    LicenceNo = @LicenceNo,
+    PolicyNo = @PolicyNo,
+    ChassisNo = @ChassisNo,
+    OwnerName = @OwnerName,
+    PAN = @PAN,
+    LorryHire = @LorryHire,
+    LessTDS = @LessTDS,
+    AdvanceAmount = @AdvanceAmount,
+    AdvanceNEFT = @AdvanceNEFT,
+    AdvanceCash = @AdvanceCash,
+    AdvanceDate = @AdvanceDate,
+    Detention = @Detention,
+    Hamali = @Hamali,
+    OtherAmount = @OtherAmount,
     Deduction = @Deduction,
     BalancePaidNEFT = @BalancePaidNEFT,
     BalancePaidCash = @BalancePaidCash,
@@ -566,17 +718,89 @@ UPDATE Challans SET
     BillAmount = @BillAmount,
     Margin = @Margin
 WHERE Id = @Id;";
-                    AddParameters(command, entry);
-                    command.Parameters.AddWithValue("@Id", entry.Id);
-                    command.ExecuteNonQuery();
+
+                AddParameters(command, entry, includeSourcePurchaseId);
+                command.Parameters.AddWithValue("@Id", entry.Id);
+                command.ExecuteNonQuery();
+            }
+        }
+
+        private static void SyncLocalChallanMirror(SQLiteConnection connection, ChallanEntry purchaseEntry)
+        {
+            var existing = FindLocalMirror(connection, purchaseEntry.Id, purchaseEntry.ChallanNumber);
+            var mirror = CreateMirrorFromPurchase(purchaseEntry, existing);
+
+            mirror.SourcePurchaseId = purchaseEntry.Id;
+
+            using (var command = connection.CreateCommand())
+            {
+                SaveToLocalTable(connection, command, ChallanLedgerTableName, mirror, includeSourcePurchaseId: true);
+            }
+        }
+
+        private static ChallanEntry FindLocalMirror(SQLiteConnection connection, int sourcePurchaseId, string challanNumber)
+        {
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = $@"
+SELECT * FROM {ChallanLedgerTableName}
+WHERE (SourcePurchaseId IS NOT NULL AND SourcePurchaseId = @SourcePurchaseId)
+   OR LOWER(ChallanNumber) = LOWER(@ChallanNumber)
+ORDER BY CASE WHEN SourcePurchaseId = @SourcePurchaseId THEN 0 ELSE 1 END, Id
+LIMIT 1;";
+                command.Parameters.AddWithValue("@SourcePurchaseId", sourcePurchaseId);
+                command.Parameters.AddWithValue("@ChallanNumber", challanNumber ?? string.Empty);
+
+                using (var reader = command.ExecuteReader())
+                {
+                    return reader.Read() ? MapReader(reader) : null;
                 }
             }
+        }
 
-            try
+        private static ChallanEntry CreateMirrorFromPurchase(ChallanEntry purchaseEntry, ChallanEntry existingMirror)
+        {
+            var mirror = existingMirror?.CloneForPersistence() ?? purchaseEntry.CloneForPersistence();
+            mirror.Id = existingMirror?.Id ?? 0;
+            mirror.ChallanNumber = purchaseEntry.ChallanNumber;
+            mirror.Date = purchaseEntry.Date;
+            mirror.LRNumber = purchaseEntry.LRNumber;
+            mirror.BrokerName = purchaseEntry.BrokerName;
+            mirror.From = purchaseEntry.From;
+            mirror.To = purchaseEntry.To;
+            mirror.VehicleNumber = purchaseEntry.VehicleNumber;
+            mirror.VehicleType = purchaseEntry.VehicleType;
+            mirror.DriverName = purchaseEntry.DriverName;
+            mirror.DriverMobile = purchaseEntry.DriverMobile;
+            mirror.EngineNo = purchaseEntry.EngineNo;
+            mirror.LicenceNo = purchaseEntry.LicenceNo;
+            mirror.PolicyNo = purchaseEntry.PolicyNo;
+            mirror.ChassisNo = purchaseEntry.ChassisNo;
+            mirror.OwnerName = purchaseEntry.OwnerName;
+            mirror.PAN = purchaseEntry.PAN;
+            mirror.LorryHire = purchaseEntry.LorryHire;
+            if (existingMirror == null)
             {
-                new VehicleRepository().UpsertFromChallan(entry);
+                mirror.LessTDS = purchaseEntry.LessTDS;
+                mirror.AdvanceAmount = purchaseEntry.AdvanceAmount;
+                mirror.AdvanceNEFT = purchaseEntry.AdvanceNEFT;
+                mirror.AdvanceCash = purchaseEntry.AdvanceCash;
+                mirror.AdvanceDate = purchaseEntry.AdvanceDate;
+                mirror.Detention = purchaseEntry.Detention;
+                mirror.Hamali = purchaseEntry.Hamali;
+                mirror.Other = purchaseEntry.Other;
+                mirror.Deduction = purchaseEntry.Deduction;
+                mirror.BalancePaidNEFT = purchaseEntry.BalancePaidNEFT;
+                mirror.BalancePaidCash = purchaseEntry.BalancePaidCash;
+                mirror.BalancePaidDate = purchaseEntry.BalancePaidDate;
+                mirror.PaidTo = purchaseEntry.PaidTo;
+                mirror.Remarks = purchaseEntry.Remarks;
+                mirror.BillAmount = purchaseEntry.BillAmount;
+                mirror.Margin = purchaseEntry.Margin;
             }
-            catch { }
+
+            mirror.RecalculateBalance();
+            return mirror;
         }
 
         public void Delete(ChallanEntry entry)
@@ -590,7 +814,7 @@ WHERE Id = @Id;";
             {
                 if (entry.Id > 0)
                 {
-                    RemoteApiClient.Delete($"api/challans/{entry.Id}");
+                    RemoteApiClient.Delete(AppendLedgerQuery($"api/challans/{entry.Id}"));
                 }
                 return;
             }
@@ -601,28 +825,41 @@ WHERE Id = @Id;";
                 connection.Open();
                 if (entry.Id > 0)
                 {
-                    command.CommandText = "DELETE FROM Challans WHERE Id = @Id;";
+                    command.CommandText = $"DELETE FROM {ActiveTableName} WHERE Id = @Id;";
                     command.Parameters.AddWithValue("@Id", entry.Id);
                 }
                 else
                 {
-                    command.CommandText = "DELETE FROM Challans WHERE ChallanNumber = @ChallanNumber;";
+                    command.CommandText = $"DELETE FROM {ActiveTableName} WHERE ChallanNumber = @ChallanNumber;";
                     command.Parameters.AddWithValue("@ChallanNumber", entry.ChallanNumber ?? string.Empty);
                 }
 
                 command.ExecuteNonQuery();
+
+                if (!IsChallanLedgerMode)
+                {
+                    using (var mirrorDelete = connection.CreateCommand())
+                    {
+                        mirrorDelete.CommandText = $@"DELETE FROM {ChallanLedgerTableName}
+WHERE SourcePurchaseId = @SourcePurchaseId
+   OR LOWER(ChallanNumber) = LOWER(@ChallanNumber);";
+                        mirrorDelete.Parameters.AddWithValue("@SourcePurchaseId", entry.Id);
+                        mirrorDelete.Parameters.AddWithValue("@ChallanNumber", entry.ChallanNumber ?? string.Empty);
+                        mirrorDelete.ExecuteNonQuery();
+                    }
+                }
             }
         }
 
-        private static List<ChallanEntry> GetAllRemoteSafe()
+        private List<ChallanEntry> GetAllRemoteSafe()
         {
-            return RemoteApiClient.GetList<ChallanEntry>("api/challans")
+            return RemoteApiClient.GetList<ChallanEntry>(AppendLedgerQuery("api/challans"))
                 .OrderBy(e => e.Sr)
                 .ThenBy(e => e.Id)
                 .ToList();
         }
 
-        private static RemotePagedResult<ChallanEntry> GetRemotePage(
+        private RemotePagedResult<ChallanEntry> GetRemotePage(
             int pageNumber,
             int pageSize,
             string searchFilter,
@@ -631,15 +868,17 @@ WHERE Id = @Id;";
             string challanNo = null,
             string lrNo = null,
             string from = null,
-            string to = null)
+            string to = null,
+            bool useLhsDerived = false)
         {
-            var query = $"api/challans/page?page={pageNumber}&pageSize={pageSize}&asc={sortAscending.ToString().ToLowerInvariant()}";
+            var query = AppendLedgerQuery($"api/challans/page?page={pageNumber}&pageSize={pageSize}&asc={sortAscending.ToString().ToLowerInvariant()}");
             if (!string.IsNullOrWhiteSpace(searchFilter)) query += $"&search={RemoteApiClient.UrlEncode(searchFilter)}";
             if (!string.IsNullOrWhiteSpace(sortColumn)) query += $"&sort={RemoteApiClient.UrlEncode(sortColumn)}";
             if (!string.IsNullOrWhiteSpace(challanNo)) query += $"&challanNo={RemoteApiClient.UrlEncode(challanNo)}";
             if (!string.IsNullOrWhiteSpace(lrNo)) query += $"&lrNo={RemoteApiClient.UrlEncode(lrNo)}";
             if (!string.IsNullOrWhiteSpace(from)) query += $"&from={RemoteApiClient.UrlEncode(from)}";
             if (!string.IsNullOrWhiteSpace(to)) query += $"&to={RemoteApiClient.UrlEncode(to)}";
+            if (useLhsDerived) query += "&useLhsDerived=true";
             try
             {
                 return RemoteApiClient.GetPage<ChallanEntry>(query);
@@ -661,7 +900,7 @@ WHERE Id = @Id;";
                     (string.IsNullOrWhiteSpace(lrNo) || Contains(e.LRNumber, lrNo)) &&
                     (string.IsNullOrWhiteSpace(from) || Contains(e.From, from)) &&
                     (string.IsNullOrWhiteSpace(to) || Contains(e.To, to)));
-                var sorted = ApplySort(filtered, sortColumn, sortAscending).ToList();
+                var sorted = ApplySort(filtered, sortColumn, sortAscending, useLhsDerived).ToList();
                 return new RemotePagedResult<ChallanEntry>
                 {
                     TotalCount = sorted.Count,
@@ -670,7 +909,7 @@ WHERE Id = @Id;";
             }
         }
 
-        private static IEnumerable<ChallanEntry> ApplySort(IEnumerable<ChallanEntry> source, string sortColumn, bool ascending)
+        private static IEnumerable<ChallanEntry> ApplySort(IEnumerable<ChallanEntry> source, string sortColumn, bool ascending, bool useLhsDerived = false)
         {
             var ordered = source ?? Enumerable.Empty<ChallanEntry>();
             Func<ChallanEntry, object> keySelector;
@@ -689,10 +928,15 @@ WHERE Id = @Id;";
                 case "drivername": keySelector = e => e.DriverName ?? string.Empty; break;
                 case "ownername": keySelector = e => e.OwnerName ?? string.Empty; break;
                 case "lorryhire": keySelector = e => e.LorryHire; break;
+                case "other":
+                case "otheramount": keySelector = e => e.Other; break;
+                case "lhs": keySelector = e => e.LHS; break;
                 case "detention": keySelector = e => e.Detention; break;
                 case "hamali": keySelector = e => e.Hamali; break;
                 case "billamount": keySelector = e => e.BillAmount; break;
-                case "margin": keySelector = e => e.Margin; break;
+                case "balance": keySelector = e => useLhsDerived ? e.ChallanBalance : e.Balance; break;
+                case "due": keySelector = e => useLhsDerived ? e.ChallanDue : e.Due; break;
+                case "margin": keySelector = e => useLhsDerived ? e.ChallanMargin : e.Margin; break;
                 default: keySelector = e => e.Sr; break;
             }
 
@@ -743,15 +987,19 @@ WHERE Id = @Id;";
         private bool HasRows()
         {
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
-            using (var command = new SQLiteCommand("SELECT COUNT(1) FROM Challans;", connection))
+            using (var command = new SQLiteCommand($"SELECT COUNT(1) FROM {PurchaseTableName};", connection))
             {
                 connection.Open();
                 return Convert.ToInt32(command.ExecuteScalar()) > 0;
             }
         }
 
-        private static void AddParameters(SQLiteCommand command, ChallanEntry entry)
+        private static void AddParameters(SQLiteCommand command, ChallanEntry entry, bool includeSourcePurchaseId = false)
         {
+            if (includeSourcePurchaseId)
+            {
+                command.Parameters.AddWithValue("@SourcePurchaseId", entry.SourcePurchaseId.HasValue ? (object)entry.SourcePurchaseId.Value : DBNull.Value);
+            }
             command.Parameters.AddWithValue("@Sr", entry.Sr);
             command.Parameters.AddWithValue("@ChallanNumber", entry.ChallanNumber ?? string.Empty);
             command.Parameters.AddWithValue("@Date", entry.Date.ToString("o"));
@@ -777,6 +1025,7 @@ WHERE Id = @Id;";
             command.Parameters.AddWithValue("@AdvanceDate", entry.AdvanceDate.HasValue ? (object)entry.AdvanceDate.Value.ToString("o") : DBNull.Value);
             command.Parameters.AddWithValue("@Detention", entry.Detention);
             command.Parameters.AddWithValue("@Hamali", entry.Hamali);
+            command.Parameters.AddWithValue("@OtherAmount", entry.Other);
             command.Parameters.AddWithValue("@Deduction", entry.Deduction);
             command.Parameters.AddWithValue("@BalancePaidNEFT", entry.BalancePaidNEFT);
             command.Parameters.AddWithValue("@BalancePaidCash", entry.BalancePaidCash);
@@ -817,6 +1066,7 @@ WHERE Id = @Id;";
                 AdvanceDate = ParseNullableDate(reader["AdvanceDate"]),
                 Detention = GetDecimal(reader["Detention"]),
                 Hamali = GetDecimal(reader["Hamali"]),
+                Other = reader["OtherAmount"] == DBNull.Value ? 0m : GetDecimal(reader["OtherAmount"]),
                 Deduction = GetDecimal(reader["Deduction"]),
                 BalancePaidNEFT = GetDecimal(reader["BalancePaidNEFT"]),
                 BalancePaidCash = GetDecimal(reader["BalancePaidCash"]),
@@ -824,8 +1074,24 @@ WHERE Id = @Id;";
                 PaidTo = reader["PaidTo"] as string,
                 Remarks = reader["Remarks"] as string,
                 BillAmount = GetDecimal(reader["BillAmount"]),
-                Margin = GetDecimal(reader["Margin"])
+                Margin = GetDecimal(reader["Margin"]),
+                SourcePurchaseId = HasColumn(reader, "SourcePurchaseId") && reader["SourcePurchaseId"] != DBNull.Value
+                    ? Convert.ToInt32(reader["SourcePurchaseId"])
+                    : (int?)null
             };
+        }
+
+        private static bool HasColumn(IDataRecord reader, string columnName)
+        {
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                if (string.Equals(reader.GetName(i), columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static decimal GetDecimal(object value) => Convert.ToDecimal(value);
@@ -842,7 +1108,7 @@ WHERE Id = @Id;";
             return DateTime.TryParse(raw, out var parsed) ? parsed : (DateTime?)null;
         }
 
-        private static string BuildOrderBy(string sortColumn, bool ascending)
+        private static string BuildOrderBy(string sortColumn, bool ascending, bool useLhsDerived = false)
         {
             if (string.IsNullOrEmpty(sortColumn)) return "Sr, Id";
             var dir = ascending ? "ASC" : "DESC";
@@ -872,12 +1138,23 @@ WHERE Id = @Id;";
                 case "advanceneft": return $"AdvanceNEFT {dir}, Sr, Id";
                 case "advancecash": return $"AdvanceCash {dir}, Sr, Id";
                 case "advancepaid": return $"AdvanceDate {dir}, Sr, Id";
+                case "other":
+                case "otheramount": return $"OtherAmount {dir}, Sr, Id";
+                case "lhs": return $"(LorryHire + OtherAmount) {dir}, Sr, Id";
                 case "detention": return $"Detention {dir}, Sr, Id";
                 case "hamali": return $"Hamali {dir}, Sr, Id";
                 case "deduction": return $"Deduction {dir}, Sr, Id";
                 case "balancepaidneft": return $"BalancePaidNEFT {dir}, Sr, Id";
                 case "balancepaidcash": return $"BalancePaidCash {dir}, Sr, Id";
-                case "due": return $"(LorryHire - LessTDS + Detention + Hamali - Deduction - AdvanceAmount - BalancePaidNEFT - BalancePaidCash) {dir}, Sr, Id";
+                case "balance": return useLhsDerived
+                    ? $"((LorryHire + OtherAmount) - LessTDS - AdvanceAmount) {dir}, Sr, Id"
+                    : $"(LorryHire - LessTDS - AdvanceAmount) {dir}, Sr, Id";
+                case "due": return useLhsDerived
+                    ? $"((LorryHire + OtherAmount) - LessTDS + Detention + Hamali + Deduction - AdvanceAmount - BalancePaidNEFT - BalancePaidCash) {dir}, Sr, Id"
+                    : $"(LorryHire - LessTDS + Detention + Hamali + Deduction - AdvanceAmount - BalancePaidNEFT - BalancePaidCash) {dir}, Sr, Id";
+                case "margin": return useLhsDerived
+                    ? $"(CASE WHEN BillAmount = 0 THEN 0 ELSE BillAmount - ((LorryHire + OtherAmount) + Detention + Hamali) END) {dir}, Sr, Id"
+                    : $"Margin {dir}, Sr, Id";
                 default: return "Sr, Id";
             }
         }

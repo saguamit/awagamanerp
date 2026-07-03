@@ -126,7 +126,7 @@
                     <StackPanel>
                         <Button Content="Sales" Tag="ðŸ“Š" Style="{StaticResource SidebarButtonStyle}" />
                         <Button Content="LR Ledger" Tag="ðŸ“„" Style="{StaticResource SidebarButtonStyle}" Foreground="{StaticResource ThemeBlue}" Background="#F3F4F6" />
-                        <Button Content="Delivery Challans" Tag="ðŸšš" Style="{StaticResource SidebarButtonStyle}" />
+                        <Button Content="Purchase" Tag="ðŸšš" Style="{StaticResource SidebarButtonStyle}" />
                         <Button Content="Master" Tag="M" Style="{StaticResource SidebarButtonStyle}" />
                         <Button Content="Reports" Tag="R" Style="{StaticResource SidebarButtonStyle}" />
                     </StackPanel>
@@ -163,7 +163,7 @@
                             <Button Content="Advance Receipts" Style="{StaticResource TabButtonStyle}" Width="160" />
                             <Button Content="Bills of Supply" Style="{StaticResource TabButtonStyle}" Width="160" />
                             <Button Content="LR Ledger" Style="{StaticResource ActiveTabButtonStyle}" Width="160" />
-                            <Button Content="Delivery Challans" Style="{StaticResource TabButtonStyle}" Width="160" Click="OpenDeliveryChallans_Click" />
+                            <Button Content="Purchase" Style="{StaticResource TabButtonStyle}" Width="160" Click="OpenDeliveryChallans_Click" />
                         </StackPanel>
                     </Border>
 

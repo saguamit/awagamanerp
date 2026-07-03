@@ -138,9 +138,11 @@
 
             <Setter Property="BorderBrush" Value="Transparent" />
 
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="12.5" />
 
-            <Setter Property="Padding" Value="20,12" />
+            <Setter Property="FontWeight" Value="Bold" />
+
+            <Setter Property="Padding" Value="12,10" />
 
             <Setter Property="Cursor" Value="Hand" />
 
@@ -335,11 +337,11 @@
 
                         <Button Content="Returns" Tag="M9,7 L4,12 L9,17 M5,12 L16,12 A4,4 0 1,1 16,20" Style="{StaticResource SidebarButtonStyle}" />
 
-                        <Button Content="Master" Tag="M4,7 L20,7 M4,12 L20,12 M4,17 L20,17" Style="{StaticResource SidebarButtonStyle}" />
+                        <Button x:Name="SidebarUsersButton" Content="Users" Tag="M12,4 A4,4 0 1,0 12,12 A4,4 0 1,0 12,4 M5,20 C5,16 8,14 12,14 C16,14 19,16 19,20" Style="{StaticResource SidebarButtonStyle}" Click="OpenUsers_Click" />
 
-                        <Button Content="Imports" Tag="M12,3 L12,15 M8,11 L12,15 L16,11 M5,20 L19,20" Style="{StaticResource SidebarButtonStyle}" Click="OpenImportGuide_Click" />
-                        <Button Content="Reconciliation" Tag="M5,4 L19,4 L19,20 L5,20 Z M8,8 L16,8 M8,12 L16,12 M8,16 L13,16" Style="{StaticResource SidebarButtonStyle}" />
-                        <Button Content="Reports" Tag="M4,20 L20,20 M7,17 L7,12 M12,17 L12,7 M17,17 L17,10" Style="{StaticResource SidebarButtonStyle}" Click="OpenReports_Click" />
+                        <Button x:Name="SidebarImportButton" Content="Imports" Tag="M12,3 L12,15 M8,11 L12,15 L16,11 M5,20 L19,20" Style="{StaticResource SidebarButtonStyle}" Click="OpenImportGuide_Click" />
+                        <Button x:Name="SidebarExportButton" Content="Exports" Tag="M5,4 L19,4 L19,20 L5,20 Z M8,8 L16,8 M8,12 L16,12 M8,16 L13,16" Style="{StaticResource SidebarButtonStyle}" Click="OpenExportHub_Click" />
+                        <Button x:Name="SidebarReportsButton" Content="Reports" Tag="M4,20 L20,20 M7,17 L7,12 M12,17 L12,7 M17,17 L17,10" Style="{StaticResource SidebarButtonStyle}" Click="OpenReports_Click" />
 
                     </StackPanel>
 
@@ -373,7 +375,7 @@
 
                     <Button Content="Menu" FontSize="13" Background="Transparent" BorderBrush="#D1D5DB" BorderThickness="1" Padding="10,4" Foreground="#555555" Margin="0,0,16,0" Cursor="Hand" Click="ToggleSidebar_Click" ToolTip="Hide / Show left menu" />
 
-                    <TextBlock x:Name="PageTitle" Text="Delivery Challan List" FontSize="18" Foreground="#555555" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <TextBlock x:Name="PageTitle" Text="Purchase List" FontSize="18" Foreground="#555555" FontWeight="SemiBold" VerticalAlignment="Center" />
 
                 </StackPanel>
 
@@ -419,14 +421,15 @@
                             </Grid.ColumnDefinitions>
 
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-                                <Button x:Name="TabDashboard" Content="Dashboard" Style="{StaticResource ActiveTabButtonStyle}" Width="160" Click="OpenDashboard_Click" />
-                                <Button x:Name="TabBillLedger" Content="Bill Ledger" Style="{StaticResource TabButtonStyle}" Width="160" Click="OpenBillLedger_Click" />
-                                <Button x:Name="TabCBSLedger" Content="CBS" Style="{StaticResource TabButtonStyle}" Width="120" Click="OpenCBSLedger_Click" />
-                                <Button x:Name="TabPartyLedger" Content="Party Ledger" Style="{StaticResource TabButtonStyle}" Width="160" Click="OpenPartyLedgerTab_Click" />
-                                <Button x:Name="TabVehicleLedger" Content="Vehicle Ledger" Style="{StaticResource TabButtonStyle}" Width="160" Click="OpenVehicleLedgerTab_Click" />
-                                <Button x:Name="TabLRLedger" Content="LR Ledger" Style="{StaticResource TabButtonStyle}" Width="160" Click="OpenLRLedger_Click" />
-                                <Button x:Name="TabDeliveryChallans" Content="Delivery Challans" Style="{StaticResource TabButtonStyle}" Width="160" Click="OpenDeliveryChallans_Click" />
-                                <Button x:Name="TabTrackingLedger" Content="Tracking Ledger" Style="{StaticResource TabButtonStyle}" Width="160" Click="OpenTrackingLedger_Click" />
+                                <Button x:Name="TabDashboard" Content="Dashboard" Style="{StaticResource ActiveTabButtonStyle}" Width="126" Click="OpenDashboard_Click" />
+                                <Button x:Name="TabBillLedger" Content="Bill Ledger" Style="{StaticResource TabButtonStyle}" Width="126" Click="OpenBillLedger_Click" />
+                                <Button x:Name="TabCBSLedger" Content="CBS" Style="{StaticResource TabButtonStyle}" Width="92" Click="OpenCBSLedger_Click" />
+                                <Button x:Name="TabPartyLedger" Content="Party Ledger" Style="{StaticResource TabButtonStyle}" Width="128" Click="OpenPartyLedgerTab_Click" />
+                                <Button x:Name="TabVehicleLedger" Content="Vehicle Ledger" Style="{StaticResource TabButtonStyle}" Width="136" Click="OpenVehicleLedgerTab_Click" />
+                                <Button x:Name="TabLRLedger" Content="LR Ledger" Style="{StaticResource TabButtonStyle}" Width="114" Click="OpenLRLedger_Click" />
+                                <Button x:Name="TabDeliveryChallans" Content="Purchase" Style="{StaticResource TabButtonStyle}" Width="114" Click="OpenDeliveryChallans_Click" />
+                                <Button x:Name="TabChallan" Content="Chllan" Style="{StaticResource TabButtonStyle}" Width="106" Click="OpenChallanTab_Click" />
+                                <Button x:Name="TabTrackingLedger" Content="Tracking Ledger" Style="{StaticResource TabButtonStyle}" Width="134" Click="OpenTrackingLedger_Click" />
                             </StackPanel>
 
                             <Button Grid.Column="1" Content="Reset Data" Background="#C62828" Foreground="White" BorderThickness="0" Padding="12,6" FontSize="12" Cursor="Hand" Click="ResetAllData_Click" ToolTip="Delete all ledger data" Margin="8,8,12,8" VerticalAlignment="Center" />
@@ -440,9 +443,19 @@
                         <ContentControl x:Name="ImportGuideContentHost" />
                     </Grid>
 
+                    <!-- Export View -->
+                    <Grid x:Name="ExportView" Grid.Row="1" Grid.RowSpan="4" Visibility="Collapsed" Background="White">
+                        <ContentControl x:Name="ExportContentHost" />
+                    </Grid>
+
                     <!-- Reports View -->
                     <Grid x:Name="ReportsView" Grid.Row="1" Grid.RowSpan="4" Visibility="Collapsed" Background="White">
                         <ContentControl x:Name="ReportsContentHost" />
+                    </Grid>
+
+                    <!-- Users View -->
+                    <Grid x:Name="UsersView" Grid.Row="1" Grid.RowSpan="4" Visibility="Collapsed" Background="White">
+                        <ContentControl x:Name="UsersContentHost" />
                     </Grid>
 
                     <!-- Dashboard View -->
@@ -520,6 +533,8 @@
                         <Grid Margin="24">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="20" />
+                            <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
                             <Grid Grid.Row="0">
@@ -616,6 +631,155 @@
                                             <TextBlock x:Name="DashboardNewBookings" Text="0" Style="{StaticResource DashboardMetricValue}" Foreground="#5B21B6" Margin="0,4,0,0" />
                                             <TextBlock Text="Challans without an LR number yet" Style="{StaticResource DashboardMetricHint}" Foreground="#6D28D9" Margin="0,6,0,0" />
                                         </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <Border Grid.Column="0" Style="{StaticResource DashboardCardStyle}" Padding="0">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <Border Background="#FFF7ED" BorderBrush="#FED7AA" BorderThickness="0,0,0,1" CornerRadius="18,18,0,0" Padding="18,14">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="Pending Dispatch" Style="{StaticResource DashboardSectionTitle}" Foreground="#9A3412" />
+                                                    <TextBlock Text="Tracking rows not dispatched yet" Style="{StaticResource DashboardSectionSubTitle}" Foreground="#C2410C" Margin="0,3,0,0" />
+                                                </StackPanel>
+                                                <Border Grid.Column="1" Background="#F97316" CornerRadius="14" Padding="10,4" VerticalAlignment="Center">
+                                                    <TextBlock x:Name="DashboardPendingDispatchCount" Text="0" Foreground="White" FontSize="11" FontWeight="Bold" />
+                                                </Border>
+                                            </Grid>
+                                        </Border>
+                                        <DataGrid Grid.Row="1"
+                                                  x:Name="DashboardPendingDispatchGrid"
+                                                  AutoGenerateColumns="False"
+                                                  CanUserAddRows="False"
+                                                  CanUserDeleteRows="False"
+                                                  IsReadOnly="True"
+                                                  HeadersVisibility="Column"
+                                                  GridLinesVisibility="Horizontal"
+                                                  BorderThickness="0"
+                                                  Background="White"
+                                                  RowBackground="White"
+                                                  AlternatingRowBackground="#FFFDF8"
+                                                  AlternationCount="2"
+                                                  SelectionMode="Single"
+                                                  Margin="14,10,14,14"
+                                                  MouseDoubleClick="DashboardTrackingGrid_MouseDoubleClick">
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Challan" Binding="{Binding ChallanNo}" Width="110" />
+                                                <DataGridTextColumn Header="Date" Binding="{Binding ChallanDate, StringFormat=dd-MMM-yy}" Width="92" />
+                                                <DataGridTextColumn Header="From" Binding="{Binding From}" Width="*" />
+                                                <DataGridTextColumn Header="To" Binding="{Binding To}" Width="*" />
+                                                <DataGridTextColumn Header="Vehicle" Binding="{Binding VehicleNo}" Width="120" />
+                                                <DataGridTemplateColumn Header="Eway Till" Width="96">
+                                                    <DataGridTemplateColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock Text="{Binding EwayBillTillDate, StringFormat=dd-MMM-yy}"
+                                                                       HorizontalAlignment="Center"
+                                                                       VerticalAlignment="Center">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Foreground" Value="#111827" />
+                                                                        <Setter Property="FontWeight" Value="Normal" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsEwayDueSoon}" Value="True">
+                                                                                <Setter Property="Foreground" Value="#DC2626" />
+                                                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                        </DataTemplate>
+                                                    </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                    </Grid>
+                                </Border>
+
+                                <Border Grid.Column="2" Style="{StaticResource DashboardCardStyle}" Padding="0">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <Border Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="0,0,0,1" CornerRadius="18,18,0,0" Padding="18,14">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="In Transit" Style="{StaticResource DashboardSectionTitle}" Foreground="#1D4ED8" />
+                                                    <TextBlock Text="Dispatched loads with live updates" Style="{StaticResource DashboardSectionSubTitle}" Foreground="#2563EB" Margin="0,3,0,0" />
+                                                </StackPanel>
+                                                <Border Grid.Column="1" Background="#2563EB" CornerRadius="14" Padding="10,4" VerticalAlignment="Center">
+                                                    <TextBlock x:Name="DashboardInTransitCount" Text="0" Foreground="White" FontSize="11" FontWeight="Bold" />
+                                                </Border>
+                                            </Grid>
+                                        </Border>
+                                        <DataGrid Grid.Row="1"
+                                                  x:Name="DashboardInTransitGrid"
+                                                  AutoGenerateColumns="False"
+                                                  CanUserAddRows="False"
+                                                  CanUserDeleteRows="False"
+                                                  IsReadOnly="True"
+                                                  HeadersVisibility="Column"
+                                                  GridLinesVisibility="Horizontal"
+                                                  BorderThickness="0"
+                                                  Background="White"
+                                                  RowBackground="White"
+                                                  AlternatingRowBackground="#F8FBFF"
+                                                  AlternationCount="2"
+                                                  SelectionMode="Single"
+                                                  Margin="14,10,14,14"
+                                                  MouseDoubleClick="DashboardTrackingGrid_MouseDoubleClick">
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Challan" Binding="{Binding ChallanNo}" Width="110" />
+                                                <DataGridTextColumn Header="Dispatch Dt." Binding="{Binding DispatchDate, StringFormat=dd-MMM-yy}" Width="100" />
+                                                <DataGridTextColumn Header="From" Binding="{Binding From}" Width="*" />
+                                                <DataGridTextColumn Header="To" Binding="{Binding To}" Width="*" />
+                                                <DataGridTextColumn Header="Vehicle" Binding="{Binding VehicleNo}" Width="120" />
+                                                <DataGridTemplateColumn Header="Eway Till" Width="96">
+                                                    <DataGridTemplateColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock Text="{Binding EwayBillTillDate, StringFormat=dd-MMM-yy}"
+                                                                       HorizontalAlignment="Center"
+                                                                       VerticalAlignment="Center">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Foreground" Value="#111827" />
+                                                                        <Setter Property="FontWeight" Value="Normal" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsEwayDueSoon}" Value="True">
+                                                                                <Setter Property="Foreground" Value="#DC2626" />
+                                                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                        </DataTemplate>
+                                                    </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
+                                                <DataGridTextColumn Header="Latest Update" Binding="{Binding LatestReport}" Width="2*" />
+                                            </DataGrid.Columns>
+                                        </DataGrid>
                                     </Grid>
                                 </Border>
                             </Grid>
@@ -1129,7 +1293,7 @@
 
                             <!-- Create + Reset Buttons -->
                             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                                <Button Content="+ Create Delivery Challan" Style="{StaticResource GreenButtonStyle}" Click="OpenChallanForm_Click" ToolTip="Ctrl+N" Margin="0,0,8,0" />
+                                <Button Content="+ Create Purchase" Style="{StaticResource GreenButtonStyle}" Click="OpenChallanForm_Click" ToolTip="Ctrl+N" Margin="0,0,8,0" />
                                 <Button Content="Reset Data" Background="#C62828" Foreground="White" BorderThickness="0" Padding="12,6" FontSize="12" Cursor="Hand" Click="ResetAllData_Click" ToolTip="Delete all ledger data" />
                             </StackPanel>
 
@@ -1246,6 +1410,7 @@
                                       RowBackground="White" AlternatingRowBackground="White" AlternationCount="2"
                                       FontSize="12" SelectionUnit="CellOrRowHeader"
                                          PreviewMouseLeftButtonDown="LedgerGrid_PreviewMouseLeftButtonDown"
+                                         MouseDoubleClick="LedgerGrid_MouseDoubleClick"
                                          PreviewMouseMove="LedgerGrid_PreviewMouseMove"
                                          PreviewMouseLeftButtonUp="LedgerGrid_PreviewMouseLeftButtonUp"
                                          SelectedCellsChanged="LedgerGrid_SelectedCellsChanged"
@@ -1417,13 +1582,31 @@
 
                                         <DataGridTextColumn Header="PAN" Binding="{Binding PAN}" Width="85" Visibility="{Binding DataContext.ShowPAN, ElementName=Root, Converter={StaticResource BoolToVis}}" />
 
-                                        <DataGridTextColumn Header="Lorry Hire" Binding="{Binding LorryHire}" Width="80" Visibility="{Binding DataContext.ShowLorryHire, ElementName=Root, Converter={StaticResource BoolToVis}}">
+                                        <DataGridTextColumn x:Name="PurchaseLorryHireColumn" Header="Lorry Hire" Binding="{Binding LorryHire}" Width="80" Visibility="{Binding DataContext.ShowLorryHire, ElementName=Root, Converter={StaticResource BoolToVis}}">
 
                                             <DataGridTextColumn.ElementStyle>
 
                                                 <Style TargetType="TextBlock">
 
                                                     <Setter Property="Foreground" Value="#18609A" />
+
+                                                    <Setter Property="FontWeight" Value="SemiBold" />
+
+                                                </Style>
+
+                                            </DataGridTextColumn.ElementStyle>
+
+                                        </DataGridTextColumn>
+
+                                        <DataGridTextColumn x:Name="ChallanOtherColumn" Header="Other" Binding="{Binding Other}" Width="70" Visibility="{Binding DataContext.ShowOther, ElementName=Root, Converter={StaticResource BoolToVis}}" />
+
+                                        <DataGridTextColumn x:Name="ChallanLhsColumn" Header="LHS" Binding="{Binding LHS, StringFormat=N2}" Width="80" IsReadOnly="True" Visibility="{Binding DataContext.ShowLHS, ElementName=Root, Converter={StaticResource BoolToVis}}">
+
+                                            <DataGridTextColumn.ElementStyle>
+
+                                                <Style TargetType="TextBlock">
+
+                                                    <Setter Property="Foreground" Value="#0F766E" />
 
                                                     <Setter Property="FontWeight" Value="SemiBold" />
 
@@ -1443,7 +1626,7 @@
 
                                         <DataGridTextColumn Header="Adv Date" Binding="{Binding AdvanceDate, StringFormat=dd-MMM-yyyy}" Width="85" Visibility="{Binding DataContext.ShowAdvanceDate, ElementName=Root, Converter={StaticResource BoolToVis}}" />
 
-                                        <DataGridTextColumn Header="Balance" Binding="{Binding Balance, StringFormat=N2}" Width="80" IsReadOnly="True" Visibility="{Binding DataContext.ShowBalance, ElementName=Root, Converter={StaticResource BoolToVis}}">
+                                        <DataGridTextColumn x:Name="ChallanBalanceColumn" Header="Balance" Binding="{Binding Balance, StringFormat=N2}" Width="80" IsReadOnly="True" Visibility="{Binding DataContext.ShowBalance, ElementName=Root, Converter={StaticResource BoolToVis}}">
 
                                             <DataGridTextColumn.ElementStyle>
 
@@ -1473,7 +1656,7 @@
 
                                         <DataGridTextColumn Header="Bal Paid Date" Binding="{Binding BalancePaidDate, StringFormat=dd-MMM-yyyy}" Width="85" Visibility="{Binding DataContext.ShowBalancePaidDate, ElementName=Root, Converter={StaticResource BoolToVis}}" />
 
-                                        <DataGridTextColumn Header="Due" Binding="{Binding Due, StringFormat=N2}" Width="75" IsReadOnly="True" Visibility="{Binding DataContext.ShowDue, ElementName=Root, Converter={StaticResource BoolToVis}}">
+                                        <DataGridTextColumn x:Name="ChallanDueColumn" Header="Due" Binding="{Binding Due, StringFormat=N2}" Width="75" IsReadOnly="True" Visibility="{Binding DataContext.ShowDue, ElementName=Root, Converter={StaticResource BoolToVis}}">
 
                                             <DataGridTextColumn.ElementStyle>
 
@@ -1497,7 +1680,7 @@
 
                                         <DataGridTextColumn Header="Bill Amount" Binding="{Binding BillAmount}" Width="70" IsReadOnly="True" Visibility="{Binding DataContext.ShowBillAmount, ElementName=Root, Converter={StaticResource BoolToVis}}" />
 
-                                        <DataGridTextColumn Header="Margin" Binding="{Binding Margin}" Width="60" IsReadOnly="True" Visibility="{Binding DataContext.ShowMargin, ElementName=Root, Converter={StaticResource BoolToVis}}" />
+                                        <DataGridTextColumn x:Name="ChallanMarginColumn" Header="Margin" Binding="{Binding Margin}" Width="60" IsReadOnly="True" Visibility="{Binding DataContext.ShowMargin, ElementName=Root, Converter={StaticResource BoolToVis}}" />
 
                                     </DataGrid.Columns>
 
@@ -1982,6 +2165,28 @@
                                         <DataGridTextColumn Header="To" Binding="{Binding To}" Width="80" />
                                         <DataGridTextColumn Header="Vehicle No." Binding="{Binding VehicleNo}" Width="100" />
                                         <DataGridTextColumn Header="Driver Mob." Binding="{Binding DriverMobile}" Width="100" />
+                                        <DataGridTemplateColumn Header="Eway Till Dt." Width="95">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding EwayBillTillDate, StringFormat=dd-MMM-yyyy}"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="#111827" />
+                                                                <Setter Property="FontWeight" Value="Normal" />
+                                                                <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsEwayDueSoon}" Value="True">
+                                                                                <Setter Property="Foreground" Value="#DC2626" />
+                                                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                                                            </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
                                         <DataGridTextColumn Header="Dispatch Dt." Binding="{Binding DispatchDate, StringFormat=dd-MMM-yyyy}" Width="85" />
                                         <DataGridTextColumn Header="Disp. Time" Binding="{Binding DispatchTime}" Width="70" />
                                         <DataGridTextColumn Header="Delivered Dt." Binding="{Binding DeliveredDate, StringFormat=dd-MMM-yyyy}" Width="85" />

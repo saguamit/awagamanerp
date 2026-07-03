@@ -146,6 +146,8 @@ SELECT
             "drivermobile" => $"driver_mobile {dir}, sr {dir}, id {dir}",
             "ownername" => $"owner_name {dir}, sr {dir}, id {dir}",
             "lorryhire" => $"lorry_hire {dir}, sr {dir}, id {dir}",
+            "other" => $"other_amount {dir}, sr {dir}, id {dir}",
+            "lhs" => $"(lorry_hire + other_amount) {dir}, sr {dir}, id {dir}",
             "detention" => $"detention {dir}, sr {dir}, id {dir}",
             "hamali" => $"hamali {dir}, sr {dir}, id {dir}",
             "balance" => $"(lorry_hire - less_tds - advance_amount) {dir}, sr {dir}, id {dir}",
@@ -154,6 +156,23 @@ SELECT
             "margin" => $"margin {dir}, sr {dir}, id {dir}",
             "sr" => $"sr {dir}, id {dir}",
             _ => $"sr {dir}, id {dir}"
+        };
+    }
+
+    private static string BuildChallanOrderBy(string? sortColumn, bool ascending, bool useLhsDerived)
+    {
+        if (!useLhsDerived)
+        {
+            return BuildChallanOrderBy(sortColumn, ascending);
+        }
+
+        var dir = SortDirection(ascending);
+        return (sortColumn ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "balance" => $"((lorry_hire + other_amount) - less_tds - advance_amount) {dir}, sr {dir}, id {dir}",
+            "due" => $"(((lorry_hire + other_amount) - less_tds - advance_amount) + detention + hamali + deduction - balance_paid_neft - balance_paid_cash) {dir}, sr {dir}, id {dir}",
+            "margin" => $"(CASE WHEN bill_amount = 0 THEN 0 ELSE bill_amount - ((lorry_hire + other_amount) + detention + hamali) END) {dir}, sr {dir}, id {dir}",
+            _ => BuildChallanOrderBy(sortColumn, ascending)
         };
     }
 
@@ -479,21 +498,36 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
         return string.Equals((mop ?? string.Empty).Trim(), "CASH", StringComparison.OrdinalIgnoreCase);
     }
 
-    public Task<int> DeleteVehicleAsync(int id) =>
-        ExecuteAsync("DELETE FROM vehicle_ledger WHERE id = @id;", new { id });
+    private static bool IsChallanLedgerKind(string? ledgerKind) =>
+        string.Equals(ledgerKind, "challan", StringComparison.OrdinalIgnoreCase);
 
-    public Task<IEnumerable<ChallanEntry>> GetChallansAsync() =>
-        QueryAsync<ChallanEntry>(@"SELECT
+    private static string GetChallanTableName(bool challanLedgerMode) =>
+        challanLedgerMode ? "challan_ledger_entries" : "challans";
+
+    private static string GetChallanSelectSql(bool challanLedgerMode)
+    {
+        return @"SELECT
+            " + (challanLedgerMode ? "source_purchase_id AS SourcePurchaseId," : "NULL::integer AS SourcePurchaseId,") + @"
             id, sr, challan_number AS ChallanNumber, date, lr_number AS LRNumber, broker_name AS BrokerName,
             from_location AS ""From"", to_location AS ""To"", vehicle_number AS VehicleNumber, vehicle_type AS VehicleType,
             driver_name AS DriverName, driver_mobile AS DriverMobile, engine_no AS EngineNo, licence_no AS LicenceNo,
             policy_no AS PolicyNo, chassis_no AS ChassisNo, owner_name AS OwnerName, pan AS PAN, lorry_hire AS LorryHire,
             less_tds AS LessTDS, advance_amount AS AdvanceAmount, advance_neft AS AdvanceNEFT, advance_cash AS AdvanceCash,
-            advance_date AS AdvanceDate, detention AS Detention, hamali AS Hamali, deduction AS Deduction,
+            advance_date AS AdvanceDate, detention AS Detention, hamali AS Hamali, other_amount AS Other, deduction AS Deduction,
             balance_paid_neft AS BalancePaidNEFT, balance_paid_cash AS BalancePaidCash, balance_paid_date AS BalancePaidDate,
             paid_to AS PaidTo, remarks AS Remarks, bill_amount AS BillAmount, margin AS Margin,
             imported_balance AS ImportedBalance, imported_due AS ImportedDue
-            FROM challans ORDER BY sr, id;");
+            FROM " + GetChallanTableName(challanLedgerMode);
+    }
+
+    public Task<int> DeleteVehicleAsync(int id) =>
+        ExecuteAsync("DELETE FROM vehicle_ledger WHERE id = @id;", new { id });
+
+    public Task<IEnumerable<ChallanEntry>> GetChallansAsync(string? ledgerKind = null)
+    {
+        var challanLedgerMode = IsChallanLedgerKind(ledgerKind);
+        return QueryAsync<ChallanEntry>(GetChallanSelectSql(challanLedgerMode) + " ORDER BY sr, id;");
+    }
 
     public async Task<PagedResult<ChallanEntry>> GetChallansPageAsync(
         int page,
@@ -504,8 +538,12 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
         string? challanNo = null,
         string? lrNo = null,
         string? from = null,
-        string? to = null)
+        string? to = null,
+        bool useLhsDerived = false,
+        string? ledgerKind = null)
     {
+        var challanLedgerMode = IsChallanLedgerKind(ledgerKind);
+        var tableName = GetChallanTableName(challanLedgerMode);
         page = NormalizePage(page);
         pageSize = NormalizePageSize(pageSize);
         var offset = (page - 1) * pageSize;
@@ -530,22 +568,12 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
         AddLikeFilter(whereParts, parameters, "to_location", "to", to);
 
         var where = whereParts.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", whereParts);
-        var orderBy = BuildChallanOrderBy(sortColumn, sortAscending);
-        var select = @"SELECT
-            id, sr, challan_number AS ChallanNumber, date, lr_number AS LRNumber, broker_name AS BrokerName,
-            from_location AS ""From"", to_location AS ""To"", vehicle_number AS VehicleNumber, vehicle_type AS VehicleType,
-            driver_name AS DriverName, driver_mobile AS DriverMobile, engine_no AS EngineNo, licence_no AS LicenceNo,
-            policy_no AS PolicyNo, chassis_no AS ChassisNo, owner_name AS OwnerName, pan AS PAN, lorry_hire AS LorryHire,
-            less_tds AS LessTDS, advance_amount AS AdvanceAmount, advance_neft AS AdvanceNEFT, advance_cash AS AdvanceCash,
-            advance_date AS AdvanceDate, detention AS Detention, hamali AS Hamali, deduction AS Deduction,
-            balance_paid_neft AS BalancePaidNEFT, balance_paid_cash AS BalancePaidCash, balance_paid_date AS BalancePaidDate,
-            paid_to AS PaidTo, remarks AS Remarks, bill_amount AS BillAmount, margin AS Margin,
-            imported_balance AS ImportedBalance, imported_due AS ImportedDue
-            FROM challans";
+        var orderBy = BuildChallanOrderBy(sortColumn, sortAscending, useLhsDerived);
+        var select = GetChallanSelectSql(challanLedgerMode);
 
         await using var conn = _factory.Create();
         await conn.OpenAsync();
-        var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM challans {where};", parameters);
+        var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM {tableName} {where};", parameters);
         var items = (await conn.QueryAsync<ChallanEntry>($"{select} {where} ORDER BY {orderBy} LIMIT @limit OFFSET @offset;", parameters)).ToList();
         return new PagedResult<ChallanEntry> { Items = items, TotalCount = total };
     }
@@ -555,8 +583,12 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
         string? challanNo = null,
         string? lrNo = null,
         string? from = null,
-        string? to = null)
+        string? to = null,
+        bool useLhsDerived = false,
+        string? ledgerKind = null)
     {
+        var challanLedgerMode = IsChallanLedgerKind(ledgerKind);
+        var tableName = GetChallanTableName(challanLedgerMode);
         var whereParts = new List<string>();
         var parameters = new DynamicParameters();
 
@@ -579,75 +611,187 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
 
         await using var conn = _factory.Create();
         await conn.OpenAsync();
-        var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM challans {where};", parameters);
-        var due = await conn.ExecuteScalarAsync<decimal>($@"SELECT COALESCE(SUM(
-            (lorry_hire - less_tds - advance_amount + detention + hamali + deduction) - balance_paid_neft - balance_paid_cash
-        ), 0) FROM challans {where};", parameters);
+        var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM {tableName} {where};", parameters);
+        var due = await conn.ExecuteScalarAsync<decimal>(useLhsDerived
+            ? $@"SELECT COALESCE(SUM(
+                ((lorry_hire + other_amount) - less_tds - advance_amount + detention + hamali + deduction) - balance_paid_neft - balance_paid_cash
+            ), 0) FROM {tableName} {where};"
+            : $@"SELECT COALESCE(SUM(
+                (lorry_hire - less_tds - advance_amount + detention + hamali + deduction) - balance_paid_neft - balance_paid_cash
+            ), 0) FROM {tableName} {where};", parameters);
         return new ChallanSummaryResult { TotalCount = total, TotalDue = due };
     }
 
-    public Task<int> GetMaxChallanSrAsync() =>
-        ExecuteScalarIntAsync("SELECT COALESCE(MAX(sr), 0) FROM challans;", new { });
+    public Task<int> GetMaxChallanSrAsync(string? ledgerKind = null) =>
+        ExecuteScalarIntAsync($"SELECT COALESCE(MAX(sr), 0) FROM {GetChallanTableName(IsChallanLedgerKind(ledgerKind))};", new { });
 
-    public Task<ChallanEntry?> GetChallanAsync(int id) =>
-        QuerySingleOrDefaultAsync<ChallanEntry>(@"SELECT
-            id, sr, challan_number AS ChallanNumber, date, lr_number AS LRNumber, broker_name AS BrokerName,
-            from_location AS ""From"", to_location AS ""To"", vehicle_number AS VehicleNumber, vehicle_type AS VehicleType,
-            driver_name AS DriverName, driver_mobile AS DriverMobile, engine_no AS EngineNo, licence_no AS LicenceNo,
-            policy_no AS PolicyNo, chassis_no AS ChassisNo, owner_name AS OwnerName, pan AS PAN, lorry_hire AS LorryHire,
-            less_tds AS LessTDS, advance_amount AS AdvanceAmount, advance_neft AS AdvanceNEFT, advance_cash AS AdvanceCash,
-            advance_date AS AdvanceDate, detention AS Detention, hamali AS Hamali, deduction AS Deduction,
-            balance_paid_neft AS BalancePaidNEFT, balance_paid_cash AS BalancePaidCash, balance_paid_date AS BalancePaidDate,
-            paid_to AS PaidTo, remarks AS Remarks, bill_amount AS BillAmount, margin AS Margin,
-            imported_balance AS ImportedBalance, imported_due AS ImportedDue
-            FROM challans WHERE id = @id;", new { id });
-
-    public async Task<int> UpsertChallanAsync(ChallanEntry entry)
+    public Task<ChallanEntry?> GetChallanAsync(int id, string? ledgerKind = null)
     {
+        var challanLedgerMode = IsChallanLedgerKind(ledgerKind);
+        return QuerySingleOrDefaultAsync<ChallanEntry>($"{GetChallanSelectSql(challanLedgerMode)} WHERE id = @id;", new { id });
+    }
+
+    public async Task<int> UpsertChallanAsync(ChallanEntry entry, string? ledgerKind = null)
+    {
+        var challanLedgerMode = IsChallanLedgerKind(ledgerKind);
+        var tableName = GetChallanTableName(challanLedgerMode);
         var sql = entry.Id <= 0
-            ? @"INSERT INTO challans (
-                    sr, challan_number, date, lr_number, broker_name, from_location, to_location, vehicle_number, vehicle_type,
-                    driver_name, driver_mobile, engine_no, licence_no, policy_no, chassis_no, owner_name, pan,
-                    lorry_hire, less_tds, advance_amount, advance_neft, advance_cash, advance_date, detention, hamali,
-                    deduction, balance_paid_neft, balance_paid_cash, balance_paid_date, paid_to, remarks, bill_amount, margin,
-                    imported_balance, imported_due)
-                VALUES (
-                    @Sr, @ChallanNumber, @Date, @LRNumber, @BrokerName, @From, @To, @VehicleNumber, @VehicleType,
-                    @DriverName, @DriverMobile, @EngineNo, @LicenceNo, @PolicyNo, @ChassisNo, @OwnerName, @PAN,
-                    @LorryHire, @LessTDS, @AdvanceAmount, @AdvanceNEFT, @AdvanceCash, @AdvanceDate, @Detention, @Hamali,
-                    @Deduction, @BalancePaidNEFT, @BalancePaidCash, @BalancePaidDate, @PaidTo, @Remarks, @BillAmount, @Margin,
-                    @ImportedBalance, @ImportedDue)
-                RETURNING id;"
-            : @"UPDATE challans SET
-                    sr = @Sr, challan_number = @ChallanNumber, date = @Date, lr_number = @LRNumber, broker_name = @BrokerName,
-                    from_location = @From, to_location = @To, vehicle_number = @VehicleNumber, vehicle_type = @VehicleType,
-                    driver_name = @DriverName, driver_mobile = @DriverMobile, engine_no = @EngineNo, licence_no = @LicenceNo,
-                    policy_no = @PolicyNo, chassis_no = @ChassisNo, owner_name = @OwnerName, pan = @PAN, lorry_hire = @LorryHire,
-                    less_tds = @LessTDS, advance_amount = @AdvanceAmount, advance_neft = @AdvanceNEFT, advance_cash = @AdvanceCash,
-                    advance_date = @AdvanceDate, detention = @Detention, hamali = @Hamali, deduction = @Deduction,
-                    balance_paid_neft = @BalancePaidNEFT, balance_paid_cash = @BalancePaidCash, balance_paid_date = @BalancePaidDate,
-                    paid_to = @PaidTo, remarks = @Remarks, bill_amount = @BillAmount, margin = @Margin,
-                    imported_balance = @ImportedBalance, imported_due = @ImportedDue
-                WHERE id = @Id;
-               SELECT @Id;";
+            ? challanLedgerMode
+                ? $@"INSERT INTO {tableName} (
+                        source_purchase_id, sr, challan_number, date, lr_number, broker_name, from_location, to_location, vehicle_number, vehicle_type,
+                        driver_name, driver_mobile, engine_no, licence_no, policy_no, chassis_no, owner_name, pan,
+                        lorry_hire, less_tds, advance_amount, advance_neft, advance_cash, advance_date, detention, hamali,
+                        other_amount, deduction, balance_paid_neft, balance_paid_cash, balance_paid_date, paid_to, remarks, bill_amount, margin,
+                        imported_balance, imported_due)
+                    VALUES (
+                        @SourcePurchaseId, @Sr, @ChallanNumber, @Date, @LRNumber, @BrokerName, @From, @To, @VehicleNumber, @VehicleType,
+                        @DriverName, @DriverMobile, @EngineNo, @LicenceNo, @PolicyNo, @ChassisNo, @OwnerName, @PAN,
+                        @LorryHire, @LessTDS, @AdvanceAmount, @AdvanceNEFT, @AdvanceCash, @AdvanceDate, @Detention, @Hamali,
+                        @Other, @Deduction, @BalancePaidNEFT, @BalancePaidCash, @BalancePaidDate, @PaidTo, @Remarks, @BillAmount, @Margin,
+                        @ImportedBalance, @ImportedDue)
+                    RETURNING id;"
+                : $@"INSERT INTO {tableName} (
+                        sr, challan_number, date, lr_number, broker_name, from_location, to_location, vehicle_number, vehicle_type,
+                        driver_name, driver_mobile, engine_no, licence_no, policy_no, chassis_no, owner_name, pan,
+                        lorry_hire, less_tds, advance_amount, advance_neft, advance_cash, advance_date, detention, hamali,
+                        other_amount, deduction, balance_paid_neft, balance_paid_cash, balance_paid_date, paid_to, remarks, bill_amount, margin,
+                        imported_balance, imported_due)
+                    VALUES (
+                        @Sr, @ChallanNumber, @Date, @LRNumber, @BrokerName, @From, @To, @VehicleNumber, @VehicleType,
+                        @DriverName, @DriverMobile, @EngineNo, @LicenceNo, @PolicyNo, @ChassisNo, @OwnerName, @PAN,
+                        @LorryHire, @LessTDS, @AdvanceAmount, @AdvanceNEFT, @AdvanceCash, @AdvanceDate, @Detention, @Hamali,
+                        @Other, @Deduction, @BalancePaidNEFT, @BalancePaidCash, @BalancePaidDate, @PaidTo, @Remarks, @BillAmount, @Margin,
+                        @ImportedBalance, @ImportedDue)
+                    RETURNING id;"
+            : challanLedgerMode
+                ? $@"UPDATE {tableName} SET
+                        source_purchase_id = @SourcePurchaseId, sr = @Sr, challan_number = @ChallanNumber, date = @Date, lr_number = @LRNumber, broker_name = @BrokerName,
+                        from_location = @From, to_location = @To, vehicle_number = @VehicleNumber, vehicle_type = @VehicleType,
+                        driver_name = @DriverName, driver_mobile = @DriverMobile, engine_no = @EngineNo, licence_no = @LicenceNo,
+                        policy_no = @PolicyNo, chassis_no = @ChassisNo, owner_name = @OwnerName, pan = @PAN, lorry_hire = @LorryHire,
+                        less_tds = @LessTDS, advance_amount = @AdvanceAmount, advance_neft = @AdvanceNEFT, advance_cash = @AdvanceCash,
+                        advance_date = @AdvanceDate, detention = @Detention, hamali = @Hamali, other_amount = @Other, deduction = @Deduction,
+                        balance_paid_neft = @BalancePaidNEFT, balance_paid_cash = @BalancePaidCash, balance_paid_date = @BalancePaidDate,
+                        paid_to = @PaidTo, remarks = @Remarks, bill_amount = @BillAmount, margin = @Margin,
+                        imported_balance = @ImportedBalance, imported_due = @ImportedDue
+                    WHERE id = @Id;
+                   SELECT @Id;"
+                : $@"UPDATE {tableName} SET
+                        sr = @Sr, challan_number = @ChallanNumber, date = @Date, lr_number = @LRNumber, broker_name = @BrokerName,
+                        from_location = @From, to_location = @To, vehicle_number = @VehicleNumber, vehicle_type = @VehicleType,
+                        driver_name = @DriverName, driver_mobile = @DriverMobile, engine_no = @EngineNo, licence_no = @LicenceNo,
+                        policy_no = @PolicyNo, chassis_no = @ChassisNo, owner_name = @OwnerName, pan = @PAN, lorry_hire = @LorryHire,
+                        less_tds = @LessTDS, advance_amount = @AdvanceAmount, advance_neft = @AdvanceNEFT, advance_cash = @AdvanceCash,
+                        advance_date = @AdvanceDate, detention = @Detention, hamali = @Hamali, other_amount = @Other, deduction = @Deduction,
+                        balance_paid_neft = @BalancePaidNEFT, balance_paid_cash = @BalancePaidCash, balance_paid_date = @BalancePaidDate,
+                        paid_to = @PaidTo, remarks = @Remarks, bill_amount = @BillAmount, margin = @Margin,
+                        imported_balance = @ImportedBalance, imported_due = @ImportedDue
+                    WHERE id = @Id;
+                   SELECT @Id;";
         var id = await ExecuteScalarIntAsync(sql, entry);
         entry.Id = id;
-        await SyncLhsCBSFromChallanAsync(entry);
+        if (challanLedgerMode)
+        {
+            await SyncLhsCBSFromChallanAsync(entry);
+        }
+        else
+        {
+            await SyncRemoteChallanMirrorAsync(entry);
+        }
         return id;
     }
 
-    public async Task<int> DeleteChallanAsync(int id)
+    public async Task<int> DeleteChallanAsync(int id, string? ledgerKind = null)
     {
-        var challan = await GetChallanAsync(id);
-        var affected = await ExecuteAsync("DELETE FROM challans WHERE id = @id;", new { id });
-        if (challan != null && !string.IsNullOrWhiteSpace(challan.ChallanNumber))
+        var challanLedgerMode = IsChallanLedgerKind(ledgerKind);
+        var tableName = GetChallanTableName(challanLedgerMode);
+        var challan = await GetChallanAsync(id, ledgerKind);
+        var affected = await ExecuteAsync($"DELETE FROM {tableName} WHERE id = @id;", new { id });
+        if (challanLedgerMode && challan != null && !string.IsNullOrWhiteSpace(challan.ChallanNumber))
         {
             var challanNo = challan.ChallanNumber.Trim();
             await DeleteAutoCBSRowsAsync("LHS", $"Challan {challanNo} - Advance Paid", "Auto from Challan");
             await DeleteAutoCBSRowsAsync("LHS", $"Challan {challanNo} - Balance Paid", "Auto from Challan");
         }
+        else if (!challanLedgerMode && challan != null)
+        {
+            await ExecuteAsync(@"DELETE FROM challan_ledger_entries
+WHERE source_purchase_id = @SourcePurchaseId
+   OR lower(trim(challan_number)) = lower(trim(@ChallanNumber));",
+                new { SourcePurchaseId = challan.Id, ChallanNumber = challan.ChallanNumber ?? string.Empty });
+        }
 
         return affected;
+    }
+
+    private async Task SyncRemoteChallanMirrorAsync(ChallanEntry purchaseEntry)
+    {
+        if (purchaseEntry == null)
+        {
+            return;
+        }
+
+        var existingMirror = await QuerySingleOrDefaultAsync<ChallanEntry>(
+            GetChallanSelectSql(true) + @"
+ WHERE (source_purchase_id IS NOT NULL AND source_purchase_id = @SourcePurchaseId)
+    OR lower(trim(challan_number)) = lower(trim(@ChallanNumber))
+ ORDER BY CASE WHEN source_purchase_id = @SourcePurchaseId THEN 0 ELSE 1 END, id
+ LIMIT 1;",
+            new
+            {
+                SourcePurchaseId = purchaseEntry.Id,
+                ChallanNumber = purchaseEntry.ChallanNumber ?? string.Empty
+            });
+
+        var mirror = CreateRemoteMirrorFromPurchase(purchaseEntry, existingMirror);
+
+        mirror.SourcePurchaseId = purchaseEntry.Id;
+        await UpsertChallanAsync(mirror, "challan");
+    }
+
+    private static ChallanEntry CreateRemoteMirrorFromPurchase(ChallanEntry purchaseEntry, ChallanEntry? existingMirror)
+    {
+        return new ChallanEntry
+        {
+            Id = existingMirror?.Id ?? 0,
+            SourcePurchaseId = purchaseEntry.Id,
+            Sr = purchaseEntry.Sr,
+            ChallanNumber = purchaseEntry.ChallanNumber,
+            Date = purchaseEntry.Date,
+            LRNumber = purchaseEntry.LRNumber,
+            BrokerName = purchaseEntry.BrokerName,
+            From = purchaseEntry.From,
+            To = purchaseEntry.To,
+            VehicleNumber = purchaseEntry.VehicleNumber,
+            VehicleType = purchaseEntry.VehicleType,
+            DriverName = purchaseEntry.DriverName,
+            DriverMobile = purchaseEntry.DriverMobile,
+            EngineNo = purchaseEntry.EngineNo,
+            LicenceNo = purchaseEntry.LicenceNo,
+            PolicyNo = purchaseEntry.PolicyNo,
+            ChassisNo = purchaseEntry.ChassisNo,
+            OwnerName = purchaseEntry.OwnerName,
+            PAN = purchaseEntry.PAN,
+            LorryHire = purchaseEntry.LorryHire,
+            LessTDS = existingMirror?.LessTDS ?? purchaseEntry.LessTDS,
+            AdvanceAmount = existingMirror?.AdvanceAmount ?? purchaseEntry.AdvanceAmount,
+            AdvanceNEFT = existingMirror?.AdvanceNEFT ?? purchaseEntry.AdvanceNEFT,
+            AdvanceCash = existingMirror?.AdvanceCash ?? purchaseEntry.AdvanceCash,
+            AdvanceDate = existingMirror?.AdvanceDate ?? purchaseEntry.AdvanceDate,
+            Detention = existingMirror?.Detention ?? purchaseEntry.Detention,
+            Hamali = existingMirror?.Hamali ?? purchaseEntry.Hamali,
+            Other = existingMirror?.Other ?? purchaseEntry.Other,
+            Deduction = existingMirror?.Deduction ?? purchaseEntry.Deduction,
+            BalancePaidNEFT = existingMirror?.BalancePaidNEFT ?? purchaseEntry.BalancePaidNEFT,
+            BalancePaidCash = existingMirror?.BalancePaidCash ?? purchaseEntry.BalancePaidCash,
+            BalancePaidDate = existingMirror?.BalancePaidDate ?? purchaseEntry.BalancePaidDate,
+            PaidTo = existingMirror?.PaidTo ?? purchaseEntry.PaidTo,
+            Remarks = existingMirror?.Remarks ?? purchaseEntry.Remarks,
+            BillAmount = existingMirror?.BillAmount ?? purchaseEntry.BillAmount,
+            Margin = existingMirror?.Margin ?? purchaseEntry.Margin,
+            ImportedBalance = existingMirror?.ImportedBalance ?? purchaseEntry.ImportedBalance,
+            ImportedDue = existingMirror?.ImportedDue ?? purchaseEntry.ImportedDue
+        };
     }
 
     public Task<IEnumerable<LREntry>> GetLREntriesAsync() =>
@@ -890,11 +1034,101 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
         return await ExecuteScalarIntAsync(sql, entry);
     }
 
-    public Task<IEnumerable<CashBankStatementEntry>> GetCashBankStatementsAsync() =>
-        QueryAsync<CashBankStatementEntry>(@"SELECT
+    public Task<IEnumerable<CashBankStatementEntry>> GetCashBankStatementsAsync(string? accountName = null, DateTime? fromDate = null, DateTime? toDate = null)
+    {
+        var sql = @"SELECT
             id, sr, cbs AS CBS, date, account_name AS AccountName, particulars AS Particulars, remarks AS Remarks,
             bank_dr AS BankDr, bank_cr AS BankCr, cash_dr AS CashDr, cash_cr AS CashCr
-            FROM cash_bank_statements ORDER BY date DESC, sr, id;");
+            FROM cash_bank_statements";
+
+        var conditions = new List<string>();
+        var parameters = new DynamicParameters();
+
+        if (!string.IsNullOrWhiteSpace(accountName))
+        {
+            conditions.Add("LOWER(TRIM(account_name)) = LOWER(TRIM(@accountName))");
+            parameters.Add("accountName", accountName.Trim());
+        }
+        if (fromDate.HasValue)
+        {
+            conditions.Add("date::date >= @fromDate");
+            parameters.Add("fromDate", fromDate.Value.Date);
+        }
+        if (toDate.HasValue)
+        {
+            conditions.Add("date::date <= @toDate");
+            parameters.Add("toDate", toDate.Value.Date);
+        }
+
+        if (conditions.Count > 0)
+        {
+            sql += " WHERE " + string.Join(" AND ", conditions);
+        }
+
+        sql += " ORDER BY date DESC, sr, id;";
+        return QueryAsync<CashBankStatementEntry>(sql, parameters);
+    }
+
+    public Task<IEnumerable<LhsSummaryEntry>> GetLhsSummaryAsync(DateTime? fromDate = null, DateTime? toDate = null)
+    {
+        var sql = @"
+SELECT
+    cbs.date AS Date,
+    COALESCE(ch.broker_name, '') AS BrokerName,
+    COALESCE(ch.from_location, '') AS ""From"",
+    COALESCE(ch.to_location, '') AS ""To"",
+    COALESCE(ch.vehicle_number, '') AS VehicleNumber,
+    cbs.bank_dr AS BankDr,
+    cbs.bank_cr AS BankCr,
+    cbs.cash_dr AS CashDr,
+    cbs.cash_cr AS CashCr
+FROM cash_bank_statements cbs
+LEFT JOIN LATERAL (
+    SELECT (regexp_match(COALESCE(cbs.particulars, ''), 'Challan\s+([^\s\-\|\t\r\n]+)', 'i'))[1] AS challan_number
+) parsed ON TRUE
+LEFT JOIN challans ch
+    ON LOWER(TRIM(ch.challan_number)) = LOWER(TRIM(COALESCE(parsed.challan_number, '')))
+WHERE LOWER(TRIM(cbs.account_name)) = 'lhs'";
+
+        var conditions = new List<string>();
+        var parameters = new DynamicParameters();
+        if (fromDate.HasValue)
+        {
+            conditions.Add("cbs.date::date >= @fromDate");
+            parameters.Add("fromDate", fromDate.Value.Date);
+        }
+        if (toDate.HasValue)
+        {
+            conditions.Add("cbs.date::date <= @toDate");
+            parameters.Add("toDate", toDate.Value.Date);
+        }
+        if (conditions.Count > 0)
+        {
+            sql += " AND " + string.Join(" AND ", conditions);
+        }
+
+        sql += " ORDER BY cbs.date DESC, cbs.sr, cbs.id;";
+        return QueryAsync<LhsSummaryEntry>(sql, parameters);
+    }
+
+    public Task<IEnumerable<ChallanEntry>> GetChallansByNumbersAsync(IEnumerable<string> challanNumbers, string? ledgerKind = null)
+    {
+        var challanLedgerMode = IsChallanLedgerKind(ledgerKind);
+        var keys = (challanNumbers ?? Enumerable.Empty<string>())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (keys.Length == 0)
+        {
+            return Task.FromResult<IEnumerable<ChallanEntry>>(Array.Empty<ChallanEntry>());
+        }
+
+        return QueryAsync<ChallanEntry>(GetChallanSelectSql(challanLedgerMode) + @"
+WHERE challan_number = ANY(@challanNumbers)
+ORDER BY date DESC, sr, id;", new { challanNumbers = keys });
+    }
 
     public Task<CashBankStatementEntry?> GetCashBankStatementAsync(int id) =>
         QuerySingleOrDefaultAsync<CashBankStatementEntry>(@"SELECT
@@ -1029,4 +1263,171 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
 
     public Task<IEnumerable<ReportingTrackEntry>> GetReportingTracksAsync(int trackingEntryId) =>
         QueryAsync<ReportingTrackEntry>("SELECT id AS Id, tracking_entry_id AS TrackingEntryId, report_date_time AS ReportDateTime, remarks AS Remarks FROM reporting_tracks WHERE tracking_entry_id = @trackingEntryId ORDER BY report_date_time;", new { trackingEntryId });
+
+    public Task<IEnumerable<AppUserInfo>> GetUsersAsync() =>
+        QueryAsync<AppUserInfo>(@"
+SELECT
+    id,
+    username,
+    full_name AS FullName,
+    role,
+    is_active AS IsActive,
+    last_login_utc AS LastLoginUtc
+FROM app_users
+ORDER BY username, id;");
+
+    public Task<AppUserEntry?> GetUserByUsernameAsync(string username) =>
+        QuerySingleOrDefaultAsync<AppUserEntry>(@"
+SELECT
+    id,
+    username,
+    full_name AS FullName,
+    role,
+    is_active AS IsActive,
+    created_utc AS CreatedUtc,
+    last_login_utc AS LastLoginUtc,
+    password_hash AS PasswordHash,
+    password_salt AS PasswordSalt
+FROM app_users
+WHERE lower(trim(username)) = lower(trim(@username))
+LIMIT 1;", new { username });
+
+    public Task<AppUserInfo?> GetUserInfoAsync(int id) =>
+        QuerySingleOrDefaultAsync<AppUserInfo>(@"
+SELECT
+    id,
+    username,
+    full_name AS FullName,
+    role,
+    is_active AS IsActive,
+    last_login_utc AS LastLoginUtc
+FROM app_users
+WHERE id = @id;", new { id });
+
+    public async Task<int> CreateUserAsync(CreateUserRequest request)
+    {
+        return await CreateUserAsync(request, string.Empty);
+    }
+
+    public async Task<int> CreateUserAsync(CreateUserRequest request, string passwordPreviewSecret)
+    {
+        var password = AuthSecurity.HashPassword(request.Password);
+        var preview = string.IsNullOrWhiteSpace(request.Password)
+            ? string.Empty
+            : AuthSecurity.EncryptPasswordPreview(request.Password, passwordPreviewSecret);
+        return await ExecuteScalarIntAsync(@"
+INSERT INTO app_users (username, full_name, password_hash, password_salt, password_preview, role, is_active, created_utc)
+VALUES (@Username, @FullName, @PasswordHash, @PasswordSalt, @PasswordPreview, @Role, TRUE, @CreatedUtc)
+RETURNING id;", new
+        {
+            Username = (request.Username ?? string.Empty).Trim(),
+            FullName = (request.FullName ?? string.Empty).Trim(),
+            PasswordHash = password.Hash,
+            PasswordSalt = password.Salt,
+            PasswordPreview = preview,
+            Role = string.IsNullOrWhiteSpace(request.Role) ? "Operator" : request.Role.Trim(),
+            CreatedUtc = DateTime.UtcNow
+        });
+    }
+
+    public Task<int> UpdateUserStatusAsync(int id, bool isActive) =>
+        ExecuteAsync("UPDATE app_users SET is_active = @isActive WHERE id = @id;", new { id, isActive });
+
+    public async Task<int> ResetUserPasswordAsync(int id, string password, string passwordPreviewSecret)
+    {
+        var hashed = AuthSecurity.HashPassword(password);
+        var preview = string.IsNullOrWhiteSpace(password)
+            ? string.Empty
+            : AuthSecurity.EncryptPasswordPreview(password, passwordPreviewSecret);
+        return await ExecuteAsync(
+            "UPDATE app_users SET password_hash = @PasswordHash, password_salt = @PasswordSalt, password_preview = @PasswordPreview WHERE id = @id;",
+            new { id, PasswordHash = hashed.Hash, PasswordSalt = hashed.Salt, PasswordPreview = preview });
+    }
+
+    public async Task<UserPasswordPreviewResponse> GetUserPasswordPreviewAsync(int id, string passwordPreviewSecret)
+    {
+        var encrypted = await QuerySingleOrDefaultAsync<string>(
+            "SELECT COALESCE(password_preview, '') FROM app_users WHERE id = @id;",
+            new { id });
+
+        if (string.IsNullOrWhiteSpace(encrypted))
+        {
+            return new UserPasswordPreviewResponse
+            {
+                Password = string.Empty,
+                Available = false
+            };
+        }
+
+        try
+        {
+            return new UserPasswordPreviewResponse
+            {
+                Password = AuthSecurity.DecryptPasswordPreview(encrypted, passwordPreviewSecret),
+                Available = true
+            };
+        }
+        catch
+        {
+            return new UserPasswordPreviewResponse
+            {
+                Password = string.Empty,
+                Available = false
+            };
+        }
+    }
+
+    public Task<int> DeleteUserAsync(int id) =>
+        ExecuteAsync("DELETE FROM app_users WHERE id = @id AND lower(username) <> 'admin';", new { id });
+
+    public Task<int> UpdateUserLastLoginAsync(int id) =>
+        ExecuteAsync("UPDATE app_users SET last_login_utc = @LastLoginUtc WHERE id = @id;", new { id, LastLoginUtc = DateTime.UtcNow });
+
+    public Task<int> AddAuditLogAsync(AuditLogEntry entry) =>
+        ExecuteScalarIntAsync(@"
+INSERT INTO audit_logs (user_id, username, full_name, role, action_area, action_type, entity_key, details, created_utc)
+VALUES (@UserId, @Username, @FullName, @Role, @ActionArea, @ActionType, @EntityKey, @Details, @CreatedUtc)
+RETURNING id;", new
+        {
+            entry.UserId,
+            Username = (entry.Username ?? string.Empty).Trim(),
+            FullName = (entry.FullName ?? string.Empty).Trim(),
+            Role = (entry.Role ?? string.Empty).Trim(),
+            ActionArea = (entry.ActionArea ?? string.Empty).Trim(),
+            ActionType = (entry.ActionType ?? string.Empty).Trim(),
+            EntityKey = (entry.EntityKey ?? string.Empty).Trim(),
+            Details = entry.Details ?? string.Empty,
+            CreatedUtc = entry.CreatedUtc == default ? DateTime.UtcNow : entry.CreatedUtc
+        });
+
+    public Task<IEnumerable<AuditLogEntry>> GetRecentAuditAsync(int take = 200) =>
+        QueryAsync<AuditLogEntry>(@"
+SELECT
+    id,
+    user_id AS UserId,
+    username,
+    full_name AS FullName,
+    role,
+    action_area AS ActionArea,
+    action_type AS ActionType,
+    entity_key AS EntityKey,
+    details,
+    created_utc AS CreatedUtc
+FROM audit_logs
+ORDER BY created_utc DESC, id DESC
+LIMIT @take;", new { take });
+
+    public Task<IEnumerable<AuditUserSummaryEntry>> GetAuditUserSummaryAsync() =>
+        QueryAsync<AuditUserSummaryEntry>(@"
+SELECT
+    username,
+    max(full_name) AS FullName,
+    max(role) AS Role,
+    COUNT(*) FILTER (WHERE lower(action_type) = 'create') AS AddedCount,
+    COUNT(*) FILTER (WHERE lower(action_type) = 'update') AS UpdatedCount,
+    COUNT(*) FILTER (WHERE lower(action_type) = 'delete') AS DeletedCount,
+    MAX(created_utc) AS LastActivityUtc
+FROM audit_logs
+GROUP BY username
+ORDER BY MAX(created_utc) DESC NULLS LAST, username;");
 }

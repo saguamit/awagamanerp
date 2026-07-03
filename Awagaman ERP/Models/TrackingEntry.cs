@@ -32,10 +32,29 @@ namespace Awagaman_ERP.Models
         public string To { get => _to; set { _to = value; OnPropertyChanged(); } }
         public string VehicleNo { get => _vehicleNo; set { _vehicleNo = value; OnPropertyChanged(); } }
         public string DriverMobile { get => _driverMobile; set { _driverMobile = value; OnPropertyChanged(); } }
-        public DateTime? EwayBillTillDate { get => _ewayBillTillDate; set { _ewayBillTillDate = value; OnPropertyChanged(); } }
+        public DateTime? EwayBillTillDate
+        {
+            get => _ewayBillTillDate;
+            set
+            {
+                _ewayBillTillDate = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsEwayDueSoon));
+            }
+        }
         public DateTime? DispatchDate { get => _dispatchDate; set { _dispatchDate = value; OnPropertyChanged(); OnPropertyChanged(nameof(Status)); } }
         public string DispatchTime { get => _dispatchTime; set { _dispatchTime = value; OnPropertyChanged(); } }
-        public DateTime? DeliveredDate { get => _deliveredDate; set { _deliveredDate = value; OnPropertyChanged(); OnPropertyChanged(nameof(Status)); } }
+        public DateTime? DeliveredDate
+        {
+            get => _deliveredDate;
+            set
+            {
+                _deliveredDate = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(Status));
+                OnPropertyChanged(nameof(IsEwayDueSoon));
+            }
+        }
         public string DeliveredTime { get => _deliveredTime; set { _deliveredTime = value; OnPropertyChanged(); } }
 
         public string Status
@@ -53,6 +72,11 @@ namespace Awagaman_ERP.Models
             get => _latestReport;
             set { _latestReport = value; OnPropertyChanged(); }
         }
+
+        public bool IsEwayDueSoon =>
+            EwayBillTillDate.HasValue &&
+            EwayBillTillDate.Value.Date <= DateTime.Today.AddDays(1).Date &&
+            !DeliveredDate.HasValue;
 
         public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string propertyName = null)

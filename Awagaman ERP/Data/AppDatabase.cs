@@ -92,6 +92,47 @@ CREATE TABLE IF NOT EXISTS Challans (
     AdvanceDate TEXT NULL,
     Detention REAL NOT NULL,
     Hamali REAL NOT NULL,
+    OtherAmount REAL NOT NULL DEFAULT 0,
+    Deduction REAL NOT NULL,
+    BalancePaidNEFT REAL NOT NULL,
+    BalancePaidCash REAL NOT NULL,
+    BalancePaidDate TEXT NULL,
+    PaidTo TEXT,
+    Remarks TEXT,
+    BillAmount REAL NOT NULL,
+    Margin REAL NOT NULL
+);");
+
+                    ExecuteNonQuery(connection, @"
+CREATE TABLE IF NOT EXISTS ChallanLedgerEntries (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    SourcePurchaseId INTEGER NULL,
+    Sr INTEGER NOT NULL,
+    ChallanNumber TEXT NOT NULL,
+    Date TEXT NOT NULL,
+    LRNumber TEXT,
+    BrokerName TEXT,
+    FromLocation TEXT,
+    ToLocation TEXT,
+    VehicleNumber TEXT,
+    VehicleType TEXT,
+    DriverName TEXT,
+    DriverMobile TEXT,
+    EngineNo TEXT,
+    LicenceNo TEXT,
+    PolicyNo TEXT,
+    ChassisNo TEXT,
+    OwnerName TEXT,
+    PAN TEXT,
+    LorryHire REAL NOT NULL,
+    LessTDS REAL NOT NULL,
+    AdvanceAmount REAL NOT NULL,
+    AdvanceNEFT REAL NOT NULL,
+    AdvanceCash REAL NOT NULL,
+    AdvanceDate TEXT NULL,
+    Detention REAL NOT NULL,
+    Hamali REAL NOT NULL,
+    OtherAmount REAL NOT NULL DEFAULT 0,
     Deduction REAL NOT NULL,
     BalancePaidNEFT REAL NOT NULL,
     BalancePaidCash REAL NOT NULL,
@@ -103,8 +144,11 @@ CREATE TABLE IF NOT EXISTS Challans (
 );");
 
                     // Add Balance/Due columns for existing databases only when missing.
+                    TryAddColumn(connection, "Challans", "OtherAmount", "REAL NOT NULL DEFAULT 0", "EnsureInitialized.Challans.OtherAmount");
                     TryAddColumn(connection, "Challans", "ImportedBalance", "REAL", "EnsureInitialized.Challans.ImportedBalance");
                     TryAddColumn(connection, "Challans", "ImportedDue", "REAL", "EnsureInitialized.Challans.ImportedDue");
+                    TryAddColumn(connection, "ChallanLedgerEntries", "SourcePurchaseId", "INTEGER", "EnsureInitialized.ChallanLedgerEntries.SourcePurchaseId");
+                    TryAddColumn(connection, "ChallanLedgerEntries", "OtherAmount", "REAL NOT NULL DEFAULT 0", "EnsureInitialized.ChallanLedgerEntries.OtherAmount");
 
                     ExecuteNonQuery(connection, @"
 CREATE TABLE IF NOT EXISTS LREntries (
@@ -189,6 +233,28 @@ CREATE TABLE IF NOT EXISTS ReportingTracks (
                     ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_Challans_BrokerName ON Challans(BrokerName);");
                     ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_Challans_LRNumber ON Challans(LRNumber);");
                     ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_Challans_VehicleNumber ON Challans(VehicleNumber);");
+                    ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_ChallanLedgerEntries_SourcePurchaseId ON ChallanLedgerEntries(SourcePurchaseId);");
+                    ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_ChallanLedgerEntries_ChallanNumber ON ChallanLedgerEntries(ChallanNumber);");
+                    ExecuteNonQuery(connection, @"
+INSERT INTO ChallanLedgerEntries (
+    SourcePurchaseId, Sr, ChallanNumber, Date, LRNumber, BrokerName, FromLocation, ToLocation, VehicleNumber, VehicleType,
+    DriverName, DriverMobile, EngineNo, LicenceNo, PolicyNo, ChassisNo, OwnerName, PAN,
+    LorryHire, LessTDS, AdvanceAmount, AdvanceNEFT, AdvanceCash, AdvanceDate,
+    Detention, Hamali, OtherAmount, Deduction, BalancePaidNEFT, BalancePaidCash, BalancePaidDate,
+    PaidTo, Remarks, BillAmount, Margin
+)
+SELECT
+    p.Id, p.Sr, p.ChallanNumber, p.Date, p.LRNumber, p.BrokerName, p.FromLocation, p.ToLocation, p.VehicleNumber, p.VehicleType,
+    p.DriverName, p.DriverMobile, p.EngineNo, p.LicenceNo, p.PolicyNo, p.ChassisNo, p.OwnerName, p.PAN,
+    p.LorryHire, p.LessTDS, p.AdvanceAmount, p.AdvanceNEFT, p.AdvanceCash, p.AdvanceDate,
+    p.Detention, p.Hamali, p.OtherAmount, p.Deduction, p.BalancePaidNEFT, p.BalancePaidCash, p.BalancePaidDate,
+    p.PaidTo, p.Remarks, p.BillAmount, p.Margin
+FROM Challans p
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM ChallanLedgerEntries c
+    WHERE c.SourcePurchaseId = p.Id
+);");
                     ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_LREntries_Date ON LREntries(Date);");
                     ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_LREntries_Broker ON LREntries(Broker);");
                     ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_LREntries_CHNo ON LREntries(CHNo);");

@@ -34,6 +34,7 @@ namespace Awagaman_ERP.Models
         private DateTime? _advanceDate;
         private decimal _detention;
         private decimal _hamali;
+        private decimal _other;
         private decimal _deduction;
         private decimal _balancePaidNeft;
         private decimal _balancePaidCash;
@@ -42,6 +43,7 @@ namespace Awagaman_ERP.Models
         private string _remarks;
         private decimal _billAmount;
         private decimal _margin;
+        private int? _sourcePurchaseId;
 
         public int Id { get => _id; set { _id = value; OnPropertyChanged(); } }
         public int Sr { get => _sr; set { _sr = value; OnPropertyChanged(); } }
@@ -194,8 +196,31 @@ namespace Awagaman_ERP.Models
         [System.Xml.Serialization.XmlIgnore]
         public decimal Balance { get; set; }
 
+        [System.Xml.Serialization.XmlIgnore]
+        public decimal LHS => LorryHire + Other;
+
+        [System.Xml.Serialization.XmlIgnore]
+        public decimal ChallanBalance => LHS - LessTDS - AdvanceAmount;
+
         public decimal Detention { get => _detention; set { _detention = value; OnPropertyChanged(); if (!_suppressCalculations) RecalculateBalance(); } }
         public decimal Hamali { get => _hamali; set { _hamali = value; OnPropertyChanged(); if (!_suppressCalculations) RecalculateBalance(); } }
+        public decimal Other
+        {
+            get => _other;
+            set
+            {
+                if (_other != value)
+                {
+                    _other = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(LHS));
+                    OnPropertyChanged(nameof(ChallanBalance));
+                    OnPropertyChanged(nameof(ChallanDue));
+                    OnPropertyChanged(nameof(ChallanMargin));
+                    if (!_suppressCalculations) RecalculateBalance();
+                }
+            }
+        }
         public decimal Deduction
         {
             get => _deduction;
@@ -222,10 +247,17 @@ namespace Awagaman_ERP.Models
         [System.Xml.Serialization.XmlIgnore]
         public decimal Due { get; set; }
 
+        [System.Xml.Serialization.XmlIgnore]
+        public decimal ChallanDue => (ChallanBalance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash;
+
         public string PaidTo { get => _paidTo; set { _paidTo = value; OnPropertyChanged(); } }
         public string Remarks { get => _remarks; set { _remarks = value; OnPropertyChanged(); } }
         public decimal BillAmount { get => _billAmount; set { _billAmount = value; OnPropertyChanged(); } }
         public decimal Margin { get => _margin; set { _margin = value; OnPropertyChanged(); } }
+        public int? SourcePurchaseId { get => _sourcePurchaseId; set { _sourcePurchaseId = value; OnPropertyChanged(); } }
+
+        [System.Xml.Serialization.XmlIgnore]
+        public decimal ChallanMargin => BillAmount == 0m ? 0m : BillAmount - (LHS + Detention + Hamali);
 
         [System.Xml.Serialization.XmlIgnore]
         public bool SuppressCalculations
@@ -293,6 +325,10 @@ namespace Awagaman_ERP.Models
             // Balance = Lorry Hire - Less TDS - Advance
             Balance = LorryHire - LessTDS - AdvanceAmount;
             OnPropertyChanged(nameof(Balance));
+            OnPropertyChanged(nameof(LHS));
+            OnPropertyChanged(nameof(ChallanBalance));
+            OnPropertyChanged(nameof(ChallanDue));
+            OnPropertyChanged(nameof(ChallanMargin));
             RecalculateDue();
         }
 
@@ -318,6 +354,7 @@ namespace Awagaman_ERP.Models
         {
             Due = (Balance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash;
             OnPropertyChanged(nameof(Due));
+            OnPropertyChanged(nameof(ChallanDue));
         }
 
         public ChallanEntry CloneForPersistence()
@@ -351,6 +388,7 @@ namespace Awagaman_ERP.Models
                 AdvanceDate = AdvanceDate,
                 Detention = Detention,
                 Hamali = Hamali,
+                Other = Other,
                 Deduction = Deduction,
                 BalancePaidNEFT = BalancePaidNEFT,
                 BalancePaidCash = BalancePaidCash,
@@ -358,7 +396,8 @@ namespace Awagaman_ERP.Models
                 PaidTo = PaidTo,
                 Remarks = Remarks,
                 BillAmount = BillAmount,
-                Margin = Margin
+                Margin = Margin,
+                SourcePurchaseId = SourcePurchaseId
             };
             copy.Balance = Balance;
             copy.Due = Due;

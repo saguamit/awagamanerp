@@ -131,11 +131,11 @@ ORDER BY TrackingEntryId;", connection))
             {
                 if (entry.Id <= 0)
                 {
-                    entry.Id = RemoteApiClient.PostAndReadInt("api/tracking", entry);
+                    entry.Id = RemoteApiClient.PostAndReadInt("api/tracking", BuildRemotePayload(entry));
                 }
                 else
                 {
-                    RemoteApiClient.Put($"api/tracking/{entry.Id}", entry);
+                    RemoteApiClient.Put($"api/tracking/{entry.Id}", BuildRemotePayload(entry));
                 }
                 return;
             }
@@ -253,6 +253,26 @@ SELECT last_insert_rowid();";
             command.Parameters.AddWithValue("@DispatchTime", (object)entry.DispatchTime ?? DBNull.Value);
             command.Parameters.AddWithValue("@DeliveredDate", entry.DeliveredDate.HasValue ? (object)entry.DeliveredDate.Value.ToString("o") : DBNull.Value);
             command.Parameters.AddWithValue("@DeliveredTime", (object)entry.DeliveredTime ?? DBNull.Value);
+        }
+
+        private static Dictionary<string, object> BuildRemotePayload(TrackingEntry entry)
+        {
+            return new Dictionary<string, object>
+            {
+                ["Id"] = entry.Id,
+                ["Sr"] = entry.Sr,
+                ["ChallanNo"] = entry.ChallanNo,
+                ["ChallanDate"] = entry.ChallanDate.ToString("yyyy-MM-dd"),
+                ["From"] = entry.From,
+                ["To"] = entry.To,
+                ["VehicleNo"] = entry.VehicleNo,
+                ["DriverMobile"] = entry.DriverMobile,
+                ["EwayBillTillDate"] = entry.EwayBillTillDate.HasValue ? (object)entry.EwayBillTillDate.Value.ToString("yyyy-MM-dd") : null,
+                ["DispatchDate"] = entry.DispatchDate.HasValue ? (object)entry.DispatchDate.Value.ToString("yyyy-MM-dd") : null,
+                ["DispatchTime"] = entry.DispatchTime,
+                ["DeliveredDate"] = entry.DeliveredDate.HasValue ? (object)entry.DeliveredDate.Value.ToString("yyyy-MM-dd") : null,
+                ["DeliveredTime"] = entry.DeliveredTime
+            };
         }
 
         private static DateTime ParseDate(object value, DateTime fallback)

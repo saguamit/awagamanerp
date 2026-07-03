@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Web.Script.Serialization;
 
@@ -22,18 +23,27 @@ namespace Awagaman_ERP.Data
 
         public static List<T> GetList<T>(string route)
         {
+            ApplyAuthHeader();
             var json = Client.GetStringAsync(route).GetAwaiter().GetResult();
             return Serializer.Deserialize<List<T>>(json) ?? new List<T>();
         }
 
         public static T Get<T>(string route) where T : class
         {
+            ApplyAuthHeader();
             var json = Client.GetStringAsync(route).GetAwaiter().GetResult();
+            return Serializer.Deserialize<T>(json);
+        }
+
+        public static T Post<T>(string route, object body) where T : class
+        {
+            var json = SendJson(HttpMethod.Post, route, body).GetAwaiter().GetResult();
             return Serializer.Deserialize<T>(json);
         }
 
         public static RemotePagedResult<T> GetPage<T>(string route)
         {
+            ApplyAuthHeader();
             var json = Client.GetStringAsync(route).GetAwaiter().GetResult();
             return Serializer.Deserialize<RemotePagedResult<T>>(json) ?? new RemotePagedResult<T>();
         }
@@ -56,11 +66,24 @@ namespace Awagaman_ERP.Data
 
         public static void Delete(string route)
         {
+            ApplyAuthHeader();
             Client.DeleteAsync(route).GetAwaiter().GetResult().EnsureSuccessStatusCode();
+        }
+
+        private static void ApplyAuthHeader()
+        {
+            if (string.IsNullOrWhiteSpace(AuthSession.Token))
+            {
+                Client.DefaultRequestHeaders.Authorization = null;
+                return;
+            }
+
+            Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AuthSession.Token);
         }
 
         private static async System.Threading.Tasks.Task<string> SendJson(HttpMethod method, string route, object body)
         {
+            ApplyAuthHeader();
             var json = Serializer.Serialize(body);
             using (var request = new HttpRequestMessage(method, route))
             {

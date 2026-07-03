@@ -34,6 +34,7 @@ namespace Awagaman_ERP.ViewModels
         private bool _hasAdvancedFilter => !string.IsNullOrWhiteSpace(_filterChallanNo) || !string.IsNullOrWhiteSpace(_filterLRNo) || !string.IsNullOrWhiteSpace(_filterFrom) || !string.IsNullOrWhiteSpace(_filterTo);
         private string _sortColumn = "ChallanNumber";
         private bool _sortAscending = false;
+        private bool _useLhsDerivedValues;
 
         // Exposed for the Sorting event handler to determine toggle direction
         public bool IsCurrentSortAscending
@@ -84,8 +85,44 @@ namespace Awagaman_ERP.ViewModels
 
         public string PageInfo => $"Page {CurrentPage}";
         public bool HasLoadedPage => _pageLoaded && !_countDirty;
+        public bool UseLhsDerivedValues
+        {
+            get => _useLhsDerivedValues;
+            set
+            {
+                if (SetProperty(ref _useLhsDerivedValues, value))
+                {
+                    OnPropertyChanged(nameof(TotalDue));
+                }
+            }
+        }
 
-        public decimal TotalDue => Entries.Sum(entry => entry?.Due ?? 0m);
+        public string LedgerMode
+        {
+            get => _repository?.LedgerMode ?? "Purchase";
+            set
+            {
+                if (_repository == null)
+                {
+                    return;
+                }
+
+                var mode = string.Equals(value, "Challan", StringComparison.OrdinalIgnoreCase) ? "Challan" : "Purchase";
+                if (string.Equals(_repository.LedgerMode, mode, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                _repository.LedgerMode = mode;
+                _countDirty = true;
+                _pageLoaded = false;
+                _nextPageCache = null;
+                _prevPageCache = null;
+                CurrentPage = 1;
+            }
+        }
+
+        public decimal TotalDue => Entries.Sum(entry => UseLhsDerivedValues ? (entry?.ChallanDue ?? 0m) : (entry?.Due ?? 0m));
         public int FilteredEntriesCount
         {
             get => _filteredEntriesCount;
@@ -132,6 +169,8 @@ namespace Awagaman_ERP.ViewModels
         private bool _showOwnerName = true;
         private bool _showPAN = true;
         private bool _showLorryHire = true;
+        private bool _showOther;
+        private bool _showLHS;
         private bool _showLessTDS = true;
         private bool _showAdvanceAmount = true;
         private bool _showAdvanceNEFT = true;
@@ -168,6 +207,8 @@ namespace Awagaman_ERP.ViewModels
         public bool ShowOwnerName { get => _showOwnerName; set => SetProperty(ref _showOwnerName, value); }
         public bool ShowPAN { get => _showPAN; set => SetProperty(ref _showPAN, value); }
         public bool ShowLorryHire { get => _showLorryHire; set => SetProperty(ref _showLorryHire, value); }
+        public bool ShowOther { get => _showOther; set => SetProperty(ref _showOther, value); }
+        public bool ShowLHS { get => _showLHS; set => SetProperty(ref _showLHS, value); }
         public bool ShowLessTDS { get => _showLessTDS; set => SetProperty(ref _showLessTDS, value); }
         public bool ShowAdvanceAmount { get => _showAdvanceAmount; set => SetProperty(ref _showAdvanceAmount, value); }
         public bool ShowAdvanceNEFT { get => _showAdvanceNEFT; set => SetProperty(ref _showAdvanceNEFT, value); }
@@ -236,6 +277,8 @@ namespace Awagaman_ERP.ViewModels
                 if (data.TryGetValue("ShowOwnerName", out v)) _showOwnerName = (bool)v;
                 if (data.TryGetValue("ShowPAN", out v)) _showPAN = (bool)v;
                 if (data.TryGetValue("ShowLorryHire", out v)) _showLorryHire = (bool)v;
+                if (data.TryGetValue("ShowOther", out v)) _showOther = (bool)v;
+                if (data.TryGetValue("ShowLHS", out v)) _showLHS = (bool)v;
                 if (data.TryGetValue("ShowLessTDS", out v)) _showLessTDS = (bool)v;
                 if (data.TryGetValue("ShowAdvanceAmount", out v)) _showAdvanceAmount = (bool)v;
                 if (data.TryGetValue("ShowAdvanceNEFT", out v)) _showAdvanceNEFT = (bool)v;
@@ -283,6 +326,8 @@ namespace Awagaman_ERP.ViewModels
                     ["ShowOwnerName"] = _showOwnerName,
                     ["ShowPAN"] = _showPAN,
                     ["ShowLorryHire"] = _showLorryHire,
+                    ["ShowOther"] = _showOther,
+                    ["ShowLHS"] = _showLHS,
                     ["ShowLessTDS"] = _showLessTDS,
                     ["ShowAdvanceAmount"] = _showAdvanceAmount,
                     ["ShowAdvanceNEFT"] = _showAdvanceNEFT,
@@ -345,25 +390,25 @@ namespace Awagaman_ERP.ViewModels
                 }
 
                 decimal totalDue = _hasAdvancedFilter
-                    ? _repository.GetTotalDueAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo)
+                    ? _repository.GetTotalDueAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, UseLhsDerivedValues)
                     : string.IsNullOrEmpty(_searchFilter)
-                        ? _repository.GetTotalDue()
-                        : _repository.GetTotalDue(_searchFilter);
+                        ? _repository.GetTotalDue("", UseLhsDerivedValues)
+                        : _repository.GetTotalDue(_searchFilter, UseLhsDerivedValues);
 
                 List<ChallanEntry> items;
                 if (_hasAdvancedFilter)
                 {
-                    items = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, CurrentPage, PageSize, _sortColumn, _sortAscending);
-                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, 1, PageSize, _sortColumn, _sortAscending); }
+                    items = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, CurrentPage, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues);
+                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, 1, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues); }
                 }
                 else if (string.IsNullOrEmpty(_searchFilter))
                 {
-                    items = _repository.GetPage(CurrentPage, PageSize, _sortColumn, _sortAscending);
+                    items = _repository.GetPage(CurrentPage, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues);
                 }
                 else
                 {
-                    items = _repository.Search(_searchFilter, CurrentPage, PageSize, _sortColumn, _sortAscending);
-                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.Search(_searchFilter, 1, PageSize, _sortColumn, _sortAscending); }
+                    items = _repository.Search(_searchFilter, CurrentPage, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues);
+                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.Search(_searchFilter, 1, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues); }
                 }
 
                 PagedEntries = new ObservableCollection<ChallanEntry>(items);
@@ -375,11 +420,11 @@ namespace Awagaman_ERP.ViewModels
                 if (!BackendSettings.UseRemoteApi && CurrentPage < TotalPages)
                 {
                     if (_hasAdvancedFilter)
-                        _nextPageCache = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
+                        _nextPageCache = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, CurrentPage + 1, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues);
                     else if (string.IsNullOrEmpty(_searchFilter))
-                        _nextPageCache = _repository.GetPage(CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
+                        _nextPageCache = _repository.GetPage(CurrentPage + 1, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues);
                     else
-                        _nextPageCache = _repository.Search(_searchFilter, CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
+                        _nextPageCache = _repository.Search(_searchFilter, CurrentPage + 1, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues);
                 }
                 else
                 {
@@ -474,32 +519,32 @@ namespace Awagaman_ERP.ViewModels
                 }
 
                 if (hasAdvancedFilter)
-                    result.TotalDue = _repository.GetTotalDueAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo);
+                    result.TotalDue = _repository.GetTotalDueAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, UseLhsDerivedValues);
                 else if (string.IsNullOrEmpty(searchFilter))
-                    result.TotalDue = _repository.GetTotalDue();
+                    result.TotalDue = _repository.GetTotalDue("", UseLhsDerivedValues);
                 else
-                    result.TotalDue = _repository.GetTotalDue(searchFilter);
+                    result.TotalDue = _repository.GetTotalDue(searchFilter, UseLhsDerivedValues);
 
                 if (hasAdvancedFilter)
                 {
-                    result.Items = _repository.SearchAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, requestedPage, requestedPageSize, sortColumn, sortAscending);
+                    result.Items = _repository.SearchAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, requestedPage, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
                     if (!result.Items.Any() && requestedPage > 1)
                     {
                         result.CurrentPage = 1;
-                        result.Items = _repository.SearchAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, 1, requestedPageSize, sortColumn, sortAscending);
+                        result.Items = _repository.SearchAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, 1, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
                     }
                 }
                 else if (string.IsNullOrEmpty(searchFilter))
                 {
-                    result.Items = _repository.GetPage(requestedPage, requestedPageSize, sortColumn, sortAscending);
+                    result.Items = _repository.GetPage(requestedPage, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
                 }
                 else
                 {
-                    result.Items = _repository.Search(searchFilter, requestedPage, requestedPageSize, sortColumn, sortAscending);
+                    result.Items = _repository.Search(searchFilter, requestedPage, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
                     if (!result.Items.Any() && requestedPage > 1)
                     {
                         result.CurrentPage = 1;
-                        result.Items = _repository.Search(searchFilter, 1, requestedPageSize, sortColumn, sortAscending);
+                        result.Items = _repository.Search(searchFilter, 1, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
                     }
                 }
 
@@ -742,11 +787,11 @@ namespace Awagaman_ERP.ViewModels
                 {
                     List<ChallanEntry> data;
                     if (hasAdvanced)
-                        data = _repository.SearchAdvanced(fCN, fLR, fFrom, fTo, nextPage, ps, sortColumn, sortAscending);
+                        data = _repository.SearchAdvanced(fCN, fLR, fFrom, fTo, nextPage, ps, sortColumn, sortAscending, UseLhsDerivedValues);
                     else if (hasFilter)
-                        data = _repository.Search(filter, nextPage, ps, sortColumn, sortAscending);
+                        data = _repository.Search(filter, nextPage, ps, sortColumn, sortAscending, UseLhsDerivedValues);
                     else
-                        data = _repository.GetPage(nextPage, ps, sortColumn, sortAscending);
+                        data = _repository.GetPage(nextPage, ps, sortColumn, sortAscending, UseLhsDerivedValues);
                     System.Windows.Application.Current.Dispatcher.Invoke(() => { _nextPageCache = data; });
                 });
             }

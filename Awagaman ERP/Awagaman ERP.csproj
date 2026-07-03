@@ -118,6 +118,7 @@
     <Compile Include="Data\CashBankStatementRepository.cs" />
     <Compile Include="Data\VehicleRepository.cs" />
     <Compile Include="Data\MasterDataCache.cs" />
+    <Compile Include="Data\AuthSession.cs" />
     <Compile Include="Data\RemoteApiClient.cs" />
     <Compile Include="Data\RemotePagedResult.cs" />
     <Compile Include="Data\RemoteSummaryModels.cs" />
@@ -132,6 +133,10 @@
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="LRFormWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="LoginWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
@@ -154,6 +159,10 @@
     <Compile Include="CustomDataGrid.cs" />
     <Compile Include="LRFormWindow.xaml.cs">
       <DependentUpon>LRFormWindow.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="LoginWindow.xaml.cs">
+      <DependentUpon>LoginWindow.xaml</DependentUpon>
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="MainWindow.xaml.cs">
@@ -226,6 +235,8 @@
     <Compile Include="Models\VehicleEntry.cs" />
     <Compile Include="Models\BillComment.cs" />
     <Compile Include="Models\DashboardSummary.cs" />
+    <Compile Include="Models\LhsSummaryEntry.cs" />
+    <Compile Include="Models\SecurityModels.cs" />
     <Compile Include="Properties\AssemblyInfo.cs">
       <SubType>Code</SubType>
     </Compile>

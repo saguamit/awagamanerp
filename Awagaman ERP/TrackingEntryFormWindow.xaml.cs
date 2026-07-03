@@ -2,6 +2,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Data;
 using Awagaman_ERP.Data;
 using Awagaman_ERP.Models;
 using MahApps.Metro.Controls;
@@ -14,6 +15,7 @@ namespace Awagaman_ERP
         public ObservableCollection<ReportingTrackEntry> ReportingTracks { get; } = new ObservableCollection<ReportingTrackEntry>();
 
         public TrackingEntry Entry { get; private set; }
+        public bool HasPersistedChanges { get; private set; }
 
         public TrackingEntryFormWindow(TrackingEntry entry)
         {
@@ -52,22 +54,61 @@ namespace Awagaman_ERP
         {
             FocusManager.SetFocusedElement(this, this);
             Keyboard.ClearFocus();
+            CommitTrackingBindings();
+            Entry.EwayBillTillDate = EwayBillTillDatePicker?.SelectedDate;
+            Entry.DispatchDate = DispatchDatePicker?.SelectedDate;
+            Entry.DeliveredDate = DeliveredDatePicker?.SelectedDate;
+            if (ChallanDatePicker?.SelectedDate.HasValue == true)
+            {
+                Entry.ChallanDate = ChallanDatePicker.SelectedDate.Value;
+            }
 
             try
             {
                 _repository.Upsert(Entry);
-                DialogResult = true;
-                Close();
+                HasPersistedChanges = true;
             }
             catch (Exception ex)
             {
                 MessageBox.Show("Unable to save: " + ex.Message, "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
             }
+
+            try
+            {
+                if (System.Windows.Interop.ComponentDispatcher.IsThreadModal)
+                {
+                    DialogResult = true;
+                }
+                Close();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(nameof(Save_Click), ex);
+            }
+        }
+
+        private void CommitTrackingBindings()
+        {
+            UpdateBinding(EwayBillTillDatePicker, System.Windows.Controls.DatePicker.SelectedDateProperty);
+            UpdateBinding(DispatchDatePicker, System.Windows.Controls.DatePicker.SelectedDateProperty);
+            UpdateBinding(DeliveredDatePicker, System.Windows.Controls.DatePicker.SelectedDateProperty);
+            UpdateBinding(ChallanDatePicker, System.Windows.Controls.DatePicker.SelectedDateProperty);
+        }
+
+        private static void UpdateBinding(DependencyObject target, DependencyProperty property)
+        {
+            if (target == null) return;
+            var expression = BindingOperations.GetBindingExpression(target, property);
+            expression?.UpdateSource();
         }
 
         private void Cancel_Click(object sender, RoutedEventArgs e)
         {
-            DialogResult = false;
+            if (System.Windows.Interop.ComponentDispatcher.IsThreadModal)
+            {
+                DialogResult = false;
+            }
             Close();
         }
 
@@ -96,6 +137,7 @@ namespace Awagaman_ERP
                 };
                 _repository.AddReportingTrack(track);
                 ReportingTracks.Add(track);
+                HasPersistedChanges = true;
                 ReportRemarksBox.Text = "Enter update...";
             }
             catch (Exception ex)

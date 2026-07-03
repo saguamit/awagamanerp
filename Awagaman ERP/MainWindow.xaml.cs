@@ -17,11 +17,50 @@ using MahApps.Metro.Controls;
 using System.Reflection;
 using System.Windows.Media;
 using System.Windows.Automation;
+using System.Threading;
+using System.Runtime.CompilerServices;
 
 namespace Awagaman_ERP
 {
     public partial class MainWindow : MetroWindow
     {
+        private sealed class UserAdminGridRow : INotifyPropertyChanged
+        {
+            private string _passwordDisplay = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
+            private string _viewButtonText = "View";
+            private bool _isPasswordVisible;
+            private string _actualPassword = string.Empty;
+
+            public AppUserInfo User { get; set; }
+            public int Id => User?.Id ?? 0;
+            public string Username => User?.Username ?? string.Empty;
+            public string FullName => User?.FullName ?? string.Empty;
+            public string Role => User?.Role ?? string.Empty;
+            public bool IsActive
+            {
+                get => User?.IsActive ?? false;
+                set
+                {
+                    if (User == null || User.IsActive == value) return;
+                    User.IsActive = value;
+                    OnPropertyChanged();
+                }
+            }
+            public DateTime? LastLoginUtc => User?.LastLoginUtc;
+            public DateTime? LastLoginLocal => User?.LastLoginLocal;
+            public string PasswordDisplay { get => _passwordDisplay; set { _passwordDisplay = value; OnPropertyChanged(); } }
+            public string ViewButtonText { get => _viewButtonText; set { _viewButtonText = value; OnPropertyChanged(); } }
+            public bool IsPasswordVisible { get => _isPasswordVisible; set { _isPasswordVisible = value; OnPropertyChanged(); } }
+            public string ActualPassword { get => _actualPassword; set { _actualPassword = value ?? string.Empty; OnPropertyChanged(); } }
+
+            public event PropertyChangedEventHandler PropertyChanged;
+
+            private void OnPropertyChanged([CallerMemberName] string propertyName = null)
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            }
+        }
+
         public ChallanViewModel VM => DataContext as ChallanViewModel;
         public LRLedgerViewModel LRVM { get; private set; }
         public TrackingViewModel TrackingVM { get; private set; }
@@ -32,10 +71,14 @@ namespace Awagaman_ERP
         private System.Windows.Threading.DispatcherTimer _remoteSyncTimer;
         private System.Windows.Threading.DispatcherTimer _connectionStatusTimer;
         private readonly System.Windows.Threading.DispatcherTimer _dashboardRefreshTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        private readonly ObservableCollection<TrackingEntry> _dashboardPendingDispatchEntries = new ObservableCollection<TrackingEntry>();
+        private readonly ObservableCollection<TrackingEntry> _dashboardInTransitEntries = new ObservableCollection<TrackingEntry>();
+        private int _dashboardRefreshVersion;
         private bool _connectionStatusCheckInProgress;
         private TextBox _activeSearchBox;
         private ContextMenu _lrColumnsMenu;
         private bool _onlyDueFilterEnabled;
+        private bool _isChallanLedgerMode;
         private readonly Dictionary<string, HashSet<string>> _challanHeaderFilters = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         private Style _challanFilteredHeaderStyle;
         private bool _challanHeaderDragSelecting;
@@ -111,11 +154,14 @@ namespace Awagaman_ERP
         private readonly TrackingRepository _trackingRepo = new TrackingRepository();
         private readonly PartyRepository _partyRepo = new PartyRepository();
         private readonly VehicleRepository _vehicleRepo = new VehicleRepository();
+        private const string TrackingTabBaseText = "Tracking Ledger";
         public MainWindow()
         {
             LogException("StartupTrace", new Exception("MainWindow ctor begin"));
             InitializeComponent();
             _dashboardRefreshTimer.Tick += DashboardRefreshTimer_Tick;
+            if (DashboardPendingDispatchGrid != null) DashboardPendingDispatchGrid.ItemsSource = _dashboardPendingDispatchEntries;
+            if (DashboardInTransitGrid != null) DashboardInTransitGrid.ItemsSource = _dashboardInTransitEntries;
             Closed += (s, e) =>
             {
                 _dashboardRefreshTimer.Stop();
@@ -172,6 +218,7 @@ namespace Awagaman_ERP
                 {
                     if (PageTitle != null) PageTitle.Text = "Dashboard";
                     LoadGridSettings();
+                    ApplyCurrentUserAccess();
 
                     if (LRLedgerGrid != null)
                     {
@@ -280,6 +327,40 @@ namespace Awagaman_ERP
             if (parent != null) parent.ToolTip = tooltip;
         }
 
+        private bool IsOperatorRestricted()
+        {
+            return AuthSession.IsAuthenticated && !AuthSession.IsAdmin;
+        }
+
+        private void ApplyCurrentUserAccess()
+        {
+            try
+            {
+                var restrict = IsOperatorRestricted();
+                if (SidebarImportButton != null) SidebarImportButton.Visibility = restrict ? Visibility.Collapsed : Visibility.Visible;
+                if (SidebarExportButton != null) SidebarExportButton.Visibility = restrict ? Visibility.Collapsed : Visibility.Visible;
+                if (SidebarReportsButton != null) SidebarReportsButton.Visibility = restrict ? Visibility.Collapsed : Visibility.Visible;
+                if (SidebarUsersButton != null) SidebarUsersButton.Visibility = restrict ? Visibility.Collapsed : Visibility.Visible;
+                if (TabPartyLedger != null) TabPartyLedger.Visibility = restrict ? Visibility.Collapsed : Visibility.Visible;
+                if (TabVehicleLedger != null) TabVehicleLedger.Visibility = restrict ? Visibility.Collapsed : Visibility.Visible;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(nameof(ApplyCurrentUserAccess), ex);
+            }
+        }
+
+        private bool EnsureAdminAccess(string featureName)
+        {
+            if (!IsOperatorRestricted())
+            {
+                return true;
+            }
+
+            MessageBox.Show(featureName + " is available only for admin users.", "Access Denied", MessageBoxButton.OK, MessageBoxImage.Information);
+            return false;
+        }
+
         private static bool HasInternetConnection()
         {
             try
@@ -384,17 +465,21 @@ namespace Awagaman_ERP
 
         private void RefreshDashboard()
         {
+            var refreshVersion = Interlocked.Increment(ref _dashboardRefreshVersion);
             Task.Run(() =>
             {
                 try
                 {
+                    int trackingReminderCount = 0;
+                    var dashboardSummaryApplied = false;
+
                     if (BackendSettings.UseRemoteApi)
                     {
                         try
                         {
                             var summary = RemoteApiClient.Get<DashboardSummary>("api/dashboard/summary");
                             ApplyDashboardSummary(summary);
-                            return;
+                            dashboardSummaryApplied = true;
                         }
                         catch (Exception summaryEx)
                         {
@@ -407,38 +492,97 @@ namespace Awagaman_ERP
                     var challans = SafeLoad(() => _challanRepo.GetAll());
                     var bills = SafeLoad(() => _billRepo.GetAll());
                     var cbsEntries = SafeLoad(() => _cbsRepo.GetAll());
+                    var trackingEntries = LoadTrackingEntriesForDashboard();
                     long dueChallans = 0;
                     decimal totalDue = 0m;
 
-                    foreach (var ch in challans)
+                    var tomorrow = DateTime.Today.AddDays(1);
+                    trackingReminderCount = trackingEntries.Count(x =>
+                        x.EwayBillTillDate.HasValue &&
+                        x.EwayBillTillDate.Value.Date <= tomorrow &&
+                        !x.DeliveredDate.HasValue);
+
+                    var pendingDispatchRows = trackingEntries
+                        .Where(x => string.Equals(x.Status, "Pending Dispatch", StringComparison.OrdinalIgnoreCase))
+                        .OrderByDescending(x => x.ChallanDate)
+                        .ThenByDescending(x => x.Id)
+                        .Take(20)
+                        .ToList();
+
+                    var inTransitRows = trackingEntries
+                        .Where(x => string.Equals(x.Status, "In Transit", StringComparison.OrdinalIgnoreCase))
+                        .OrderByDescending(x => x.DispatchDate ?? DateTime.MinValue)
+                        .ThenByDescending(x => x.Id)
+                        .Take(20)
+                        .ToList();
+
+                    if (!dashboardSummaryApplied)
                     {
-                        var due = ch.LorryHire - ch.LessTDS + ch.Detention + ch.Hamali - ch.Deduction - ch.AdvanceAmount - ch.BalancePaidNEFT - ch.BalancePaidCash;
-                        totalDue += due;
-                        if (due > 0m) dueChallans++;
+                        foreach (var ch in challans)
+                        {
+                            var due = ch.LorryHire - ch.LessTDS + ch.Detention + ch.Hamali - ch.Deduction - ch.AdvanceAmount - ch.BalancePaidNEFT - ch.BalancePaidCash;
+                            totalDue += due;
+                            if (due > 0m) dueChallans++;
+                        }
+
+                        decimal billTotalDue = bills.Sum(b => b.Freight + b.Detention + b.HML + b.OTHR + b.StCharge - b.RCVD - b.TDS - b.DED);
+                        decimal cbsBankNet = cbsEntries.Sum(x => x.BankDr - x.BankCr);
+                        decimal cbsCashNet = cbsEntries.Sum(x => x.CashDr - x.CashCr);
+                        var newBookingItems = SafeLoad(() => LoadPendingBookingItems(50));
+                        var pendingBills = SafeLoad(() => LoadPendingBillItems(30));
+
+                        DeferUi(() =>
+                        {
+                            if (refreshVersion != Volatile.Read(ref _dashboardRefreshVersion)) return;
+                            if (DashboardTotalDue != null) DashboardTotalDue.Text = $"Rs. {totalDue:N2}";
+                            if (DashboardTotalChallans != null) DashboardTotalChallans.Text = $"{dueChallans} Due Challans";
+                            if (DashboardOutstanding != null) DashboardOutstanding.Text = $"Rs. {billTotalDue:N2}";
+                            if (DashboardCBSBankNet != null) DashboardCBSBankNet.Text = $"Rs. {cbsBankNet:N2}";
+                            if (DashboardCBSCashNet != null) DashboardCBSCashNet.Text = $"Rs. {cbsCashNet:N2}";
+                            if (DashboardNewBookings != null) DashboardNewBookings.Text = newBookingItems.Count.ToString();
+                            if (DashboardBillsCard != null) DashboardBillsCard.ToolTip = $"Open pending bills window ({pendingBills.Count})";
+                            ApplyTrackingReminderCount(trackingReminderCount);
+                            ApplyDashboardTrackingTables(pendingDispatchRows, inTransitRows);
+                        });
                     }
-
-                    decimal billTotalDue = bills.Sum(b => b.Freight + b.Detention + b.HML + b.OTHR + b.StCharge - b.RCVD - b.TDS - b.DED);
-                    decimal cbsBankNet = cbsEntries.Sum(x => x.BankDr - x.BankCr);
-                    decimal cbsCashNet = cbsEntries.Sum(x => x.CashDr - x.CashCr);
-                    var newBookingItems = SafeLoad(() => LoadPendingBookingItems(50));
-                    var pendingBills = SafeLoad(() => LoadPendingBillItems(30));
-
-                    DeferUi(() =>
+                    else
                     {
-                        if (DashboardTotalDue != null) DashboardTotalDue.Text = $"Rs. {totalDue:N2}";
-                        if (DashboardTotalChallans != null) DashboardTotalChallans.Text = $"{dueChallans} Due Challans";
-                        if (DashboardOutstanding != null) DashboardOutstanding.Text = $"Rs. {billTotalDue:N2}";
-                        if (DashboardCBSBankNet != null) DashboardCBSBankNet.Text = $"Rs. {cbsBankNet:N2}";
-                        if (DashboardCBSCashNet != null) DashboardCBSCashNet.Text = $"Rs. {cbsCashNet:N2}";
-                        if (DashboardNewBookings != null) DashboardNewBookings.Text = newBookingItems.Count.ToString();
-                        if (DashboardBillsCard != null) DashboardBillsCard.ToolTip = $"Open pending bills window ({pendingBills.Count})";
-                    });
+                        DeferUi(() =>
+                        {
+                            if (refreshVersion != Volatile.Read(ref _dashboardRefreshVersion)) return;
+                            ApplyTrackingReminderCount(trackingReminderCount);
+                            ApplyDashboardTrackingTables(pendingDispatchRows, inTransitRows);
+                        });
+                    }
                 }
                 catch (Exception ex)
                 {
                     LogException(nameof(RefreshDashboard), ex);
                 }
             });
+        }
+
+        private List<TrackingEntry> LoadTrackingEntriesForDashboard()
+        {
+            var trackingEntries = SafeLoad(() => _trackingRepo.GetAll()) ?? new List<TrackingEntry>();
+
+            try
+            {
+                var latestReports = _trackingRepo.GetLatestReportForAll() ?? new Dictionary<int, string>();
+                foreach (var entry in trackingEntries)
+                {
+                    if (latestReports.TryGetValue(entry.Id, out var latestReport))
+                    {
+                        entry.LatestReport = latestReport;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogException(nameof(LoadTrackingEntriesForDashboard), ex);
+            }
+
+            return trackingEntries;
         }
 
         private void QueueDashboardRefresh()
@@ -473,6 +617,105 @@ namespace Awagaman_ERP
                 if (DashboardNewBookings != null) DashboardNewBookings.Text = summary.NewBookingCount.ToString();
                 if (DashboardBillsCard != null) DashboardBillsCard.ToolTip = $"Open pending bills window ({summary.PendingBillCount})";
             });
+        }
+
+        private void ApplyTrackingReminderCount(int reminderCount)
+        {
+            if (TabTrackingLedger == null) return;
+
+            var safeCount = Math.Max(0, reminderCount);
+            TabTrackingLedger.Content = safeCount > 0
+                ? $"{TrackingTabBaseText} ({safeCount})"
+                : TrackingTabBaseText;
+            TabTrackingLedger.ToolTip = safeCount > 0
+                ? $"{safeCount} e-way bill entr{(safeCount == 1 ? "y is" : "ies are")} expired or due by tomorrow."
+                : "No expired or near-due e-way bill reminders.";
+        }
+
+        private void RefreshTrackingReminderFromCurrentEntries()
+        {
+            try
+            {
+                if (TrackingVM?.Entries == null)
+                {
+                    ApplyTrackingReminderCount(0);
+                    return;
+                }
+
+                var tomorrow = DateTime.Today.AddDays(1).Date;
+                var reminderCount = TrackingVM.Entries.Count(x =>
+                    x.EwayBillTillDate.HasValue &&
+                    x.EwayBillTillDate.Value.Date <= tomorrow &&
+                    !x.DeliveredDate.HasValue);
+
+                ApplyTrackingReminderCount(reminderCount);
+            }
+            catch (Exception ex)
+            {
+                LogException(nameof(RefreshTrackingReminderFromCurrentEntries), ex);
+            }
+        }
+
+        private void ApplyDashboardTrackingTables(IList<TrackingEntry> pendingDispatchRows, IList<TrackingEntry> inTransitRows)
+        {
+            if (DashboardPendingDispatchCount != null)
+            {
+                DashboardPendingDispatchCount.Text = (pendingDispatchRows?.Count ?? 0).ToString();
+            }
+
+            if (DashboardInTransitCount != null)
+            {
+                DashboardInTransitCount.Text = (inTransitRows?.Count ?? 0).ToString();
+            }
+
+            _dashboardPendingDispatchEntries.Clear();
+            if (pendingDispatchRows != null)
+            {
+                foreach (var row in pendingDispatchRows)
+                {
+                    _dashboardPendingDispatchEntries.Add(row);
+                }
+            }
+
+            _dashboardInTransitEntries.Clear();
+            if (inTransitRows != null)
+            {
+                foreach (var row in inTransitRows)
+                {
+                    _dashboardInTransitEntries.Add(row);
+                }
+            }
+        }
+
+        private void RefreshDashboardTrackingTablesFromCurrentEntries()
+        {
+            try
+            {
+                var trackingEntries = TrackingVM?.Entries?.ToList() ?? new List<TrackingEntry>();
+
+                var pendingDispatchRows = trackingEntries
+                    .Where(x => string.Equals(x.Status, "Pending Dispatch", StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(x => x.ChallanDate)
+                    .ThenByDescending(x => x.Id)
+                    .Take(20)
+                    .ToList();
+
+                var inTransitRows = trackingEntries
+                    .Where(x => string.Equals(x.Status, "In Transit", StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(x => x.DispatchDate ?? DateTime.MinValue)
+                    .ThenByDescending(x => x.Id)
+                    .Take(20)
+                    .ToList();
+
+                ApplyDashboardTrackingTables(pendingDispatchRows, inTransitRows);
+
+                if (DashboardPendingDispatchGrid != null) DashboardPendingDispatchGrid.Items.Refresh();
+                if (DashboardInTransitGrid != null) DashboardInTransitGrid.Items.Refresh();
+            }
+            catch (Exception ex)
+            {
+                LogException(nameof(RefreshDashboardTrackingTablesFromCurrentEntries), ex);
+            }
         }
 
         private static List<T> SafeLoad<T>(Func<List<T>> loader)
@@ -763,6 +1006,15 @@ namespace Awagaman_ERP
                 {
                     SaveBillRowsFromFormEntry(entry);
                     UpdateLRBillNo(lr.Id, entry.BillNo);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Save error: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                try
+                {
                     BillVM.RefreshAfterDelete();
                     LRVM.RefreshAfterDelete();
                     BillUpdatePageUI();
@@ -770,7 +1022,10 @@ namespace Awagaman_ERP
                     RefreshDashboard();
                     afterSaved?.Invoke();
                 }
-                catch (Exception ex) { MessageBox.Show("Save error: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); }
+                catch (Exception ex)
+                {
+                    LogException(nameof(OpenBillFormFromPendingLr), ex);
+                }
             };
             form.Show();
         }
@@ -1400,6 +1655,7 @@ namespace Awagaman_ERP
                 TabBillLedger.Style = (Style)FindResource("ActiveTabButtonStyle");
                 TabDashboard.Style = (Style)FindResource("TabButtonStyle");
                 TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle");
+                TabChallan.Style = (Style)FindResource("TabButtonStyle");
                 TabLRLedger.Style = (Style)FindResource("TabButtonStyle");
                 TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle");
                 TabPartyLedger.Style = (Style)FindResource("TabButtonStyle");
@@ -1446,13 +1702,25 @@ namespace Awagaman_ERP
                 {
                     SaveBillRowsFromFormEntry(entry);
                     SyncLREntriesFromBillNo(entry?.BillNo);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Save error: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                try
+                {
                     LRVM.RefreshAfterDelete();
                     SyncAllChallanBillingFromLR();
                     BillVM.RefreshAfterDelete();
                     LRUpdatePageUI();
                     BillUpdatePageUI();
                 }
-                catch (Exception ex) { MessageBox.Show("Save error: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); }
+                catch (Exception ex)
+                {
+                    LogException(nameof(OpenBillForm_Click), ex);
+                }
             };
             form.Show();
         }
@@ -1582,13 +1850,24 @@ namespace Awagaman_ERP
                         if (lr.Id <= 0) continue;
                         UpdateLRBillNo(lr.Id, entry.BillNo);
                     }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Save error: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
 
+                try
+                {
                     LRVM.RefreshAfterDelete();
                     BillVM.RefreshAfterDelete();
                     LRUpdatePageUI();
                     BillUpdatePageUI();
                 }
-                catch (Exception ex) { MessageBox.Show("Save error: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); }
+                catch (Exception ex)
+                {
+                    LogException(nameof(CreateBillFromLR_Click), ex);
+                }
             };
             form.Show();
         }
@@ -1731,6 +2010,7 @@ namespace Awagaman_ERP
 
         private void OpenPartyLedgerTab_Click(object sender, RoutedEventArgs e)
         {
+            if (!EnsureAdminAccess("Party Ledger")) return;
             HideUtilityViews();
             DashboardView.Visibility = Visibility.Collapsed;
             DeliveryChallanView.Visibility = Visibility.Collapsed;
@@ -1743,6 +2023,7 @@ namespace Awagaman_ERP
             TabPartyLedger.Style = (Style)FindResource("ActiveTabButtonStyle");
             TabDashboard.Style = (Style)FindResource("TabButtonStyle");
             TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle");
+            TabChallan.Style = (Style)FindResource("TabButtonStyle");
             TabLRLedger.Style = (Style)FindResource("TabButtonStyle");
             TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle");
             TabBillLedger.Style = (Style)FindResource("TabButtonStyle");
@@ -2084,6 +2365,7 @@ namespace Awagaman_ERP
 
         private void OpenVehicleLedgerTab_Click(object sender, RoutedEventArgs e)
         {
+            if (!EnsureAdminAccess("Vehicle Ledger")) return;
             HideUtilityViews();
             DashboardView.Visibility = Visibility.Collapsed;
             DeliveryChallanView.Visibility = Visibility.Collapsed;
@@ -2099,6 +2381,7 @@ namespace Awagaman_ERP
             TabBillLedger.Style = (Style)FindResource("TabButtonStyle");
             TabDashboard.Style = (Style)FindResource("TabButtonStyle");
             TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle");
+            TabChallan.Style = (Style)FindResource("TabButtonStyle");
             TabLRLedger.Style = (Style)FindResource("TabButtonStyle");
             TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle");
             TabCBSLedger.Style = (Style)FindResource("TabButtonStyle");
@@ -2162,6 +2445,7 @@ namespace Awagaman_ERP
             TabBillLedger.Style = (Style)FindResource("TabButtonStyle");
             TabDashboard.Style = (Style)FindResource("TabButtonStyle");
             TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle");
+            TabChallan.Style = (Style)FindResource("TabButtonStyle");
             TabLRLedger.Style = (Style)FindResource("TabButtonStyle");
             TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle");
 
@@ -3118,19 +3402,6 @@ namespace Awagaman_ERP
             public CashBankStatementEntry After;
         }
 
-        private sealed class LhsSummaryRow
-        {
-            public DateTime Date { get; set; }
-            public string BrokerName { get; set; }
-            public string From { get; set; }
-            public string To { get; set; }
-            public string VehicleNumber { get; set; }
-            public decimal BankDr { get; set; }
-            public decimal BankCr { get; set; }
-            public decimal CashDr { get; set; }
-            public decimal CashCr { get; set; }
-        }
-
         private sealed class BfrsSummaryRow
         {
             public DateTime Date { get; set; }
@@ -3556,7 +3827,7 @@ namespace Awagaman_ERP
                 string activeFilterColumn = null;
                 var activeFilterValues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var currentEntries = new List<CashBankStatementEntry>();
-                var currentLhsEntries = new List<LhsSummaryRow>();
+                var currentLhsEntries = new List<LhsSummaryEntry>();
                 var currentBfrsEntries = new List<BfrsSummaryRow>();
                 var isCurrentLhs = false;
                 var isCurrentBfrs = false;
@@ -3569,7 +3840,7 @@ namespace Awagaman_ERP
                 Func<object, string, string> getValue = (rowObj, h) =>
                 {
                     if (rowObj == null) return string.Empty;
-                    if (rowObj is LhsSummaryRow lr)
+                    if (rowObj is LhsSummaryEntry lr)
                     {
                         switch ((h ?? string.Empty).Trim())
                         {
@@ -3817,7 +4088,7 @@ namespace Awagaman_ERP
                         totalCashDr.Text = string.Empty;
                         totalCashCr.Text = string.Empty;
                         currentEntries = new List<CashBankStatementEntry>();
-                        currentLhsEntries = new List<LhsSummaryRow>();
+                        currentLhsEntries = new List<LhsSummaryEntry>();
                         currentBfrsEntries = new List<BfrsSummaryRow>();
                         addEntryBtn.Content = "+ Entry";
                         addEntryBtn.ToolTip = "Add CBS entry";
@@ -3838,39 +4109,11 @@ namespace Awagaman_ERP
 
                     if (isLhs)
                     {
-                        var entries = _cbsRepo.GetAll()
-                            .Where(x => string.Equals((x.AccountName ?? string.Empty).Trim(), account, StringComparison.OrdinalIgnoreCase))
-                            .OrderByDescending(x => x.Date)
-                            .ThenByDescending(x => x.Id)
-                            .ToList();
-                        if (fromDate.HasValue)
-                            entries = entries.Where(x => x.Date.Date >= fromDate.Value).ToList();
-                        if (toDate.HasValue)
-                            entries = entries.Where(x => x.Date.Date <= toDate.Value).ToList();
-                        var challans = new ChallanRepository().GetAll();
-                        var lhsRows = entries.Select(x =>
-                        {
-                            var txt = (x.Particulars ?? string.Empty);
-                            var idx = txt.IndexOf("Challan ", StringComparison.OrdinalIgnoreCase);
-                            var chNo = idx >= 0 ? txt.Substring(idx + 8).Split(new[] { ' ', '-', '|', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() : string.Empty;
-                            var ch = challans.FirstOrDefault(c => string.Equals((c.ChallanNumber ?? string.Empty).Trim(), (chNo ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase));
-                            return new LhsSummaryRow
-                            {
-                                Date = x.Date,
-                                BrokerName = ch?.BrokerName ?? string.Empty,
-                                From = ch?.From ?? string.Empty,
-                                To = ch?.To ?? string.Empty,
-                                VehicleNumber = ch?.VehicleNumber ?? string.Empty,
-                                BankDr = x.BankDr,
-                                BankCr = x.BankCr,
-                                CashDr = x.CashDr,
-                                CashCr = x.CashCr
-                            };
-                        }).ToList();
+                        var lhsRows = _cbsRepo.GetLhsSummary(fromDate, toDate);
                         currentLhsEntries = lhsRows;
-                        currentEntries = entries;
+                        currentEntries = new List<CashBankStatementEntry>();
                         currentBfrsEntries = new List<BfrsSummaryRow>();
-                        IEnumerable<LhsSummaryRow> lhsFiltered = lhsRows;
+                        IEnumerable<LhsSummaryEntry> lhsFiltered = lhsRows;
                         if (!string.IsNullOrWhiteSpace(activeFilterColumn) && activeFilterValues.Count > 0)
                             lhsFiltered = lhsFiltered.Where(x => activeFilterValues.Contains(getValue(x, activeFilterColumn)));
                         grid.ItemsSource = lhsFiltered.ToList();
@@ -3932,7 +4175,7 @@ namespace Awagaman_ERP
 
                         currentBfrsEntries = bfrsRows;
                         currentEntries = new List<CashBankStatementEntry>();
-                        currentLhsEntries = new List<LhsSummaryRow>();
+                        currentLhsEntries = new List<LhsSummaryEntry>();
                         IEnumerable<BfrsSummaryRow> bfrsFiltered = bfrsRows;
                         if (!string.IsNullOrWhiteSpace(activeFilterColumn) && activeFilterValues.Count > 0)
                             bfrsFiltered = bfrsFiltered.Where(x => activeFilterValues.Contains(getValue(x, activeFilterColumn)));
@@ -3940,21 +4183,16 @@ namespace Awagaman_ERP
                     }
                     else
                     {
-                        var entries = _cbsRepo.GetAll()
-                            .Where(x => string.Equals((x.AccountName ?? string.Empty).Trim(), account, StringComparison.OrdinalIgnoreCase))
+                        var entries = _cbsRepo.GetByAccount(account, fromDate, toDate)
                             .OrderByDescending(x => x.Date)
                             .ThenByDescending(x => x.Id)
                             .ToList();
-                        if (fromDate.HasValue)
-                            entries = entries.Where(x => x.Date.Date >= fromDate.Value).ToList();
-                        if (toDate.HasValue)
-                            entries = entries.Where(x => x.Date.Date <= toDate.Value).ToList();
                         IEnumerable<CashBankStatementEntry> filtered = entries;
                         if (!string.IsNullOrWhiteSpace(activeFilterColumn) && activeFilterValues.Count > 0)
                             filtered = filtered.Where(x => activeFilterValues.Contains(getValue(x, activeFilterColumn)));
                         var list = filtered.ToList();
                         grid.ItemsSource = list;
-                        currentLhsEntries = new List<LhsSummaryRow>();
+                        currentLhsEntries = new List<LhsSummaryEntry>();
                         currentBfrsEntries = new List<BfrsSummaryRow>();
                         currentEntries = list;
                         totalBankDr.Text = list.Sum(x => x.BankDr).ToString("N2");
@@ -3965,7 +4203,7 @@ namespace Awagaman_ERP
                     header.Text = isBfrs ? $"Account: {account} - Bill Receipt Summary" : $"Account: {account}";
                     if (isLhs)
                     {
-                        var lhsShown = (grid.ItemsSource as IEnumerable<LhsSummaryRow>)?.ToList() ?? new List<LhsSummaryRow>();
+                        var lhsShown = (grid.ItemsSource as IEnumerable<LhsSummaryEntry>)?.ToList() ?? new List<LhsSummaryEntry>();
                         totalBankDr.Text = lhsShown.Sum(x => x.BankDr).ToString("N2");
                         totalBankCr.Text = lhsShown.Sum(x => x.BankCr).ToString("N2");
                         totalCashDr.Text = lhsShown.Sum(x => x.CashDr).ToString("N2");
@@ -4182,20 +4420,22 @@ namespace Awagaman_ERP
 
                     OpenCBSAddEntryDialog(currentAccount, refreshSelected);
                 };
-                if (!string.IsNullOrWhiteSpace(preselectAccount))
-                {
-                    var idx = accounts.FindIndex(a => string.Equals(a, preselectAccount, StringComparison.OrdinalIgnoreCase));
-                    accountList.SelectedIndex = idx >= 0 ? idx : (accounts.Count > 0 ? 0 : -1);
-                }
-                else if (accounts.Count > 0)
-                {
-                    accountList.SelectedIndex = 0;
-                }
-
                 refreshSummaryView = () => refreshSelected();
 
                 win.Content = root;
                 win.Show();
+                win.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (!string.IsNullOrWhiteSpace(preselectAccount))
+                    {
+                        var idx = accounts.FindIndex(a => string.Equals(a, preselectAccount, StringComparison.OrdinalIgnoreCase));
+                        accountList.SelectedIndex = idx >= 0 ? idx : (accounts.Count > 0 ? 0 : -1);
+                    }
+                    else if (accounts.Count > 0)
+                    {
+                        accountList.SelectedIndex = 0;
+                    }
+                }), System.Windows.Threading.DispatcherPriority.Background);
             }
             catch (Exception ex)
             {
@@ -4800,7 +5040,7 @@ namespace Awagaman_ERP
         private List<string> LoadDueBrokers()
         {
             return _challanRepo.GetAll()
-                .Where(c => (c.LorryHire - c.LessTDS - c.AdvanceAmount + c.Detention + c.Hamali + c.Deduction - c.BalancePaidNEFT - c.BalancePaidCash) > 0m)
+                .Where(c => c.ChallanDue > 0m)
                 .Select(c => (c.BrokerName ?? string.Empty).Trim())
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -4815,17 +5055,17 @@ namespace Awagaman_ERP
             if (string.IsNullOrWhiteSpace(brokerKey)) return rows;
             return _challanRepo.GetAll()
                 .Where(c => string.Equals((c.BrokerName ?? string.Empty).Trim(), brokerKey, StringComparison.OrdinalIgnoreCase))
-                .Where(c => (c.LorryHire - c.LessTDS - c.AdvanceAmount + c.Detention + c.Hamali + c.Deduction - c.BalancePaidNEFT - c.BalancePaidCash) > 0m)
+                .Where(c => c.ChallanDue > 0m)
                 .OrderByDescending(c => c.Id)
                 .Select(c => new DueChallanOption
                 {
                     Id = c.Id,
                     ChallanNo = c.ChallanNumber ?? string.Empty,
                     Broker = c.BrokerName ?? string.Empty,
-                    LorryHire = c.LorryHire,
+                    LorryHire = c.LHS,
                     Advance = c.AdvanceAmount,
                     BalancePaid = c.BalancePaidNEFT + c.BalancePaidCash,
-                    Due = c.LorryHire - c.LessTDS - c.AdvanceAmount + c.Detention + c.Hamali + c.Deduction - c.BalancePaidNEFT - c.BalancePaidCash
+                    Due = c.ChallanDue
                 })
                 .ToList();
         }
@@ -5889,12 +6129,94 @@ namespace Awagaman_ERP
         {
             try
             {
+                if (!EnsureAdminAccess("Reports")) return;
                 ShowReportsHubInMain();
             }
             catch (Exception ex)
             {
                 MessageBox.Show("Unable to open reports: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private void OpenUsers_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (!EnsureAdminAccess("User Management")) return;
+                ShowUsersHubInMain();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(nameof(OpenUsers_Click), ex);
+                MessageBox.Show("Unable to open users: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void OpenExportHub_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (!EnsureAdminAccess("Exports")) return;
+                ShowExportHubInMain();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(nameof(OpenExportHub_Click), ex);
+                MessageBox.Show("Unable to open exports: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void ShowExportHubInMain()
+        {
+            ShowUtilityView(ExportView, "Exports");
+            if (ExportContentHost == null) return;
+
+            var root = new Grid { Margin = new Thickness(18) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            root.Children.Add(BuildInlinePageHeader(
+                "Ledger Export Hub",
+                "Export any ledger into Excel-ready CSV format. Each export uses the full ledger dataset from the current source, not only the visible page."));
+
+            var note = new Border
+            {
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F8FAFC")),
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D8E1EE")),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(14),
+                Margin = new Thickness(0, 12, 0, 0),
+                Child = new TextBlock
+                {
+                    Text = "File format: CSV with UTF-8 encoding. These files open directly in Microsoft Excel and are suitable for backup, reconciliation, or sharing.",
+                    FontSize = 12,
+                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#475569")),
+                    TextWrapping = TextWrapping.Wrap
+                }
+            };
+            Grid.SetRow(note, 1);
+            root.Children.Add(note);
+
+            var actions = new UniformGrid
+            {
+                Columns = 2,
+                Margin = new Thickness(0, 16, 0, 0)
+            };
+
+            actions.Children.Add(BuildExportActionCard("Challan Ledger", "Export all challan rows with transport, payment, and billing values.", "#1565C0", ExportChallanLedger_Click));
+            actions.Children.Add(BuildExportActionCard("LR Ledger", "Export all LR rows with invoice, value, charges, and bill linkage.", "#7C3AED", ExportLRLedger_Click));
+            actions.Children.Add(BuildExportActionCard("Bill Ledger", "Export all bill rows with party, LR, due, receipt, and remarks data.", "#00897B", ExportBillLedger_Click));
+            actions.Children.Add(BuildExportActionCard("CBS Entries", "Export the full cash-bank statement transaction ledger.", "#B45309", ExportCBSEntries_Click));
+            actions.Children.Add(BuildExportActionCard("CBS Accounts", "Export the CBS account master list including active status.", "#DC2626", ExportCBSAccounts_Click));
+            actions.Children.Add(BuildExportActionCard("Party Ledger", "Export billing party name, address, and GST details.", "#2563EB", ExportPartyLedger_Click));
+            actions.Children.Add(BuildExportActionCard("Vehicle Ledger", "Export vehicle master data used for suggestions and autofill.", "#0F766E", ExportVehicleLedger_Click));
+            actions.Children.Add(BuildExportActionCard("Tracking Ledger", "Export dispatch, delivery, e-way, and latest update details.", "#9333EA", ExportTrackingLedger_Click));
+
+            Grid.SetRow(actions, 2);
+            root.Children.Add(actions);
+            ExportContentHost.Content = root;
         }
 
         private void ShowReportsHubInMain()
@@ -6037,6 +6359,387 @@ namespace Awagaman_ERP
             refresh();
         }
 
+        private void ShowUsersHubInMain()
+        {
+            ShowUtilityView(UsersView, "Users");
+            if (UsersContentHost == null) return;
+
+            var root = new Grid { Margin = new Thickness(18) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            root.Children.Add(BuildInlinePageHeader(
+                "User Management",
+                "Admin can add users, disable access, reset passwords, and review who added or updated ledger data."));
+
+            if (!AuthSession.IsAdmin)
+            {
+                var denied = new Border
+                {
+                    Margin = new Thickness(0, 12, 0, 0),
+                    Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FEF2F2")),
+                    BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FCA5A5")),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(10),
+                    Padding = new Thickness(16),
+                    Child = new TextBlock
+                    {
+                        Text = "Only admin users can open this section.",
+                        Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#991B1B")),
+                        FontSize = 13
+                    }
+                };
+                Grid.SetRow(denied, 1);
+                Grid.SetRowSpan(denied, 3);
+                root.Children.Add(denied);
+                UsersContentHost.Content = root;
+                return;
+            }
+
+            var toolbar = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var addButton = CreateInlineActionButton("Add User", "#1565C0", 110);
+            var refreshButton = CreateInlineActionButton("Refresh", "#0F766E", 96);
+            var toggleButton = CreateInlineActionButton("Enable / Disable", "#7C3AED", 140);
+            var resetPasswordButton = CreateInlineActionButton("Reset Password", "#B45309", 140);
+            var deleteButton = CreateInlineActionButton("Delete User", "#C62828", 120);
+            toolbar.Children.Add(addButton);
+            toolbar.Children.Add(refreshButton);
+            toolbar.Children.Add(toggleButton);
+            toolbar.Children.Add(resetPasswordButton);
+            toolbar.Children.Add(deleteButton);
+            Grid.SetRow(toolbar, 1);
+            root.Children.Add(toolbar);
+
+            var usersGrid = new DataGrid
+            {
+                AutoGenerateColumns = false,
+                CanUserAddRows = false,
+                IsReadOnly = true,
+                Margin = new Thickness(0, 12, 0, 12),
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D8E1EE")),
+                BorderThickness = new Thickness(1)
+            };
+            usersGrid.Columns.Add(new DataGridTextColumn { Header = "Username", Binding = new Binding("Username"), Width = 140 });
+            usersGrid.Columns.Add(new DataGridTextColumn { Header = "Full Name", Binding = new Binding("FullName"), Width = 180 });
+            usersGrid.Columns.Add(new DataGridTextColumn { Header = "Role", Binding = new Binding("Role"), Width = 90 });
+            usersGrid.Columns.Add(new DataGridTextColumn { Header = "Password", Binding = new Binding("PasswordDisplay"), Width = 140 });
+            var viewPasswordColumn = new DataGridTemplateColumn { Header = "View", Width = 82 };
+            var viewPasswordFactory = new FrameworkElementFactory(typeof(Button));
+            viewPasswordFactory.SetValue(Button.WidthProperty, 64.0);
+            viewPasswordFactory.SetValue(Button.HeightProperty, 28.0);
+            viewPasswordFactory.SetValue(Button.MarginProperty, new Thickness(4, 0, 4, 0));
+            viewPasswordFactory.SetValue(Button.BackgroundProperty, new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1565C0")));
+            viewPasswordFactory.SetValue(Button.ForegroundProperty, Brushes.White);
+            viewPasswordFactory.SetValue(Button.BorderThicknessProperty, new Thickness(0));
+            viewPasswordFactory.SetBinding(Button.ContentProperty, new Binding("ViewButtonText"));
+            viewPasswordFactory.AddHandler(Button.ClickEvent, new RoutedEventHandler(delegate(object senderObj, RoutedEventArgs eArgs)
+            {
+                try
+                {
+                    var button = senderObj as Button;
+                    var row = button?.DataContext as UserAdminGridRow;
+                    if (row == null) return;
+
+                    if (row.IsPasswordVisible)
+                    {
+                        row.IsPasswordVisible = false;
+                        row.PasswordDisplay = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
+                        row.ViewButtonText = "View";
+                        return;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(row.ActualPassword))
+                    {
+                        var preview = RemoteApiClient.Get<UserPasswordPreviewResponse>("api/users/" + row.Id + "/password");
+                        if (preview == null || !preview.Available || string.IsNullOrWhiteSpace(preview.Password))
+                        {
+                            MessageBox.Show("Password preview is not available for this user yet.", "Users", MessageBoxButton.OK, MessageBoxImage.Information);
+                            return;
+                        }
+
+                        row.ActualPassword = preview.Password;
+                    }
+
+                    row.IsPasswordVisible = true;
+                    row.PasswordDisplay = row.ActualPassword;
+                    row.ViewButtonText = "Hide";
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Unable to load password: " + ex.Message, "Users", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }));
+            viewPasswordColumn.CellTemplate = new DataTemplate { VisualTree = viewPasswordFactory };
+            usersGrid.Columns.Add(viewPasswordColumn);
+            usersGrid.Columns.Add(new DataGridCheckBoxColumn { Header = "Active", Binding = new Binding("IsActive"), Width = 80 });
+            usersGrid.Columns.Add(new DataGridTextColumn { Header = "Last Login", Binding = new Binding("LastLoginLocal") { StringFormat = "dd-MM-yyyy HH:mm" }, Width = 160 });
+            Grid.SetRow(usersGrid, 2);
+            root.Children.Add(usersGrid);
+
+            var lower = new Grid();
+            lower.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            lower.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.35, GridUnitType.Star) });
+
+            var summaryGrid = new DataGrid
+            {
+                AutoGenerateColumns = false,
+                CanUserAddRows = false,
+                IsReadOnly = true,
+                Margin = new Thickness(0, 0, 10, 0),
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D8E1EE")),
+                BorderThickness = new Thickness(1)
+            };
+            summaryGrid.Columns.Add(new DataGridTextColumn { Header = "User", Binding = new Binding("Username"), Width = 120 });
+            summaryGrid.Columns.Add(new DataGridTextColumn { Header = "Full Name", Binding = new Binding("FullName"), Width = 150 });
+            summaryGrid.Columns.Add(new DataGridTextColumn { Header = "Role", Binding = new Binding("Role"), Width = 80 });
+            summaryGrid.Columns.Add(new DataGridTextColumn { Header = "Added", Binding = new Binding("AddedCount"), Width = 70 });
+            summaryGrid.Columns.Add(new DataGridTextColumn { Header = "Updated", Binding = new Binding("UpdatedCount"), Width = 80 });
+            summaryGrid.Columns.Add(new DataGridTextColumn { Header = "Deleted", Binding = new Binding("DeletedCount"), Width = 80 });
+            summaryGrid.Columns.Add(new DataGridTextColumn { Header = "Last Activity", Binding = new Binding("LastActivityLocal") { StringFormat = "dd-MM-yyyy HH:mm" }, Width = 150 });
+            Grid.SetColumn(summaryGrid, 0);
+            lower.Children.Add(summaryGrid);
+
+            var recentGrid = new DataGrid
+            {
+                AutoGenerateColumns = false,
+                CanUserAddRows = false,
+                IsReadOnly = true,
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D8E1EE")),
+                BorderThickness = new Thickness(1)
+            };
+            recentGrid.Columns.Add(new DataGridTextColumn { Header = "When", Binding = new Binding("CreatedLocal") { StringFormat = "dd-MM-yyyy HH:mm" }, Width = 140 });
+            recentGrid.Columns.Add(new DataGridTextColumn { Header = "User", Binding = new Binding("Username"), Width = 100 });
+            recentGrid.Columns.Add(new DataGridTextColumn { Header = "Area", Binding = new Binding("ActionArea"), Width = 120 });
+            recentGrid.Columns.Add(new DataGridTextColumn { Header = "Action", Binding = new Binding("ActionType"), Width = 80 });
+            recentGrid.Columns.Add(new DataGridTextColumn { Header = "Entity", Binding = new Binding("EntityKey"), Width = 110 });
+            recentGrid.Columns.Add(new DataGridTextColumn { Header = "Details", Binding = new Binding("Details"), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+            Grid.SetColumn(recentGrid, 1);
+            lower.Children.Add(recentGrid);
+
+            Grid.SetRow(lower, 3);
+            root.Children.Add(lower);
+
+            Action reload = delegate
+            {
+                usersGrid.ItemsSource = RemoteApiClient
+                    .GetList<AppUserInfo>("api/users")
+                    .Select(x => new UserAdminGridRow { User = x })
+                    .ToList();
+                summaryGrid.ItemsSource = RemoteApiClient.GetList<AuditUserSummaryEntry>("api/audit/summary");
+                recentGrid.ItemsSource = RemoteApiClient.GetList<AuditLogEntry>("api/audit/recent?take=200");
+            };
+
+            addButton.Click += delegate
+            {
+                var request = PromptCreateUser();
+                if (request == null) return;
+                RemoteApiClient.Post<object>("api/users", request);
+                reload();
+            };
+            refreshButton.Click += delegate { reload(); };
+            toggleButton.Click += delegate
+            {
+                var row = usersGrid.SelectedItem as UserAdminGridRow;
+                var user = row?.User;
+                if (user == null)
+                {
+                    MessageBox.Show("Select a user first.", "Users", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                RemoteApiClient.Put("api/users/" + user.Id + "/status", new UpdateUserStatusRequest { IsActive = !user.IsActive });
+                reload();
+            };
+            resetPasswordButton.Click += delegate
+            {
+                var row = usersGrid.SelectedItem as UserAdminGridRow;
+                var user = row?.User;
+                if (user == null)
+                {
+                    MessageBox.Show("Select a user first.", "Users", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var password = PromptPassword("Reset Password", "Enter a new password for " + user.Username);
+                if (string.IsNullOrWhiteSpace(password)) return;
+                RemoteApiClient.Put("api/users/" + user.Id + "/password", new ResetPasswordRequest { Password = password });
+                MessageBox.Show("Password updated.", "Users", MessageBoxButton.OK, MessageBoxImage.Information);
+            };
+            deleteButton.Click += delegate
+            {
+                var row = usersGrid.SelectedItem as UserAdminGridRow;
+                var user = row?.User;
+                if (user == null)
+                {
+                    MessageBox.Show("Select a user first.", "Users", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                if (MessageBox.Show("Delete user " + user.Username + "?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                {
+                    return;
+                }
+
+                RemoteApiClient.Delete("api/users/" + user.Id);
+                reload();
+            };
+
+            reload();
+            UsersContentHost.Content = root;
+        }
+
+        private CreateUserRequest PromptCreateUser()
+        {
+            var window = new Window
+            {
+                Title = "Add User",
+                Width = 460,
+                Height = 420,
+                Owner = this,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ResizeMode = ResizeMode.NoResize,
+                Background = Brushes.White
+            };
+
+            var grid = new Grid { Margin = new Thickness(18) };
+            for (int i = 0; i < 8; i++)
+            {
+                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            }
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var username = new TextBox { Height = 34, Padding = new Thickness(8, 4, 8, 4) };
+            var fullName = new TextBox { Height = 34, Padding = new Thickness(8, 4, 8, 4) };
+            var password = new PasswordBox { Height = 34, Padding = new Thickness(8, 4, 8, 4) };
+            var role = new ComboBox { Height = 34, ItemsSource = new[] { "Operator", "Admin" }, SelectedIndex = 0, Padding = new Thickness(6, 2, 6, 2) };
+            AddFormRow(grid, 0, "Username", username);
+            AddFormRow(grid, 2, "Full Name", fullName);
+            AddFormRow(grid, 4, "Password", password);
+            AddFormRow(grid, 6, "Role", role);
+
+            var buttonRow = new Grid { Margin = new Thickness(0, 20, 0, 0) };
+            buttonRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            buttonRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            buttonRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var cancel = new Button
+            {
+                Content = "Cancel",
+                Width = 100,
+                Height = 36,
+                Margin = new Thickness(0, 0, 10, 0)
+            };
+            cancel.Click += delegate { window.DialogResult = false; };
+            Grid.SetColumn(cancel, 1);
+            buttonRow.Children.Add(cancel);
+
+            var save = new Button
+            {
+                Content = "Save",
+                Width = 100,
+                Height = 36,
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1565C0")),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0)
+            };
+            save.Click += delegate { window.DialogResult = true; };
+            Grid.SetColumn(save, 2);
+            buttonRow.Children.Add(save);
+
+            Grid.SetRow(buttonRow, 9);
+            grid.Children.Add(buttonRow);
+
+            window.Content = grid;
+            if (window.ShowDialog() != true) return null;
+
+            return new CreateUserRequest
+            {
+                Username = username.Text?.Trim(),
+                FullName = fullName.Text?.Trim(),
+                Password = password.Password ?? string.Empty,
+                Role = role.SelectedItem as string ?? "Operator"
+            };
+        }
+
+        private string PromptPassword(string title, string label)
+        {
+            var window = new Window
+            {
+                Title = title,
+                Width = 430,
+                Height = 230,
+                Owner = this,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ResizeMode = ResizeMode.NoResize,
+                Background = Brushes.White
+            };
+
+            var grid = new Grid { Margin = new Thickness(18) };
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            grid.Children.Add(new TextBlock { Text = label, Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#334155")), TextWrapping = TextWrapping.Wrap });
+            var password = new PasswordBox { Height = 34, Margin = new Thickness(0, 8, 0, 0), Padding = new Thickness(8, 4, 8, 4) };
+            Grid.SetRow(password, 1);
+            grid.Children.Add(password);
+
+            var buttonRow = new Grid { Margin = new Thickness(0, 18, 0, 0) };
+            buttonRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            buttonRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            buttonRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var cancel = new Button
+            {
+                Content = "Cancel",
+                Width = 100,
+                Height = 36,
+                Margin = new Thickness(0, 0, 10, 0)
+            };
+            cancel.Click += delegate { window.DialogResult = false; };
+            Grid.SetColumn(cancel, 1);
+            buttonRow.Children.Add(cancel);
+
+            var save = new Button
+            {
+                Content = "Save",
+                Width = 100,
+                Height = 36,
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1565C0")),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0)
+            };
+            save.Click += delegate { window.DialogResult = true; };
+            Grid.SetColumn(save, 2);
+            buttonRow.Children.Add(save);
+
+            Grid.SetRow(buttonRow, 3);
+            grid.Children.Add(buttonRow);
+
+            window.Content = grid;
+            return window.ShowDialog() == true ? password.Password : null;
+        }
+
+        private void AddFormRow(Grid grid, int rowIndex, string label, Control editor)
+        {
+            var labelBlock = new TextBlock
+            {
+                Text = label,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1E293B")),
+                Margin = new Thickness(0, rowIndex == 0 ? 0 : 8, 0, 6)
+            };
+            Grid.SetRow(labelBlock, rowIndex);
+            grid.Children.Add(labelBlock);
+
+            Grid.SetRow(editor, rowIndex + 1);
+            grid.Children.Add(editor);
+        }
+
         private void ShowUtilityView(Grid targetView, string title)
         {
             if (DashboardView != null) DashboardView.Visibility = Visibility.Collapsed;
@@ -6048,7 +6751,9 @@ namespace Awagaman_ERP
             if (VehicleLedgerView != null) VehicleLedgerView.Visibility = Visibility.Collapsed;
             if (CBSLedgerView != null) CBSLedgerView.Visibility = Visibility.Collapsed;
             if (ImportGuideView != null) ImportGuideView.Visibility = Visibility.Collapsed;
+            if (ExportView != null) ExportView.Visibility = Visibility.Collapsed;
             if (ReportsView != null) ReportsView.Visibility = Visibility.Collapsed;
+            if (UsersView != null) UsersView.Visibility = Visibility.Collapsed;
 
             if (targetView != null) targetView.Visibility = Visibility.Visible;
             SetTopTabsInactive();
@@ -6058,7 +6763,9 @@ namespace Awagaman_ERP
         private void HideUtilityViews()
         {
             if (ImportGuideView != null) ImportGuideView.Visibility = Visibility.Collapsed;
+            if (ExportView != null) ExportView.Visibility = Visibility.Collapsed;
             if (ReportsView != null) ReportsView.Visibility = Visibility.Collapsed;
+            if (UsersView != null) UsersView.Visibility = Visibility.Collapsed;
         }
 
         private void SetTopTabsInactive()
@@ -6068,6 +6775,7 @@ namespace Awagaman_ERP
                 var tabStyle = (Style)FindResource("TabButtonStyle");
                 if (TabDashboard != null) TabDashboard.Style = tabStyle;
                 if (TabDeliveryChallans != null) TabDeliveryChallans.Style = tabStyle;
+                if (TabChallan != null) TabChallan.Style = tabStyle;
                 if (TabLRLedger != null) TabLRLedger.Style = tabStyle;
                 if (TabTrackingLedger != null) TabTrackingLedger.Style = tabStyle;
                 if (TabPartyLedger != null) TabPartyLedger.Style = tabStyle;
@@ -6125,6 +6833,43 @@ namespace Awagaman_ERP
                 BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand
             };
+        }
+
+        private UIElement BuildExportActionCard(string title, string description, string colorHex, RoutedEventHandler exportHandler)
+        {
+            var card = new Border
+            {
+                Background = Brushes.White,
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D8E1EE")),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(12),
+                Padding = new Thickness(16),
+                Margin = new Thickness(0, 0, 14, 14)
+            };
+
+            var stack = new StackPanel();
+            stack.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = 16,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#0F172A"))
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = description,
+                FontSize = 12,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#64748B")),
+                Margin = new Thickness(0, 6, 0, 14),
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            var button = CreateInlineActionButton("Export CSV", colorHex, 120);
+            button.Margin = new Thickness(0);
+            button.Click += exportHandler;
+            stack.Children.Add(button);
+            card.Child = stack;
+            return card;
         }
 
         private void AddMetricCard(Grid grid, int column, string label, string accent, out TextBlock valueText, out TextBlock hintText)
@@ -7647,6 +8392,7 @@ namespace Awagaman_ERP
         {
             try
             {
+                if (!EnsureAdminAccess("Imports")) return;
                 ShowImportGuideInMain();
             }
             catch (Exception ex)
@@ -7741,7 +8487,7 @@ namespace Awagaman_ERP
             sb.AppendLine("CHALLAN LEDGER CSV");
             sb.AppendLine("------------------");
             sb.AppendLine("Recommended headers:");
-            sb.AppendLine("ChallanNumber, Date, LRNumber, BrokerName, From, To, VehicleNumber, VehicleType, DriverName, DriverMobile, EngineNo, LicenceNo, PolicyNo, ChassisNo, OwnerName, PAN, LorryHire, LessTDS, AdvanceAmount, AdvanceNEFT, AdvanceCash, AdvanceDate, Detention, Hamali, Deduction, BalancePaidNEFT, BalancePaidCash, BalancePaidDate, PaidTo, Remarks, BillAmount, Margin");
+            sb.AppendLine("ChallanNumber, Date, LRNumber, BrokerName, From, To, VehicleNumber, VehicleType, DriverName, DriverMobile, EngineNo, LicenceNo, PolicyNo, ChassisNo, OwnerName, PAN, LorryHire, Other, LessTDS, AdvanceAmount, AdvanceNEFT, AdvanceCash, AdvanceDate, Detention, Hamali, Deduction, BalancePaidNEFT, BalancePaidCash, BalancePaidDate, PaidTo, Remarks, BillAmount, Margin");
             sb.AppendLine();
             sb.AppendLine("Accepted alternate names:");
             sb.AppendLine("- ChallanNumber: ChallanNo, CHALLANNO");
@@ -7751,6 +8497,7 @@ namespace Awagaman_ERP
             sb.AppendLine("- DriverName: Driver");
             sb.AppendLine("- OwnerName: Owner");
             sb.AppendLine("- AdvanceAmount: Advance");
+            sb.AppendLine("- Other: OtherAmount");
             sb.AppendLine();
 
             sb.AppendLine("LR LEDGER CSV");
@@ -7798,6 +8545,309 @@ namespace Awagaman_ERP
             sb.AppendLine("- Imported ledger rows are stored directly. If possible, prefer normal app workflows for derived data: Challan -> LR -> Bill -> Receive Bill.");
             sb.AppendLine("- For migrated old data, import Challan first, then LR, then Bill, so references like Challan No, LR No, and Bill No are available.");
             return sb.ToString();
+        }
+
+        private void ExportChallanLedger_Click(object sender, RoutedEventArgs e)
+        {
+            var repo = new ChallanRepository();
+            var rows = repo.GetAll()
+                .OrderByDescending(x => x.Sr)
+                .Select(x => new[]
+                {
+                    x.Sr.ToString(),
+                    x.ChallanNumber,
+                    FormatDate(x.Date),
+                    x.LRNumber,
+                    x.BrokerName,
+                    x.From,
+                    x.To,
+                    x.VehicleNumber,
+                    x.VehicleType,
+                    x.DriverName,
+                    x.DriverMobile,
+                    x.EngineNo,
+                    x.LicenceNo,
+                    x.PolicyNo,
+                    x.ChassisNo,
+                    x.OwnerName,
+                    x.PAN,
+                    FormatDecimal(x.LorryHire),
+                    FormatDecimal(x.Other),
+                    FormatDecimal(x.LessTDS),
+                    FormatDecimal(x.AdvanceAmount),
+                    FormatDecimal(x.AdvanceNEFT),
+                    FormatDecimal(x.AdvanceCash),
+                    FormatDate(x.AdvanceDate),
+                    FormatDecimal(x.ChallanBalance),
+                    FormatDecimal(x.Detention),
+                    FormatDecimal(x.Hamali),
+                    FormatDecimal(x.Deduction),
+                    FormatDecimal(x.ChallanDue),
+                    FormatDecimal(x.BalancePaidNEFT),
+                    FormatDecimal(x.BalancePaidCash),
+                    FormatDate(x.BalancePaidDate),
+                    x.PaidTo,
+                    x.Remarks,
+                    FormatDecimal(x.BillAmount),
+                    FormatDecimal(x.ChallanMargin)
+                });
+
+            ExportLedgerCsv(
+                "Export Challan Ledger",
+                "challan-ledger",
+                new[] { "Sr", "ChallanNumber", "Date", "LRNumber", "BrokerName", "From", "To", "VehicleNumber", "VehicleType", "DriverName", "DriverMobile", "EngineNo", "LicenceNo", "PolicyNo", "ChassisNo", "OwnerName", "PAN", "LorryHire", "Other", "LessTDS", "AdvanceAmount", "AdvanceNEFT", "AdvanceCash", "AdvanceDate", "Balance", "Detention", "Hamali", "Deduction", "Due", "BalancePaidNEFT", "BalancePaidCash", "BalancePaidDate", "PaidTo", "Remarks", "BillAmount", "Margin" },
+                rows);
+        }
+
+        private void ExportLRLedger_Click(object sender, RoutedEventArgs e)
+        {
+            var repo = new LRRepository();
+            var rows = repo.GetAll()
+                .OrderByDescending(x => x.Sr)
+                .Select(x => new[]
+                {
+                    x.Sr.ToString(),
+                    x.LRNo,
+                    FormatDate(x.Date),
+                    x.ConsignorName,
+                    x.ConsignorAddress,
+                    x.ConsignorGST,
+                    x.ConsigneeName,
+                    x.ConsigneeAddress,
+                    x.ConsigneeGST,
+                    x.From,
+                    x.To,
+                    x.VehicleNo,
+                    x.VehicleType,
+                    FormatDecimal(x.SizeL),
+                    FormatDecimal(x.SizeW),
+                    FormatDecimal(x.SizeH),
+                    FormatDecimal(x.ActualWeight),
+                    FormatDecimal(x.ChargedWeight),
+                    x.PKG.ToString(),
+                    x.PkgType,
+                    x.Description,
+                    x.Invoice,
+                    x.Value,
+                    x.CHNo,
+                    FormatDecimal(x.TotalFreight),
+                    FormatDecimal(x.Hamali),
+                    FormatDecimal(x.Detention),
+                    FormatDecimal(x.Others),
+                    FormatDecimal(x.StCharge),
+                    FormatDecimal(x.TotalBill),
+                    FormatDecimal(x.NEFT),
+                    FormatDecimal(x.CASH),
+                    FormatDecimal(x.TDS),
+                    FormatDecimal(x.Ded),
+                    FormatDecimal(x.Bal),
+                    x.BillNo,
+                    FormatDate(x.BillDate),
+                    FormatDecimal(x.BILL),
+                    x.BillParty,
+                    x.Broker,
+                    x.FrtType,
+                    x.PayType,
+                    FormatDecimal(x.Comm),
+                    x.Paid
+                });
+
+            ExportLedgerCsv(
+                "Export LR Ledger",
+                "lr-ledger",
+                new[] { "Sr", "LRNo", "Date", "ConsignorName", "ConsignorAddress", "ConsignorGST", "ConsigneeName", "ConsigneeAddress", "ConsigneeGST", "From", "To", "VehicleNo", "VehicleType", "L", "W", "H", "ActualWeight", "ChargedWeight", "PKG", "PkgType", "Description", "Invoice", "Value", "CHNo", "TotalFreight", "Hamali", "Detention", "Others", "StCharge", "TotalBill", "NEFT", "CASH", "TDS", "Ded", "Bal", "BillNo", "BillDate", "BILL", "BillParty", "Broker", "FrtType", "PayType", "Comm", "Paid" },
+                rows);
+        }
+
+        private void ExportBillLedger_Click(object sender, RoutedEventArgs e)
+        {
+            var repo = new BillRepository();
+            var rows = repo.GetAll()
+                .OrderByDescending(x => x.Sr)
+                .Select(x => new[]
+                {
+                    x.Sr.ToString(),
+                    x.BillNo,
+                    FormatDate(x.BillDate),
+                    x.Party,
+                    x.LRNo,
+                    FormatDate(x.LRDate),
+                    x.From,
+                    x.To,
+                    x.VehicleType,
+                    FormatDecimal(x.Freight),
+                    FormatDecimal(x.Detention),
+                    FormatDecimal(x.HML),
+                    FormatDecimal(x.OTHR),
+                    FormatDecimal(x.StCharge),
+                    FormatDecimal(x.Total),
+                    FormatDecimal(x.RCVD),
+                    FormatDecimal(x.TDS),
+                    FormatDecimal(x.DED),
+                    FormatDecimal(x.Due),
+                    x.MOP,
+                    x.MR,
+                    x.Remarks,
+                    FormatDate(x.Date)
+                });
+
+            ExportLedgerCsv(
+                "Export Bill Ledger",
+                "bill-ledger",
+                new[] { "Sr", "BillNo", "BillDate", "Party", "LRNo", "LRDate", "From", "To", "VehicleType", "Freight", "Detention", "HML", "OTHR", "StCharge", "Total", "RCVD", "TDS", "DED", "Due", "MOP", "MR", "Remarks", "ReceivedDate" },
+                rows);
+        }
+
+        private void ExportCBSEntries_Click(object sender, RoutedEventArgs e)
+        {
+            var repo = new CashBankStatementRepository();
+            var rows = repo.GetAll()
+                .OrderByDescending(x => x.Sr)
+                .Select(x => new[]
+                {
+                    x.Sr.ToString(),
+                    x.CBS,
+                    FormatDate(x.Date),
+                    x.AccountName,
+                    x.Particulars,
+                    x.Remarks,
+                    FormatDecimal(x.BankDr),
+                    FormatDecimal(x.BankCr),
+                    FormatDecimal(x.CashDr),
+                    FormatDecimal(x.CashCr)
+                });
+
+            ExportLedgerCsv(
+                "Export CBS Entries",
+                "cbs-entries",
+                new[] { "Sr", "CBS", "Date", "AccountName", "Particulars", "Remarks", "BankDr", "BankCr", "CashDr", "CashCr" },
+                rows);
+        }
+
+        private void ExportCBSAccounts_Click(object sender, RoutedEventArgs e)
+        {
+            var repo = new CBSAccountRepository();
+            var rows = repo.GetAll()
+                .OrderBy(x => x.AccountName ?? string.Empty)
+                .Select(x => new[] { x.Sr.ToString(), x.AccountName, x.IsActive ? "Yes" : "No" });
+
+            ExportLedgerCsv(
+                "Export CBS Accounts",
+                "cbs-accounts",
+                new[] { "Sr", "AccountName", "IsActive" },
+                rows);
+        }
+
+        private void ExportPartyLedger_Click(object sender, RoutedEventArgs e)
+        {
+            var repo = new PartyRepository();
+            var rows = repo.GetAll()
+                .OrderBy(x => x.PartyName ?? string.Empty)
+                .Select(x => new[] { x.Sr.ToString(), x.PartyName, x.Address, x.GSTNo });
+
+            ExportLedgerCsv(
+                "Export Party Ledger",
+                "party-ledger",
+                new[] { "Sr", "PartyName", "Address", "GSTNo" },
+                rows);
+        }
+
+        private void ExportVehicleLedger_Click(object sender, RoutedEventArgs e)
+        {
+            var repo = new VehicleRepository();
+            var rows = repo.GetAll()
+                .OrderBy(x => x.VehicleNumber ?? string.Empty)
+                .Select(x => new[] { x.Sr.ToString(), x.VehicleNumber, x.OwnerName, x.PANNumber, x.EngineNumber, x.ChassisNumber, x.VehicleType });
+
+            ExportLedgerCsv(
+                "Export Vehicle Ledger",
+                "vehicle-ledger",
+                new[] { "Sr", "VehicleNumber", "OwnerName", "PANNumber", "EngineNumber", "ChassisNumber", "VehicleType" },
+                rows);
+        }
+
+        private void ExportTrackingLedger_Click(object sender, RoutedEventArgs e)
+        {
+            var repo = new TrackingRepository();
+            var rows = repo.GetAll()
+                .OrderByDescending(x => x.Sr)
+                .Select(x => new[]
+                {
+                    x.Sr.ToString(),
+                    x.ChallanNo,
+                    FormatDate(x.ChallanDate),
+                    x.From,
+                    x.To,
+                    x.VehicleNo,
+                    x.DriverMobile,
+                    FormatDate(x.EwayBillTillDate),
+                    FormatDate(x.DispatchDate),
+                    x.DispatchTime,
+                    FormatDate(x.DeliveredDate),
+                    x.DeliveredTime,
+                    x.Status,
+                    x.LatestReport
+                });
+
+            ExportLedgerCsv(
+                "Export Tracking Ledger",
+                "tracking-ledger",
+                new[] { "Sr", "ChallanNo", "ChallanDate", "From", "To", "VehicleNo", "DriverMobile", "EwayBillTillDate", "DispatchDate", "DispatchTime", "DeliveredDate", "DeliveredTime", "Status", "LatestReport" },
+                rows);
+        }
+
+        private void ExportLedgerCsv(string title, string filePrefix, IEnumerable<string> headers, IEnumerable<string[]> rows)
+        {
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = title,
+                Filter = "Excel CSV (*.csv)|*.csv",
+                DefaultExt = ".csv",
+                FileName = filePrefix + "-" + DateTime.Today.ToString("yyyyMMdd") + ".csv"
+            };
+
+            if (dialog.ShowDialog() != true) return;
+
+            try
+            {
+                var builder = new StringBuilder();
+                builder.AppendLine(string.Join(",", headers.Select(EscapeCsv)));
+                foreach (var row in rows)
+                {
+                    builder.AppendLine(string.Join(",", row.Select(EscapeCsv)));
+                }
+
+                System.IO.File.WriteAllText(dialog.FileName, builder.ToString(), new UTF8Encoding(true));
+                MessageBox.Show("Export complete:\n" + dialog.FileName, "Export", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(nameof(ExportLedgerCsv), ex);
+                MessageBox.Show("Unable to export file: " + ex.Message, "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private static string EscapeCsv(string value)
+        {
+            var text = value ?? string.Empty;
+            var mustQuote = text.Contains(",") || text.Contains("\"") || text.Contains("\r") || text.Contains("\n");
+            if (text.Contains("\"")) text = text.Replace("\"", "\"\"");
+            return mustQuote ? "\"" + text + "\"" : text;
+        }
+
+        private static string FormatDate(DateTime date)
+        {
+            return date == default(DateTime) ? string.Empty : date.ToString("dd-MM-yyyy");
+        }
+
+        private static string FormatDate(DateTime? date)
+        {
+            return date.HasValue ? date.Value.ToString("dd-MM-yyyy") : string.Empty;
+        }
+
+        private static string FormatDecimal(decimal value)
+        {
+            return value == 0m ? "0" : value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         private static DateTime? ParseNullableDateCSV(string value)
@@ -7909,6 +8959,25 @@ namespace Awagaman_ERP
 
             ApplyChallanDueFilter();
         }
+
+        private decimal GetVisibleChallanBalance(ChallanEntry entry)
+        {
+            if (entry == null) return 0m;
+            return _isChallanLedgerMode ? entry.ChallanBalance : entry.Balance;
+        }
+
+        private decimal GetVisibleChallanDue(ChallanEntry entry)
+        {
+            if (entry == null) return 0m;
+            return _isChallanLedgerMode ? entry.ChallanDue : entry.Due;
+        }
+
+        private decimal GetVisibleChallanMargin(ChallanEntry entry)
+        {
+            if (entry == null) return 0m;
+            return _isChallanLedgerMode ? entry.ChallanMargin : entry.Margin;
+        }
+
         private void RefreshFilteredSummary()
         {
             if (VM == null) return;
@@ -7932,7 +9001,7 @@ namespace Awagaman_ERP
 
             var summaryRows = rows.ToList();
             VM.FilteredEntriesCount = summaryRows.Count;
-            VM.FilteredTotalDue = summaryRows.Sum(entry => entry?.Due ?? 0m);
+            VM.FilteredTotalDue = summaryRows.Sum(GetVisibleChallanDue);
 
             if (LedgerGrid != null)
             {
@@ -7951,7 +9020,7 @@ namespace Awagaman_ERP
         private bool ChallanMatchesVisibleFilters(ChallanEntry ce)
         {
             if (ce == null) return false;
-            if (_onlyDueFilterEnabled && ce.Due <= 0m) return false;
+            if (_onlyDueFilterEnabled && GetVisibleChallanDue(ce) <= 0m) return false;
 
             foreach (var kv in _challanHeaderFilters)
             {
@@ -7980,11 +9049,17 @@ namespace Awagaman_ERP
                     case "Lorry Hire":
                         if (!selectedSet.Contains(ce.LorryHire.ToString("N2"))) return false;
                         break;
+                    case "Other":
+                        if (!selectedSet.Contains(ce.Other.ToString("N2"))) return false;
+                        break;
+                    case "LHS":
+                        if (!selectedSet.Contains(ce.LHS.ToString("N2"))) return false;
+                        break;
                     case "Balance":
-                        if (!selectedSet.Contains(ce.Balance.ToString("N2"))) return false;
+                        if (!selectedSet.Contains(GetVisibleChallanBalance(ce).ToString("N2"))) return false;
                         break;
                     case "Due":
-                        if (!selectedSet.Contains(ce.Due.ToString("N2"))) return false;
+                        if (!selectedSet.Contains(GetVisibleChallanDue(ce).ToString("N2"))) return false;
                         break;
                 }
             }
@@ -8003,7 +9078,7 @@ namespace Awagaman_ERP
                 {
                     var ce = obj as ChallanEntry;
                     if (ce == null) return false;
-                    if (_onlyDueFilterEnabled && ce.Due <= 0m) return false;
+                    if (_onlyDueFilterEnabled && GetVisibleChallanDue(ce) <= 0m) return false;
 
                     foreach (var kv in _challanHeaderFilters)
                     {
@@ -8032,11 +9107,17 @@ namespace Awagaman_ERP
                             case "Lorry Hire":
                                 if (!selectedSet.Contains(ce.LorryHire.ToString("N2"))) return false;
                                 break;
+                            case "Other":
+                                if (!selectedSet.Contains(ce.Other.ToString("N2"))) return false;
+                                break;
+                            case "LHS":
+                                if (!selectedSet.Contains(ce.LHS.ToString("N2"))) return false;
+                                break;
                             case "Balance":
-                                if (!selectedSet.Contains(ce.Balance.ToString("N2"))) return false;
+                                if (!selectedSet.Contains(GetVisibleChallanBalance(ce).ToString("N2"))) return false;
                                 break;
                             case "Due":
-                                if (!selectedSet.Contains(ce.Due.ToString("N2"))) return false;
+                                if (!selectedSet.Contains(GetVisibleChallanDue(ce).ToString("N2"))) return false;
                                 break;
                         }
                     }
@@ -8321,6 +9402,8 @@ namespace Awagaman_ERP
                 case "Owner": return "OwnerName";
                 case "PAN": return "PAN";
                 case "Lorry Hire": return "LorryHire";
+                case "Other": return "Other";
+                case "LHS": return "LHS";
                 case "Less TDS": return "LessTDS";
                 case "Advance": return "AdvanceAmount";
                 case "Adv (NEFT)": return "AdvanceNEFT";
@@ -8383,7 +9466,7 @@ namespace Awagaman_ERP
             }
 
             // Numeric columns
-            if (key == "challannumber" || key == "lrnumber" || key == "sr" || key == "lorryhire" || key == "lesstds" || key == "advanceamount" ||
+            if (key == "challannumber" || key == "lrnumber" || key == "sr" || key == "lorryhire" || key == "other" || key == "lhs" || key == "lesstds" || key == "advanceamount" ||
                 key == "advanceneft" || key == "advancecash" || key == "balance" || key == "detention" ||
                 key == "hamali" || key == "deduction" || key == "balancepaidneft" || key == "balancepaidcash" ||
                 key == "due" || key == "billamount" || key == "margin")
@@ -8430,8 +9513,11 @@ namespace Awagaman_ERP
                 case "From": return rows.Select(x => (x?.From ?? string.Empty).Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x);
                 case "To": return rows.Select(x => (x?.To ?? string.Empty).Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x);
                 case "Lorry Hire": return rows.Select(x => x?.LorryHire.ToString("N2")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x);
-                case "Balance": return rows.Select(x => x?.Balance.ToString("N2")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x);
-                case "Due": return rows.Select(x => x?.Due.ToString("N2")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x);
+                case "Other": return rows.Select(x => x?.Other.ToString("N2")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x);
+                case "LHS": return rows.Select(x => x?.LHS.ToString("N2")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x);
+                case "Balance": return rows.Select(x => GetVisibleChallanBalance(x).ToString("N2")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x);
+                case "Due": return rows.Select(x => GetVisibleChallanDue(x).ToString("N2")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x);
+                case "Margin": return rows.Select(x => GetVisibleChallanMargin(x).ToString("N2")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x);
             }
             return Enumerable.Empty<string>();
         }
@@ -9111,6 +10197,425 @@ namespace Awagaman_ERP
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
+        private void LedgerGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            var source = e.OriginalSource as DependencyObject;
+            while (source != null && !(source is DataGridCell)) source = System.Windows.Media.VisualTreeHelper.GetParent(source);
+            var cell = source as DataGridCell;
+            if (cell?.Column == null) return;
+
+            var bindingPath = GetColumnBindingPath(cell.Column) ?? string.Empty;
+            var headerName = NormalizeHeaderForSort((cell.Column.Header ?? string.Empty).ToString());
+
+            bool isChallanNumber =
+                string.Equals(bindingPath, "ChallanNumber", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(headerName, "Challan No", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(headerName, "Challan No.", StringComparison.OrdinalIgnoreCase);
+
+            if (!isChallanNumber) return;
+
+            var entry = cell.DataContext as ChallanEntry;
+            if (entry == null) return;
+
+            e.Handled = true;
+            OpenChallanFormatPreview(entry, _isChallanLedgerMode);
+        }
+
+        private void OpenChallanFormatPreview(ChallanEntry entry, bool challanMode)
+        {
+            if (entry == null) return;
+
+            const double pageWidth = 559;
+            const double pageHeight = 794;
+            const double exportDpi = 180;
+
+            var dialog = new Window
+            {
+                Title = $"{(challanMode ? "Challan" : "Purchase")} View - {entry.ChallanNumber}",
+                Owner = this,
+                Width = 760,
+                Height = 900,
+                MinWidth = 680,
+                MinHeight = 760,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = Brushes.White
+            };
+
+            var root = new Grid { Margin = new Thickness(12) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            var toolbar = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
+            Grid.SetRow(toolbar, 0);
+
+            var titleBlock = new TextBlock
+            {
+                Text = $"{(challanMode ? "Challan" : "Purchase")} Slip",
+                FontSize = 18,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#0F172A")),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(titleBlock, Dock.Left);
+            toolbar.Children.Add(titleBlock);
+
+            var buttonPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            DockPanel.SetDock(buttonPanel, Dock.Right);
+
+            FrameworkElement BuildPreviewPage() => BuildChallanPrintVisual(entry, challanMode);
+
+            var printPreviewButton = new Button
+            {
+                Content = "Print Preview",
+                Margin = new Thickness(0, 0, 8, 0),
+                Padding = new Thickness(14, 6, 14, 6),
+                MinWidth = 100
+            };
+            printPreviewButton.Click += (_, __) =>
+            {
+                try
+                {
+                    var tempPdf = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"Awagaman-{entry.ChallanNumber}-{DateTime.Now:yyyyMMddHHmmss}.pdf");
+                    var visual = BuildPreviewPage();
+                    var bmp = RenderElementToBitmap(visual, pageWidth, pageHeight, exportDpi);
+                    SaveBitmapAsPdf(bmp, tempPdf, exportDpi);
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(tempPdf) { UseShellExecute = true });
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Unable to open print preview: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            };
+            buttonPanel.Children.Add(printPreviewButton);
+
+            var printButton = new Button
+            {
+                Content = "Print",
+                Margin = new Thickness(0, 0, 8, 0),
+                Padding = new Thickness(14, 6, 14, 6),
+                MinWidth = 80
+            };
+            printButton.Click += (_, __) =>
+            {
+                try
+                {
+                    var pd = new PrintDialog();
+                    if (pd.ShowDialog() == true)
+                    {
+                        var visual = BuildPreviewPage();
+                        pd.PrintVisual(visual, $"{(challanMode ? "Challan" : "Purchase")} {entry.ChallanNumber}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Unable to print: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            };
+            buttonPanel.Children.Add(printButton);
+
+            var downloadButton = new Button
+            {
+                Content = "Download PDF",
+                Margin = new Thickness(0, 0, 8, 0),
+                Padding = new Thickness(14, 6, 14, 6),
+                MinWidth = 110
+            };
+            downloadButton.Click += (_, __) =>
+            {
+                try
+                {
+                    var sfd = new Microsoft.Win32.SaveFileDialog
+                    {
+                        Filter = "PDF Files|*.pdf",
+                        FileName = $"{entry.ChallanNumber}_{(challanMode ? "challan" : "purchase")}.pdf"
+                    };
+                    if (sfd.ShowDialog() == true)
+                    {
+                        var visual = BuildPreviewPage();
+                        var bmp = RenderElementToBitmap(visual, pageWidth, pageHeight, exportDpi);
+                        SaveBitmapAsPdf(bmp, sfd.FileName, exportDpi);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Unable to download PDF: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            };
+            buttonPanel.Children.Add(downloadButton);
+
+            var closeButton = new Button
+            {
+                Content = "Close",
+                Padding = new Thickness(14, 6, 14, 6),
+                MinWidth = 80
+            };
+            closeButton.Click += (_, __) => dialog.Close();
+            buttonPanel.Children.Add(closeButton);
+
+            toolbar.Children.Add(buttonPanel);
+            root.Children.Add(toolbar);
+
+            var pageHost = new Border
+            {
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F8FAFC")),
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E2E8F0")),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(18)
+            };
+            Grid.SetRow(pageHost, 1);
+
+            var scroll = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
+
+            var fitView = new Viewbox
+            {
+                Stretch = Stretch.Uniform,
+                StretchDirection = StretchDirection.DownOnly,
+                Child = BuildPreviewPage()
+            };
+
+            scroll.Content = fitView;
+            pageHost.Child = scroll;
+            root.Children.Add(pageHost);
+
+            dialog.Content = root;
+            dialog.Show();
+        }
+
+        private FrameworkElement BuildChallanPrintVisual(ChallanEntry entry, bool challanMode)
+        {
+            const double pageWidth = 559;
+            const double pageHeight = 794;
+
+            var surface = new Border
+            {
+                Width = pageWidth,
+                Height = pageHeight,
+                Background = Brushes.White,
+                BorderBrush = Brushes.Black,
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(22)
+            };
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var titleGrid = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            titleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            titleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var titleStack = new StackPanel();
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = challanMode ? "CHALLAN VIEW" : "PURCHASE VIEW",
+                FontSize = 18,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#111827"))
+            });
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = $"Challan No.: {entry.ChallanNumber}",
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold
+            });
+            Grid.SetColumn(titleStack, 0);
+            titleGrid.Children.Add(titleStack);
+
+            var dateBlock = new TextBlock
+            {
+                Text = $"Date: {entry.Date:dd-MMM-yyyy}",
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                VerticalAlignment = VerticalAlignment.Top,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            Grid.SetColumn(dateBlock, 1);
+            titleGrid.Children.Add(dateBlock);
+            root.Children.Add(titleGrid);
+
+            Border BuildSection(string title, UIElement child, Thickness? margin = null)
+            {
+                var section = new Border
+                {
+                    BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#CBD5E1")),
+                    BorderThickness = new Thickness(1),
+                    Margin = margin ?? new Thickness(0, 0, 0, 10),
+                    Padding = new Thickness(10, 8, 10, 10)
+                };
+                var panel = new StackPanel();
+                panel.Children.Add(new TextBlock
+                {
+                    Text = title,
+                    FontSize = 12,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1E3A8A")),
+                    Margin = new Thickness(0, 0, 0, 8)
+                });
+                panel.Children.Add(child);
+                section.Child = panel;
+                return section;
+            }
+
+            Grid BuildTwoColumnDetails(params Tuple<string, string>[] items)
+            {
+                var grid = new Grid();
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                for (int i = 0; i < (items.Length + 1) / 2; i++)
+                {
+                    grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                }
+
+                for (int i = 0; i < items.Length; i++)
+                {
+                    var row = i / 2;
+                    var col = i % 2;
+                    var stack = new StackPanel { Margin = new Thickness(0, 0, col == 0 ? 14 : 0, 8) };
+                    stack.Children.Add(new TextBlock
+                    {
+                        Text = items[i].Item1,
+                        FontSize = 10,
+                        Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#64748B"))
+                    });
+                    stack.Children.Add(new TextBlock
+                    {
+                        Text = string.IsNullOrWhiteSpace(items[i].Item2) ? "-" : items[i].Item2,
+                        FontSize = 12,
+                        FontWeight = FontWeights.SemiBold,
+                        TextWrapping = TextWrapping.Wrap
+                    });
+                    Grid.SetRow(stack, row);
+                    Grid.SetColumn(stack, col);
+                    grid.Children.Add(stack);
+                }
+
+                return grid;
+            }
+
+            var tripSection = BuildSection(
+                "Trip Details",
+                BuildTwoColumnDetails(
+                    Tuple.Create("LR Number", entry.LRNumber),
+                    Tuple.Create("Broker / Agent", entry.BrokerName),
+                    Tuple.Create("From", entry.From),
+                    Tuple.Create("To", entry.To),
+                    Tuple.Create("Vehicle No.", entry.VehicleNumber),
+                    Tuple.Create("Vehicle Type", entry.VehicleType),
+                    Tuple.Create("Driver Name", entry.DriverName),
+                    Tuple.Create("Driver Mobile", entry.DriverMobile)
+                ));
+            Grid.SetRow(tripSection, 1);
+            root.Children.Add(tripSection);
+
+            var ownerSection = BuildSection(
+                "Owner Details",
+                BuildTwoColumnDetails(
+                    Tuple.Create("Owner Name", entry.OwnerName),
+                    Tuple.Create("PAN", entry.PAN),
+                    Tuple.Create("Engine No.", entry.EngineNo),
+                    Tuple.Create("Chassis No.", entry.ChassisNo),
+                    Tuple.Create("Licence No.", entry.LicenceNo),
+                    Tuple.Create("Policy No.", entry.PolicyNo)
+                ));
+            Grid.SetRow(ownerSection, 2);
+            root.Children.Add(ownerSection);
+
+            var settlementGrid = new Grid();
+            settlementGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            settlementGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var settlementRows = new List<Tuple<string, decimal>>
+            {
+                Tuple.Create("Lorry Hire", entry.LorryHire)
+            };
+
+            if (challanMode)
+            {
+                settlementRows.Add(Tuple.Create("Other", entry.Other));
+                settlementRows.Add(Tuple.Create("LHS", entry.LHS));
+            }
+
+            settlementRows.Add(Tuple.Create("Less TDS", entry.LessTDS));
+            settlementRows.Add(Tuple.Create("Advance", entry.AdvanceAmount));
+            settlementRows.Add(Tuple.Create("Detention", entry.Detention));
+            settlementRows.Add(Tuple.Create("Hamali", entry.Hamali));
+            settlementRows.Add(Tuple.Create("Deduction", entry.Deduction));
+            settlementRows.Add(Tuple.Create("Balance Paid (NEFT)", entry.BalancePaidNEFT));
+            settlementRows.Add(Tuple.Create("Balance Paid (Cash)", entry.BalancePaidCash));
+            settlementRows.Add(Tuple.Create("Balance", challanMode ? entry.ChallanBalance : entry.Balance));
+            settlementRows.Add(Tuple.Create("Due", challanMode ? entry.ChallanDue : entry.Due));
+            settlementRows.Add(Tuple.Create("Bill Amount", entry.BillAmount));
+            settlementRows.Add(Tuple.Create("Margin", challanMode ? entry.ChallanMargin : entry.Margin));
+
+            for (int i = 0; i < settlementRows.Count; i++)
+            {
+                settlementGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                var label = new TextBlock
+                {
+                    Text = settlementRows[i].Item1,
+                    Margin = new Thickness(0, 0, 10, 5),
+                    FontSize = 11,
+                    FontWeight = (settlementRows[i].Item1 == "LHS" || settlementRows[i].Item1 == "Due") ? FontWeights.Bold : FontWeights.Normal
+                };
+                var value = new TextBlock
+                {
+                    Text = settlementRows[i].Item2.ToString("N2"),
+                    Margin = new Thickness(0, 0, 0, 5),
+                    FontSize = 11,
+                    FontWeight = (settlementRows[i].Item1 == "LHS" || settlementRows[i].Item1 == "Due") ? FontWeights.Bold : FontWeights.SemiBold,
+                    HorizontalAlignment = HorizontalAlignment.Right
+                };
+                Grid.SetRow(label, i);
+                Grid.SetColumn(label, 0);
+                Grid.SetRow(value, i);
+                Grid.SetColumn(value, 1);
+                settlementGrid.Children.Add(label);
+                settlementGrid.Children.Add(value);
+            }
+
+            var settlementSection = BuildSection("Settlement", settlementGrid);
+            Grid.SetRow(settlementSection, 3);
+            root.Children.Add(settlementSection);
+
+            var remarksBorder = BuildSection(
+                "Remarks",
+                new TextBlock
+                {
+                    Text = string.IsNullOrWhiteSpace(entry.Remarks) ? "-" : entry.Remarks,
+                    FontSize = 11,
+                    TextWrapping = TextWrapping.Wrap
+                },
+                new Thickness(0, 0, 0, 0));
+            Grid.SetRow(remarksBorder, 4);
+            root.Children.Add(remarksBorder);
+
+            var footer = new TextBlock
+            {
+                Text = "Half A4 print format",
+                FontSize = 10,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#64748B")),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 10, 0, 0)
+            };
+            Grid.SetRow(footer, 5);
+            root.Children.Add(footer);
+
+            surface.Child = root;
+            return surface;
+        }
         private void SyncLinkedBillsFromLREntry(LREntry entry)
         {
             if (entry == null || string.IsNullOrWhiteSpace(entry.LRNo)) return;
@@ -9174,7 +10679,7 @@ namespace Awagaman_ERP
                     {
                         if (lrByNo.TryGetValue(lrNo, out var total)) billAmount += total;
                     }
-                    var margin = billAmount != 0m ? (billAmount - ch.LorryHire + ch.Detention + ch.Hamali) : 0m;
+                    var margin = billAmount != 0m ? (billAmount - (ch.LHS + ch.Detention + ch.Hamali)) : 0m;
                     ch.BillAmount = billAmount;
                     ch.Margin = margin;
                     _challanRepo.Upsert(ch);
@@ -9230,7 +10735,7 @@ namespace Awagaman_ERP
                     if (lrByNo.TryGetValue(lrNo, out var total)) billAmount += total;
                 }
 
-                var margin = billAmount != 0m ? (billAmount - challan.LorryHire + challan.Detention + challan.Hamali) : 0m;
+                var margin = billAmount != 0m ? (billAmount - (challan.LHS + challan.Detention + challan.Hamali)) : 0m;
                 challan.BillAmount = billAmount;
                 challan.Margin = margin;
                 _challanRepo.Upsert(challan);
@@ -9795,7 +11300,7 @@ namespace Awagaman_ERP
             e.Handled = true;
         }
 
-        private void OpenDashboard_Click(object sender, RoutedEventArgs e) { HideUtilityViews(); DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Collapsed; DashboardView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; TabDashboard.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); if (PageTitle != null) PageTitle.Text = "Dashboard"; RefreshDashboard(); }
+        private void OpenDashboard_Click(object sender, RoutedEventArgs e) { HideUtilityViews(); DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Collapsed; DashboardView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; TabDashboard.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabChallan.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); if (PageTitle != null) PageTitle.Text = "Dashboard"; RefreshDashboard(); }
         private void Refresh_Click(object sender, RoutedEventArgs e) { if (SearchBox != null) SearchBox.Text = string.Empty; if (ChallanFilterBox != null) ChallanFilterBox.Text = string.Empty; if (LRFilterBox != null) LRFilterBox.Text = string.Empty; if (FromFilterBox != null) FromFilterBox.Text = string.Empty; if (ToFilterBox != null) ToFilterBox.Text = string.Empty; _challanHeaderFilters.Clear(); _onlyDueFilterEnabled = false; if (OnlyDueButton != null) OnlyDueButton.Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#455A64")); ApplyChallanDueFilter(); if (LedgerGrid != null) LedgerGrid.UnselectAllCells(); }
         private void OnlyDueButton_Click(object sender, RoutedEventArgs e)
         {
@@ -9809,8 +11314,8 @@ namespace Awagaman_ERP
         }
         private void ShowColumnsMenu_Click(object sender, RoutedEventArgs e) { if (VM == null || !(sender is Button button)) return; _columnsMenu = BuildColumnsMenu(); _columnsMenu.PlacementTarget = button; _columnsMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom; _columnsMenu.IsOpen = true; }
         private ContextMenu BuildColumnsMenu() { var menu = new ContextMenu(); foreach (var config in GetColumnToggleConfigs()) { var item = new System.Windows.Controls.MenuItem { Header = config.Label, IsCheckable = true, IsChecked = config.GetValue(), StaysOpenOnClick = true }; item.Click += (_, __) => { config.SetValue(item.IsChecked); UpdateColumnVisibility(); }; menu.Items.Add(item); } return menu; }
-        private void UpdateColumnVisibility() { if (VM == null || LedgerGrid == null) return; foreach (var col in LedgerGrid.Columns) { var header = (col.Header ?? "").ToString(); switch (header) { case "#": col.Visibility = VM.ShowSr ? Visibility.Visible : Visibility.Collapsed; break; case "Challan No": col.Visibility = VM.ShowChallanNumber ? Visibility.Visible : Visibility.Collapsed; break; case "Date": col.Visibility = VM.ShowDate ? Visibility.Visible : Visibility.Collapsed; break; case "LR No.": col.Visibility = VM.ShowLRNumber ? Visibility.Visible : Visibility.Collapsed; break; case "Agent/Broker": col.Visibility = VM.ShowBrokerName ? Visibility.Visible : Visibility.Collapsed; break; case "From": col.Visibility = VM.ShowFrom ? Visibility.Visible : Visibility.Collapsed; break; case "To": col.Visibility = VM.ShowTo ? Visibility.Visible : Visibility.Collapsed; break; case "Vehicle No": col.Visibility = VM.ShowVehicleNumber ? Visibility.Visible : Visibility.Collapsed; break; case "Vehicle Type": col.Visibility = VM.ShowVehicleType ? Visibility.Visible : Visibility.Collapsed; break; case "Driver": col.Visibility = VM.ShowDriverName ? Visibility.Visible : Visibility.Collapsed; break; case "Driver Mobile": col.Visibility = VM.ShowDriverMobile ? Visibility.Visible : Visibility.Collapsed; break; case "Engine No": col.Visibility = VM.ShowEngineNo ? Visibility.Visible : Visibility.Collapsed; break; case "Licence": col.Visibility = VM.ShowLicenceNo ? Visibility.Visible : Visibility.Collapsed; break; case "Policy": col.Visibility = VM.ShowPolicyNo ? Visibility.Visible : Visibility.Collapsed; break; case "Chassis": col.Visibility = VM.ShowChassisNo ? Visibility.Visible : Visibility.Collapsed; break; case "Owner": col.Visibility = VM.ShowOwnerName ? Visibility.Visible : Visibility.Collapsed; break; case "PAN": col.Visibility = VM.ShowPAN ? Visibility.Visible : Visibility.Collapsed; break; case "Lorry Hire": col.Visibility = VM.ShowLorryHire ? Visibility.Visible : Visibility.Collapsed; break; case "Less TDS": col.Visibility = VM.ShowLessTDS ? Visibility.Visible : Visibility.Collapsed; break; case "Advance": col.Visibility = VM.ShowAdvanceAmount ? Visibility.Visible : Visibility.Collapsed; break; case "Adv (NEFT)": col.Visibility = VM.ShowAdvanceNEFT ? Visibility.Visible : Visibility.Collapsed; break; case "Adv (Cash)": col.Visibility = VM.ShowAdvanceCash ? Visibility.Visible : Visibility.Collapsed; break; case "Adv Date": col.Visibility = VM.ShowAdvanceDate ? Visibility.Visible : Visibility.Collapsed; break; case "Balance": col.Visibility = VM.ShowBalance ? Visibility.Visible : Visibility.Collapsed; break; case "Detention": col.Visibility = VM.ShowDetention ? Visibility.Visible : Visibility.Collapsed; break; case "Hamali": col.Visibility = VM.ShowHamali ? Visibility.Visible : Visibility.Collapsed; break; case "Deduction": col.Visibility = VM.ShowDeduction ? Visibility.Visible : Visibility.Collapsed; break; case "Bal Paid (NEFT)": col.Visibility = VM.ShowBalancePaidNEFT ? Visibility.Visible : Visibility.Collapsed; break; case "Bal Paid (Cash)": col.Visibility = VM.ShowBalancePaidCash ? Visibility.Visible : Visibility.Collapsed; break; case "Bal Paid Date": col.Visibility = VM.ShowBalancePaidDate ? Visibility.Visible : Visibility.Collapsed; break; case "Due": col.Visibility = VM.ShowDue ? Visibility.Visible : Visibility.Collapsed; break; case "Paid To": col.Visibility = VM.ShowPaidTo ? Visibility.Visible : Visibility.Collapsed; break; case "Remarks": col.Visibility = VM.ShowRemarks ? Visibility.Visible : Visibility.Collapsed; break; case "Bill Amount": col.Visibility = VM.ShowBillAmount ? Visibility.Visible : Visibility.Collapsed; break; case "Margin": col.Visibility = VM.ShowMargin ? Visibility.Visible : Visibility.Collapsed; break; } } }
-        private IEnumerable<(string Label, Func<bool> GetValue, Action<bool> SetValue)> GetColumnToggleConfigs() { yield return ("#", () => VM.ShowSr, value => VM.ShowSr = value); yield return ("Challan No", () => VM.ShowChallanNumber, value => VM.ShowChallanNumber = value); yield return ("Date", () => VM.ShowDate, value => VM.ShowDate = value); yield return ("LR No.", () => VM.ShowLRNumber, value => VM.ShowLRNumber = value); yield return ("Agent/Broker", () => VM.ShowBrokerName, value => VM.ShowBrokerName = value); yield return ("From", () => VM.ShowFrom, value => VM.ShowFrom = value); yield return ("To", () => VM.ShowTo, value => VM.ShowTo = value); yield return ("Vehicle No", () => VM.ShowVehicleNumber, value => VM.ShowVehicleNumber = value); yield return ("Vehicle Type", () => VM.ShowVehicleType, value => VM.ShowVehicleType = value); yield return ("Driver", () => VM.ShowDriverName, value => VM.ShowDriverName = value); yield return ("Driver Mobile", () => VM.ShowDriverMobile, value => VM.ShowDriverMobile = value); yield return ("Engine No", () => VM.ShowEngineNo, value => VM.ShowEngineNo = value); yield return ("Licence", () => VM.ShowLicenceNo, value => VM.ShowLicenceNo = value); yield return ("Policy", () => VM.ShowPolicyNo, value => VM.ShowPolicyNo = value); yield return ("Chassis", () => VM.ShowChassisNo, value => VM.ShowChassisNo = value); yield return ("Owner", () => VM.ShowOwnerName, value => VM.ShowOwnerName = value); yield return ("PAN", () => VM.ShowPAN, value => VM.ShowPAN = value); yield return ("Lorry Hire", () => VM.ShowLorryHire, value => VM.ShowLorryHire = value); yield return ("Less TDS", () => VM.ShowLessTDS, value => VM.ShowLessTDS = value); yield return ("Advance", () => VM.ShowAdvanceAmount, value => VM.ShowAdvanceAmount = value); yield return ("Adv (NEFT)", () => VM.ShowAdvanceNEFT, value => VM.ShowAdvanceNEFT = value); yield return ("Adv (Cash)", () => VM.ShowAdvanceCash, value => VM.ShowAdvanceCash = value); yield return ("Adv Date", () => VM.ShowAdvanceDate, value => VM.ShowAdvanceDate = value); yield return ("Balance", () => VM.ShowBalance, value => VM.ShowBalance = value); yield return ("Detention", () => VM.ShowDetention, value => VM.ShowDetention = value); yield return ("Hamali", () => VM.ShowHamali, value => VM.ShowHamali = value); yield return ("Deduction", () => VM.ShowDeduction, value => VM.ShowDeduction = value); yield return ("Bal Paid (NEFT)", () => VM.ShowBalancePaidNEFT, value => VM.ShowBalancePaidNEFT = value); yield return ("Bal Paid (Cash)", () => VM.ShowBalancePaidCash, value => VM.ShowBalancePaidCash = value); yield return ("Bal Paid Date", () => VM.ShowBalancePaidDate, value => VM.ShowBalancePaidDate = value); yield return ("Due", () => VM.ShowDue, value => VM.ShowDue = value); yield return ("Paid To", () => VM.ShowPaidTo, value => VM.ShowPaidTo = value); yield return ("Remarks", () => VM.ShowRemarks, value => VM.ShowRemarks = value); yield return ("Bill Amount", () => VM.ShowBillAmount, value => VM.ShowBillAmount = value); yield return ("Margin", () => VM.ShowMargin, value => VM.ShowMargin = value); }
+        private void UpdateColumnVisibility() { if (VM == null || LedgerGrid == null) return; foreach (var col in LedgerGrid.Columns) { var header = (col.Header ?? "").ToString(); switch (header) { case "#": col.Visibility = VM.ShowSr ? Visibility.Visible : Visibility.Collapsed; break; case "Challan No": col.Visibility = VM.ShowChallanNumber ? Visibility.Visible : Visibility.Collapsed; break; case "Date": col.Visibility = VM.ShowDate ? Visibility.Visible : Visibility.Collapsed; break; case "LR No.": col.Visibility = VM.ShowLRNumber ? Visibility.Visible : Visibility.Collapsed; break; case "Agent/Broker": col.Visibility = VM.ShowBrokerName ? Visibility.Visible : Visibility.Collapsed; break; case "From": col.Visibility = VM.ShowFrom ? Visibility.Visible : Visibility.Collapsed; break; case "To": col.Visibility = VM.ShowTo ? Visibility.Visible : Visibility.Collapsed; break; case "Vehicle No": col.Visibility = VM.ShowVehicleNumber ? Visibility.Visible : Visibility.Collapsed; break; case "Vehicle Type": col.Visibility = VM.ShowVehicleType ? Visibility.Visible : Visibility.Collapsed; break; case "Driver": col.Visibility = VM.ShowDriverName ? Visibility.Visible : Visibility.Collapsed; break; case "Driver Mobile": col.Visibility = VM.ShowDriverMobile ? Visibility.Visible : Visibility.Collapsed; break; case "Engine No": col.Visibility = VM.ShowEngineNo ? Visibility.Visible : Visibility.Collapsed; break; case "Licence": col.Visibility = VM.ShowLicenceNo ? Visibility.Visible : Visibility.Collapsed; break; case "Policy": col.Visibility = VM.ShowPolicyNo ? Visibility.Visible : Visibility.Collapsed; break; case "Chassis": col.Visibility = VM.ShowChassisNo ? Visibility.Visible : Visibility.Collapsed; break; case "Owner": col.Visibility = VM.ShowOwnerName ? Visibility.Visible : Visibility.Collapsed; break; case "PAN": col.Visibility = VM.ShowPAN ? Visibility.Visible : Visibility.Collapsed; break; case "Lorry Hire": col.Visibility = VM.ShowLorryHire ? Visibility.Visible : Visibility.Collapsed; break; case "Other": col.Visibility = VM.ShowOther ? Visibility.Visible : Visibility.Collapsed; break; case "LHS": col.Visibility = VM.ShowLHS ? Visibility.Visible : Visibility.Collapsed; break; case "Less TDS": col.Visibility = VM.ShowLessTDS ? Visibility.Visible : Visibility.Collapsed; break; case "Advance": col.Visibility = VM.ShowAdvanceAmount ? Visibility.Visible : Visibility.Collapsed; break; case "Adv (NEFT)": col.Visibility = VM.ShowAdvanceNEFT ? Visibility.Visible : Visibility.Collapsed; break; case "Adv (Cash)": col.Visibility = VM.ShowAdvanceCash ? Visibility.Visible : Visibility.Collapsed; break; case "Adv Date": col.Visibility = VM.ShowAdvanceDate ? Visibility.Visible : Visibility.Collapsed; break; case "Balance": col.Visibility = VM.ShowBalance ? Visibility.Visible : Visibility.Collapsed; break; case "Detention": col.Visibility = VM.ShowDetention ? Visibility.Visible : Visibility.Collapsed; break; case "Hamali": col.Visibility = VM.ShowHamali ? Visibility.Visible : Visibility.Collapsed; break; case "Deduction": col.Visibility = VM.ShowDeduction ? Visibility.Visible : Visibility.Collapsed; break; case "Bal Paid (NEFT)": col.Visibility = VM.ShowBalancePaidNEFT ? Visibility.Visible : Visibility.Collapsed; break; case "Bal Paid (Cash)": col.Visibility = VM.ShowBalancePaidCash ? Visibility.Visible : Visibility.Collapsed; break; case "Bal Paid Date": col.Visibility = VM.ShowBalancePaidDate ? Visibility.Visible : Visibility.Collapsed; break; case "Due": col.Visibility = VM.ShowDue ? Visibility.Visible : Visibility.Collapsed; break; case "Paid To": col.Visibility = VM.ShowPaidTo ? Visibility.Visible : Visibility.Collapsed; break; case "Remarks": col.Visibility = VM.ShowRemarks ? Visibility.Visible : Visibility.Collapsed; break; case "Bill Amount": col.Visibility = VM.ShowBillAmount ? Visibility.Visible : Visibility.Collapsed; break; case "Margin": col.Visibility = VM.ShowMargin ? Visibility.Visible : Visibility.Collapsed; break; } } }
+        private IEnumerable<(string Label, Func<bool> GetValue, Action<bool> SetValue)> GetColumnToggleConfigs() { yield return ("#", () => VM.ShowSr, value => VM.ShowSr = value); yield return ("Challan No", () => VM.ShowChallanNumber, value => VM.ShowChallanNumber = value); yield return ("Date", () => VM.ShowDate, value => VM.ShowDate = value); yield return ("LR No.", () => VM.ShowLRNumber, value => VM.ShowLRNumber = value); yield return ("Agent/Broker", () => VM.ShowBrokerName, value => VM.ShowBrokerName = value); yield return ("From", () => VM.ShowFrom, value => VM.ShowFrom = value); yield return ("To", () => VM.ShowTo, value => VM.ShowTo = value); yield return ("Vehicle No", () => VM.ShowVehicleNumber, value => VM.ShowVehicleNumber = value); yield return ("Vehicle Type", () => VM.ShowVehicleType, value => VM.ShowVehicleType = value); yield return ("Driver", () => VM.ShowDriverName, value => VM.ShowDriverName = value); yield return ("Driver Mobile", () => VM.ShowDriverMobile, value => VM.ShowDriverMobile = value); yield return ("Engine No", () => VM.ShowEngineNo, value => VM.ShowEngineNo = value); yield return ("Licence", () => VM.ShowLicenceNo, value => VM.ShowLicenceNo = value); yield return ("Policy", () => VM.ShowPolicyNo, value => VM.ShowPolicyNo = value); yield return ("Chassis", () => VM.ShowChassisNo, value => VM.ShowChassisNo = value); yield return ("Owner", () => VM.ShowOwnerName, value => VM.ShowOwnerName = value); yield return ("PAN", () => VM.ShowPAN, value => VM.ShowPAN = value); yield return ("Lorry Hire", () => VM.ShowLorryHire, value => VM.ShowLorryHire = value); yield return ("Other", () => VM.ShowOther, value => VM.ShowOther = value); yield return ("LHS", () => VM.ShowLHS, value => VM.ShowLHS = value); yield return ("Less TDS", () => VM.ShowLessTDS, value => VM.ShowLessTDS = value); yield return ("Advance", () => VM.ShowAdvanceAmount, value => VM.ShowAdvanceAmount = value); yield return ("Adv (NEFT)", () => VM.ShowAdvanceNEFT, value => VM.ShowAdvanceNEFT = value); yield return ("Adv (Cash)", () => VM.ShowAdvanceCash, value => VM.ShowAdvanceCash = value); yield return ("Adv Date", () => VM.ShowAdvanceDate, value => VM.ShowAdvanceDate = value); yield return ("Balance", () => VM.ShowBalance, value => VM.ShowBalance = value); yield return ("Detention", () => VM.ShowDetention, value => VM.ShowDetention = value); yield return ("Hamali", () => VM.ShowHamali, value => VM.ShowHamali = value); yield return ("Deduction", () => VM.ShowDeduction, value => VM.ShowDeduction = value); yield return ("Bal Paid (NEFT)", () => VM.ShowBalancePaidNEFT, value => VM.ShowBalancePaidNEFT = value); yield return ("Bal Paid (Cash)", () => VM.ShowBalancePaidCash, value => VM.ShowBalancePaidCash = value); yield return ("Bal Paid Date", () => VM.ShowBalancePaidDate, value => VM.ShowBalancePaidDate = value); yield return ("Due", () => VM.ShowDue, value => VM.ShowDue = value); yield return ("Paid To", () => VM.ShowPaidTo, value => VM.ShowPaidTo = value); yield return ("Remarks", () => VM.ShowRemarks, value => VM.ShowRemarks = value); yield return ("Bill Amount", () => VM.ShowBillAmount, value => VM.ShowBillAmount = value); yield return ("Margin", () => VM.ShowMargin, value => VM.ShowMargin = value); }
         private void OpenChallanForm_Click(object sender, RoutedEventArgs e) { OpenChallanForm(); }
         private void OpenChallanForm()
         {
@@ -9998,6 +11503,7 @@ namespace Awagaman_ERP
             TabLRLedger.Style = (Style)FindResource("ActiveTabButtonStyle");
             TabDashboard.Style = (Style)FindResource("TabButtonStyle");
             TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle");
+            TabChallan.Style = (Style)FindResource("TabButtonStyle");
             TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle");
             TabPartyLedger.Style = (Style)FindResource("TabButtonStyle");
             TabBillLedger.Style = (Style)FindResource("TabButtonStyle");
@@ -10061,8 +11567,9 @@ namespace Awagaman_ERP
                 break;
             }
         }
-        private void OpenDeliveryChallans_Click(object sender, RoutedEventArgs e)
+        private void ShowPurchaseLedger(Button activeTab, string pageTitle)
         {
+            _isChallanLedgerMode = ReferenceEquals(activeTab, TabChallan);
             HideUtilityViews();
             DashboardView.Visibility = Visibility.Collapsed;
             LRLedgerView.Visibility = Visibility.Collapsed;
@@ -10072,7 +11579,12 @@ namespace Awagaman_ERP
             BillLedgerView.Visibility = Visibility.Collapsed;
             VehicleLedgerView.Visibility = Visibility.Collapsed;
             CBSLedgerView.Visibility = Visibility.Collapsed;
-            TabDeliveryChallans.Style = (Style)FindResource("ActiveTabButtonStyle");
+            TabDeliveryChallans.Style = ReferenceEquals(activeTab, TabDeliveryChallans)
+                ? (Style)FindResource("ActiveTabButtonStyle")
+                : (Style)FindResource("TabButtonStyle");
+            TabChallan.Style = ReferenceEquals(activeTab, TabChallan)
+                ? (Style)FindResource("ActiveTabButtonStyle")
+                : (Style)FindResource("TabButtonStyle");
             TabDashboard.Style = (Style)FindResource("TabButtonStyle");
             TabLRLedger.Style = (Style)FindResource("TabButtonStyle");
             TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle");
@@ -10080,7 +11592,8 @@ namespace Awagaman_ERP
             TabBillLedger.Style = (Style)FindResource("TabButtonStyle");
             TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle");
             TabCBSLedger.Style = (Style)FindResource("TabButtonStyle");
-            if (PageTitle != null) PageTitle.Text = "Delivery Challan List";
+            if (PageTitle != null) PageTitle.Text = pageTitle;
+            ApplyPurchaseChallanMode();
 
             if (BackendSettings.UseRemoteApi)
             {
@@ -10101,14 +11614,63 @@ namespace Awagaman_ERP
             SyncAllChallanBillingFromLR();
             UpdatePageUI();
         }
-        private void OpenTrackingLedger_Click(object sender, RoutedEventArgs e) { HideUtilityViews(); DashboardView.Visibility = Visibility.Collapsed; DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; if (TrackingLedgerView.DataContext == null) TrackingLedgerView.DataContext = TrackingVM; if (TrackingLedgerGrid != null) TrackingLedgerGrid.ItemsSource = TrackingVM.Entries; if (TrackingVM != null && TrackingVM.Entries.Count == 0) TrackingVM.LoadData(); TabTrackingLedger.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDashboard.Style = (Style)FindResource("TabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count; if (PageTitle != null) PageTitle.Text = "Tracking Ledger"; }
-        private void OpenTrackingEntryForm_Click(object sender, RoutedEventArgs e) { var entry = TrackingLedgerGrid?.SelectedItem as TrackingEntry; if (entry == null) { MessageBox.Show("Select a tracking entry to edit.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information); return; } var form = new TrackingEntryFormWindow(entry); form.Owner = this; form.Closed += (_, __) => { TrackingVM.UpdateEntry(entry); var repo = new TrackingRepository(); var reports = repo.GetReportingTracks(entry.Id); if (reports.Count > 0) entry.LatestReport = $"{reports[reports.Count - 1].ReportDateTime:dd-MMM HH:mm} - {reports[reports.Count - 1].Remarks}"; RefreshDashboard(); }; form.Show(); }
+
+        private void ApplyPurchaseChallanMode()
+        {
+            if (VM != null)
+            {
+                VM.LedgerMode = _isChallanLedgerMode ? "Challan" : "Purchase";
+                VM.UseLhsDerivedValues = _isChallanLedgerMode;
+                VM.ShowOther = _isChallanLedgerMode;
+                VM.ShowLHS = _isChallanLedgerMode;
+            }
+
+            if (ChallanBalanceColumn != null)
+            {
+                ChallanBalanceColumn.Binding = new Binding(_isChallanLedgerMode ? "ChallanBalance" : "Balance")
+                {
+                    StringFormat = "N2"
+                };
+            }
+
+            if (ChallanDueColumn != null)
+            {
+                ChallanDueColumn.Binding = new Binding(_isChallanLedgerMode ? "ChallanDue" : "Due")
+                {
+                    StringFormat = "N2"
+                };
+            }
+
+            if (ChallanMarginColumn != null)
+            {
+                ChallanMarginColumn.Binding = new Binding(_isChallanLedgerMode ? "ChallanMargin" : "Margin");
+            }
+
+            UpdateColumnVisibility();
+            RefreshFilteredSummary();
+            if (LedgerGrid != null)
+                LedgerGrid.Items.Refresh();
+        }
+        private void OpenDeliveryChallans_Click(object sender, RoutedEventArgs e)
+        {
+            ShowPurchaseLedger(TabDeliveryChallans, "Purchase List");
+        }
+
+        private void OpenChallanTab_Click(object sender, RoutedEventArgs e)
+        {
+            ShowPurchaseLedger(TabChallan, "Chllan List");
+        }
+        private void OpenTrackingLedger_Click(object sender, RoutedEventArgs e) { HideUtilityViews(); DashboardView.Visibility = Visibility.Collapsed; DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; if (TrackingLedgerView.DataContext == null) TrackingLedgerView.DataContext = TrackingVM; if (TrackingLedgerGrid != null) TrackingLedgerGrid.ItemsSource = TrackingVM.Entries; if (TrackingVM != null && TrackingVM.Entries.Count == 0) TrackingVM.LoadData(); TabTrackingLedger.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDashboard.Style = (Style)FindResource("TabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabChallan.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count; RefreshTrackingReminderFromCurrentEntries(); if (PageTitle != null) PageTitle.Text = "Tracking Ledger"; }
+        private void OpenTrackingEntryForm_Click(object sender, RoutedEventArgs e) { var entry = TrackingLedgerGrid?.SelectedItem as TrackingEntry; if (entry == null) { MessageBox.Show("Select a tracking entry to edit.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information); return; } OpenTrackingEditor(entry); }
         private async void AppVersionText_MouseLeftButtonUp(object sender, MouseButtonEventArgs e) { await App.CheckForUpdatesOnDemandAsync(); }
         private void TrackingGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e) { OpenTrackingEntryForm_Click(sender, e); }
         private void TrackingLedgerGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) { }
         private void QuickReportBox_GotFocus(object sender, RoutedEventArgs e) { if (QuickReportBox.Text == "Enter report update...") QuickReportBox.Text = string.Empty; }
         private void QuickAddReport_Click(object sender, RoutedEventArgs e) { var entry = TrackingLedgerGrid?.SelectedItem as TrackingEntry; if (entry == null || entry.Id <= 0) { MessageBox.Show("Select a tracking entry first.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information); return; } var remarks = QuickReportBox.Text?.Trim(); if (string.IsNullOrWhiteSpace(remarks) || remarks == "Enter report update...") { MessageBox.Show("Enter report remarks.", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning); return; } try { var track = new ReportingTrackEntry { TrackingEntryId = entry.Id, ReportDateTime = DateTime.Now, Remarks = remarks }; new TrackingRepository().AddReportingTrack(track); entry.ReportTracks.Add(track); entry.LatestReport = $"{track.ReportDateTime:dd-MMM HH:mm} - {track.Remarks}"; QuickReportBox.Text = "Enter report update..."; } catch (Exception ex) { MessageBox.Show("Unable to add report: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
         private void ToggleTrackingDetails_Click(object sender, RoutedEventArgs e) { var button = sender as System.Windows.Controls.Button; if (button == null) return; var entry = button.DataContext as TrackingEntry; if (entry == null) return; var row = TrackingLedgerGrid?.ItemContainerGenerator.ContainerFromItem(entry) as System.Windows.Controls.DataGridRow; if (row != null) row.DetailsVisibility = row.DetailsVisibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible; }
+        private void DashboardTrackingUpdate_Click(object sender, RoutedEventArgs e) { var button = sender as Button; var entry = button?.Tag as TrackingEntry; if (entry == null) return; OpenTrackingEditor(entry); }
+        private void DashboardTrackingGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e) { var grid = sender as DataGrid; var entry = grid?.SelectedItem as TrackingEntry; if (entry == null) return; OpenTrackingEditor(entry); }
+        private void OpenTrackingEditor(TrackingEntry entry) { if (entry == null) return; var form = new TrackingEntryFormWindow(entry); form.Owner = this; form.Closed += (_, __) => { try { if (!form.HasPersistedChanges) return; TrackingVM.LoadData(); RefreshTrackingReminderFromCurrentEntries(); RefreshDashboardTrackingTablesFromCurrentEntries(); if (TrackingLedgerGrid != null) TrackingLedgerGrid.Items.Refresh(); QueueDashboardRefresh(); } catch (Exception ex) { LogException(nameof(OpenTrackingEditor), ex); } }; form.Show(); }
         private void OpenLRForm_Click(object sender, RoutedEventArgs e)
         {
             var form = new LRFormWindow(VM.Entries, LRVM.Entries);
@@ -10207,7 +11769,7 @@ namespace Awagaman_ERP
             }
             catch { }
         }
-        private void ImportChallan_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select Challan Import File" }; if (dialog.ShowDialog() != true) return; if (dialog.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) || dialog.FileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase)) { MessageBox.Show("Please export your Excel file as CSV first.", "Format Not Supported", MessageBoxButton.OK, MessageBoxImage.Information); return; } try { var lines = System.IO.File.ReadAllLines(dialog.FileName); if (lines.Length < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = SplitCsvLine(lines[0]); var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new ChallanRepository(); int imported = 0, errors = 0; int maxSr = repo.GetMaxSr(); var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = lines.Length - 1; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; var importProgress = BeginImportProgress("Importing Challans", lines.Length - 1); try { for (int i = 1; i < lines.Length; i++) { try { var parts = SplitCsvLine(lines[i]); var importedChallanNo = GetFirstCol(parts, colMap, "ChallanNumber", "ChallanNo", "CHALLANNO", "CHNo", "CHNO", "ChNo", "CH", "Challan", "CNo", "CNNo", "C/NNo", "BiltyNo", "BuiltyNo"); if (string.IsNullOrWhiteSpace(importedChallanNo)) throw new InvalidOperationException("Missing Challan No / Challan Number value in import row."); var entry = new ChallanEntry { Sr = ++maxSr, ChallanNumber = importedChallanNo, Date = ParseDate(GetCol(parts, colMap, "Date") ?? GetCol(parts, colMap, "DATE")), LRNumber = GetCol(parts, colMap, "LRNumber") ?? GetCol(parts, colMap, "LRNumber") ?? GetCol(parts, colMap, "LRNO"), BrokerName = GetCol(parts, colMap, "BrokerName") ?? GetCol(parts, colMap, "Broker"), From = GetCol(parts, colMap, "From") ?? GetCol(parts, colMap, "FROM"), To = GetCol(parts, colMap, "To") ?? GetCol(parts, colMap, "TO"), VehicleNumber = GetCol(parts, colMap, "VehicleNumber") ?? GetCol(parts, colMap, "VehicleNo") ?? GetCol(parts, colMap, "VEHICLENO"), VehicleType = GetCol(parts, colMap, "VehicleType"), DriverName = GetCol(parts, colMap, "DriverName") ?? GetCol(parts, colMap, "Driver"), DriverMobile = GetCol(parts, colMap, "DriverMobile") ?? GetCol(parts, colMap, "DriverMobile"), EngineNo = GetCol(parts, colMap, "EngineNo"), LicenceNo = GetCol(parts, colMap, "LicenceNo"), PolicyNo = GetCol(parts, colMap, "PolicyNo"), ChassisNo = GetCol(parts, colMap, "ChassisNo"), OwnerName = GetCol(parts, colMap, "OwnerName") ?? GetCol(parts, colMap, "Owner"), PAN = GetCol(parts, colMap, "PAN"), LorryHire = ParseDecimal(GetCol(parts, colMap, "LorryHire") ?? GetCol(parts, colMap, "LorryHire")), LessTDS = ParseDecimal(GetCol(parts, colMap, "LessTDS")), AdvanceAmount = ParseDecimal(GetCol(parts, colMap, "AdvanceAmount") ?? GetCol(parts, colMap, "Advance")), AdvanceNEFT = ParseDecimal(GetCol(parts, colMap, "AdvanceNEFT")), AdvanceCash = ParseDecimal(GetCol(parts, colMap, "AdvanceCash")), AdvanceDate = ParseNullableDate(GetCol(parts, colMap, "AdvanceDate")), Detention = ParseDecimal(GetCol(parts, colMap, "Detention")), Hamali = ParseDecimal(GetCol(parts, colMap, "Hamali")), Deduction = ParseDecimal(GetCol(parts, colMap, "Deduction")), BalancePaidNEFT = ParseDecimal(GetCol(parts, colMap, "BalancePaidNEFT")), BalancePaidCash = ParseDecimal(GetCol(parts, colMap, "BalancePaidCash")), BalancePaidDate = ParseNullableDate(GetCol(parts, colMap, "BalancePaidDate")), PaidTo = GetCol(parts, colMap, "PaidTo"), Remarks = GetCol(parts, colMap, "Remarks"), BillAmount = ParseDecimal(GetCol(parts, colMap, "BillAmount")), Margin = ParseDecimal(GetCol(parts, colMap, "Margin")) }; entry.SuppressCalculations = true; entry.RecalculateBalance(); repo.Upsert(entry); imported++; } catch (Exception ex) { AppLogger.LogException(nameof(ImportChallan_Click), ex); errors++; } if (progress != null) progress.Value = i; if (status != null) status.Text = $"Importing {i}/{lines.Length - 1}"; UpdateImportProgress(importProgress, i, lines.Length - 1, imported, errors); } } finally { importProgress.Dispose(); } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) { status.Text = string.Empty; status.Visibility = Visibility.Collapsed; } VM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); UpdatePageUI(); RefreshDashboard(); MessageBox.Show($"Challan import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
+        private void ImportChallan_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select Challan Import File" }; if (dialog.ShowDialog() != true) return; if (dialog.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) || dialog.FileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase)) { MessageBox.Show("Please export your Excel file as CSV first.", "Format Not Supported", MessageBoxButton.OK, MessageBoxImage.Information); return; } try { var lines = System.IO.File.ReadAllLines(dialog.FileName); if (lines.Length < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = SplitCsvLine(lines[0]); var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new ChallanRepository(); int imported = 0, errors = 0; int maxSr = repo.GetMaxSr(); var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = lines.Length - 1; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; var importProgress = BeginImportProgress("Importing Challans", lines.Length - 1); try { for (int i = 1; i < lines.Length; i++) { try { var parts = SplitCsvLine(lines[i]); var importedChallanNo = GetFirstCol(parts, colMap, "ChallanNumber", "ChallanNo", "CHALLANNO", "CHNo", "CHNO", "ChNo", "CH", "Challan", "CNo", "CNNo", "C/NNo", "BiltyNo", "BuiltyNo"); if (string.IsNullOrWhiteSpace(importedChallanNo)) throw new InvalidOperationException("Missing Challan No / Challan Number value in import row."); var entry = new ChallanEntry { Sr = ++maxSr, ChallanNumber = importedChallanNo, Date = ParseDate(GetCol(parts, colMap, "Date") ?? GetCol(parts, colMap, "DATE")), LRNumber = GetCol(parts, colMap, "LRNumber") ?? GetCol(parts, colMap, "LRNumber") ?? GetCol(parts, colMap, "LRNO"), BrokerName = GetCol(parts, colMap, "BrokerName") ?? GetCol(parts, colMap, "Broker"), From = GetCol(parts, colMap, "From") ?? GetCol(parts, colMap, "FROM"), To = GetCol(parts, colMap, "To") ?? GetCol(parts, colMap, "TO"), VehicleNumber = GetCol(parts, colMap, "VehicleNumber") ?? GetCol(parts, colMap, "VehicleNo") ?? GetCol(parts, colMap, "VEHICLENO"), VehicleType = GetCol(parts, colMap, "VehicleType"), DriverName = GetCol(parts, colMap, "DriverName") ?? GetCol(parts, colMap, "Driver"), DriverMobile = GetCol(parts, colMap, "DriverMobile") ?? GetCol(parts, colMap, "DriverMobile"), EngineNo = GetCol(parts, colMap, "EngineNo"), LicenceNo = GetCol(parts, colMap, "LicenceNo"), PolicyNo = GetCol(parts, colMap, "PolicyNo"), ChassisNo = GetCol(parts, colMap, "ChassisNo"), OwnerName = GetCol(parts, colMap, "OwnerName") ?? GetCol(parts, colMap, "Owner"), PAN = GetCol(parts, colMap, "PAN"), LorryHire = ParseDecimal(GetCol(parts, colMap, "LorryHire") ?? GetCol(parts, colMap, "LorryHire")), Other = ParseDecimal(GetCol(parts, colMap, "Other") ?? GetCol(parts, colMap, "OtherAmount")), LessTDS = ParseDecimal(GetCol(parts, colMap, "LessTDS")), AdvanceAmount = ParseDecimal(GetCol(parts, colMap, "AdvanceAmount") ?? GetCol(parts, colMap, "Advance")), AdvanceNEFT = ParseDecimal(GetCol(parts, colMap, "AdvanceNEFT")), AdvanceCash = ParseDecimal(GetCol(parts, colMap, "AdvanceCash")), AdvanceDate = ParseNullableDate(GetCol(parts, colMap, "AdvanceDate")), Detention = ParseDecimal(GetCol(parts, colMap, "Detention")), Hamali = ParseDecimal(GetCol(parts, colMap, "Hamali")), Deduction = ParseDecimal(GetCol(parts, colMap, "Deduction")), BalancePaidNEFT = ParseDecimal(GetCol(parts, colMap, "BalancePaidNEFT")), BalancePaidCash = ParseDecimal(GetCol(parts, colMap, "BalancePaidCash")), BalancePaidDate = ParseNullableDate(GetCol(parts, colMap, "BalancePaidDate")), PaidTo = GetCol(parts, colMap, "PaidTo"), Remarks = GetCol(parts, colMap, "Remarks"), BillAmount = ParseDecimal(GetCol(parts, colMap, "BillAmount")), Margin = ParseDecimal(GetCol(parts, colMap, "Margin")) }; entry.SuppressCalculations = true; entry.RecalculateBalance(); repo.Upsert(entry); imported++; } catch (Exception ex) { AppLogger.LogException(nameof(ImportChallan_Click), ex); errors++; } if (progress != null) progress.Value = i; if (status != null) status.Text = $"Importing {i}/{lines.Length - 1}"; UpdateImportProgress(importProgress, i, lines.Length - 1, imported, errors); } } finally { importProgress.Dispose(); } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) { status.Text = string.Empty; status.Visibility = Visibility.Collapsed; } VM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); UpdatePageUI(); RefreshDashboard(); MessageBox.Show($"Challan import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
         private void EditSelected_Click(object sender, RoutedEventArgs e)
         {
             var item = LedgerGrid.SelectedItem as ChallanEntry;
@@ -10340,7 +11902,15 @@ namespace Awagaman_ERP
                 {
                     UpdateChallanLRNumbers(linkedChallanId, entry.LRNo);
                 }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to save LR entry: " + ex.Message, "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
 
+            try
+            {
                 LRVM?.RefreshAfterDelete();
                 VM?.RefreshAfterDelete();
                 SyncChallanBillingForLr(entry);
@@ -10352,7 +11922,7 @@ namespace Awagaman_ERP
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Unable to save LR entry: " + ex.Message, "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                LogException(nameof(SaveNewLrAndRefresh), ex);
             }
         }
         private void UpdateChallanLRNumbers(int challanId, string newLrNo)

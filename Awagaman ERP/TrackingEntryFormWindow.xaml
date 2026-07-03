@@ -57,7 +57,7 @@
                             </StackPanel>
                             <StackPanel Grid.Column="2">
                                 <TextBlock Text="Challan Date" Style="{StaticResource FieldLabelStyle}" />
-                                <DatePicker SelectedDate="{Binding ChallanDate}" Style="{StaticResource DatePickerStyle}" IsEnabled="False" />
+                                <DatePicker x:Name="ChallanDatePicker" SelectedDate="{Binding ChallanDate}" Style="{StaticResource DatePickerStyle}" IsEnabled="False" />
                             </StackPanel>
                         </Grid>
                         <Grid Margin="0,12,0,0">
@@ -104,7 +104,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="E-way Bill Till Date" Style="{StaticResource FieldLabelStyle}" />
-                                <DatePicker SelectedDate="{Binding EwayBillTillDate}" Style="{StaticResource DatePickerStyle}" />
+                                <DatePicker x:Name="EwayBillTillDatePicker" SelectedDate="{Binding EwayBillTillDate, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource DatePickerStyle}" />
                             </StackPanel>
                         </Grid>
                         <Grid Margin="0,12,0,0">
@@ -115,7 +115,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="Dispatch Date" Style="{StaticResource FieldLabelStyle}" />
-                                <DatePicker SelectedDate="{Binding DispatchDate}" Style="{StaticResource DatePickerStyle}" />
+                                <DatePicker x:Name="DispatchDatePicker" SelectedDate="{Binding DispatchDate, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource DatePickerStyle}" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
                                 <TextBlock Text="Dispatch Time" Style="{StaticResource FieldLabelStyle}" />
@@ -130,7 +130,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="Delivered Date" Style="{StaticResource FieldLabelStyle}" />
-                                <DatePicker SelectedDate="{Binding DeliveredDate}" Style="{StaticResource DatePickerStyle}" />
+                                <DatePicker x:Name="DeliveredDatePicker" SelectedDate="{Binding DeliveredDate, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource DatePickerStyle}" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
                                 <TextBlock Text="Delivered Time" Style="{StaticResource FieldLabelStyle}" />

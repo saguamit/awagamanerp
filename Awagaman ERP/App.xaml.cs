@@ -34,6 +34,44 @@ namespace Awagaman_ERP
             }
             AppLogger.LogMessage("Startup", "Checking updates");
             _ = CheckForUpdatesAsync(showUpToDateMessage: false);
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                AppLogger.LogMessage("Startup", "Remote mode login window opening");
+                var login = new LoginWindow();
+                var loginOk = login.ShowDialog();
+                AppLogger.LogMessage("Startup", $"Remote mode login result: {loginOk}");
+                if (loginOk != true)
+                {
+                    AppLogger.LogMessage("Startup", "Login cancelled or failed, shutting down");
+                    Shutdown();
+                    return;
+                }
+            }
+            else
+            {
+                AuthSession.Clear();
+            }
+
+            try
+            {
+                AppLogger.LogMessage("Startup", "Creating MainWindow");
+                MainWindow = new MainWindow();
+                ShutdownMode = ShutdownMode.OnMainWindowClose;
+                MainWindow.Show();
+                AppLogger.LogMessage("Startup", "MainWindow shown");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogException("Startup MainWindow", ex);
+                MessageBox.Show(
+                    ex.Message,
+                    "Startup Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                Shutdown();
+            }
         }
 
         protected override void OnExit(ExitEventArgs e)
