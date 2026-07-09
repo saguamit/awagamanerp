@@ -349,9 +349,17 @@ CREATE TABLE IF NOT EXISTS VehicleLedger (
     PANNumber TEXT,
     EngineNumber TEXT,
     ChassisNumber TEXT,
-    VehicleType TEXT
+    VehicleType TEXT,
+    DriverName TEXT,
+    DriverMobile TEXT,
+    LicenceNumber TEXT,
+    PolicyNumber TEXT
 );");
                     ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_VehicleLedger_VehicleNumber ON VehicleLedger(VehicleNumber);");
+                    TryAddColumn(connection, "VehicleLedger", "DriverName", "TEXT", "EnsureInitialized.VehicleLedger.DriverName");
+                    TryAddColumn(connection, "VehicleLedger", "DriverMobile", "TEXT", "EnsureInitialized.VehicleLedger.DriverMobile");
+                    TryAddColumn(connection, "VehicleLedger", "LicenceNumber", "TEXT", "EnsureInitialized.VehicleLedger.LicenceNumber");
+                    TryAddColumn(connection, "VehicleLedger", "PolicyNumber", "TEXT", "EnsureInitialized.VehicleLedger.PolicyNumber");
 
                     ExecuteNonQuery(connection, @"CREATE TABLE IF NOT EXISTS BillComments (
     Id INTEGER PRIMARY KEY AUTOINCREMENT,

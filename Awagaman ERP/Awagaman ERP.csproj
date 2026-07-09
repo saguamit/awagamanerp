@@ -111,6 +111,7 @@
     <Compile Include="Data\LRRepository.cs" />
     <Compile Include="Data\TrackingRepository.cs" />
     <Compile Include="Data\PartyRepository.cs" />
+    <Compile Include="Helpers\ChallanNumberFormatter.cs" />
     <Compile Include="Data\CommentRepository.cs" />
     <Compile Include="Data\BillRepository.cs" />
     <Compile Include="Data\BillReceiptRepository.cs" />

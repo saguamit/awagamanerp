@@ -158,8 +158,8 @@ namespace Awagaman_ERP.Tests
 
             InvokePrivate(_window, "SyncSystemCBSFromChallan");
 
-            var cbsRows = cbsRepo.GetAll().Where(x => string.Equals((x.AccountName ?? string.Empty).Trim(), "LHS", StringComparison.OrdinalIgnoreCase)).ToList();
-            Assert.That(cbsRows.Count, Is.EqualTo(2), "LHS should have separate advance and balance rows.");
+            var cbsRows = cbsRepo.GetAll().Where(x => string.Equals((x.AccountName ?? string.Empty).Trim(), "Purchase LHS", StringComparison.OrdinalIgnoreCase)).ToList();
+            Assert.That(cbsRows.Count, Is.EqualTo(2), "Purchase LHS should have separate advance and balance rows.");
             Assert.That(cbsRows.Sum(x => x.BankCr), Is.EqualTo(22000m));
             Assert.That(cbsRows.Sum(x => x.CashCr), Is.EqualTo(0m));
 
@@ -228,6 +228,43 @@ namespace Awagaman_ERP.Tests
                 .Count(x => string.Equals((x.LRNo ?? string.Empty).Trim(), lrNo, StringComparison.OrdinalIgnoreCase) &&
                             string.IsNullOrWhiteSpace((x.BillNo ?? string.Empty).Trim()));
             Assert.That(pendingAfterChallanPayment, Is.EqualTo(0), "The same LR should not reappear in pending bills after challan payment.");
+        }
+
+        [Test]
+        public void GetAll_Sorts_ChallanNumbers_By_FinancialYear_Then_Sequence_For_Both_Ledgers()
+        {
+            var purchaseRepo = new ChallanRepository();
+
+            purchaseRepo.Upsert(new ChallanEntry
+            {
+                Sr = 1,
+                ChallanNumber = "004/25-26",
+                Date = new DateTime(2025, 5, 10)
+            });
+
+            purchaseRepo.Upsert(new ChallanEntry
+            {
+                Sr = 2,
+                ChallanNumber = "003/26-27",
+                Date = new DateTime(2026, 5, 10)
+            });
+
+            purchaseRepo.Upsert(new ChallanEntry
+            {
+                Sr = 3,
+                ChallanNumber = "004/26-27",
+                Date = new DateTime(2026, 5, 11)
+            });
+
+            var purchaseOrder = purchaseRepo.GetAll().Select(x => x.ChallanNumber).Take(3).ToList();
+
+            var challanRepo = new ChallanRepository { LedgerMode = "Challan" };
+            var challanOrder = challanRepo.GetAll().Select(x => x.ChallanNumber).Take(3).ToList();
+
+            var expected = new[] { "004/26-27", "003/26-27", "004/25-26" };
+
+            Assert.That(purchaseOrder, Is.EqualTo(expected));
+            Assert.That(challanOrder, Is.EqualTo(expected));
         }
 
         [Test]

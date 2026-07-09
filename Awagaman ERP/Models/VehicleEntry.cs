@@ -13,6 +13,10 @@ namespace Awagaman_ERP.Models
         private string _engineNumber;
         private string _chassisNumber;
         private string _vehicleType;
+        private string _driverName;
+        private string _driverMobile;
+        private string _licenceNumber;
+        private string _policyNumber;
 
         public int Id { get => _id; set { _id = value; OnPropertyChanged(); } }
         public int Sr { get => _sr; set { _sr = value; OnPropertyChanged(); } }
@@ -22,6 +26,10 @@ namespace Awagaman_ERP.Models
         public string EngineNumber { get => _engineNumber; set { _engineNumber = value; OnPropertyChanged(); } }
         public string ChassisNumber { get => _chassisNumber; set { _chassisNumber = value; OnPropertyChanged(); } }
         public string VehicleType { get => _vehicleType; set { _vehicleType = value; OnPropertyChanged(); } }
+        public string DriverName { get => _driverName; set { _driverName = value; OnPropertyChanged(); } }
+        public string DriverMobile { get => _driverMobile; set { _driverMobile = value; OnPropertyChanged(); } }
+        public string LicenceNumber { get => _licenceNumber; set { _licenceNumber = value; OnPropertyChanged(); } }
+        public string PolicyNumber { get => _policyNumber; set { _policyNumber = value; OnPropertyChanged(); } }
 
         public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));

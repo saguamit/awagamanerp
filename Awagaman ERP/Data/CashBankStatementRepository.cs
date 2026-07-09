@@ -38,6 +38,10 @@ namespace Awagaman_ERP.Data
         public List<CashBankStatementEntry> GetByAccount(string accountName, DateTime? fromDate = null, DateTime? toDate = null)
         {
             accountName = (accountName ?? string.Empty).Trim();
+            if (string.Equals(accountName, "LHS", StringComparison.OrdinalIgnoreCase))
+            {
+                accountName = "Purchase LHS";
+            }
             if (accountName.Length == 0)
             {
                 return new List<CashBankStatementEntry>();
@@ -61,7 +65,16 @@ namespace Awagaman_ERP.Data
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = c.CreateCommand())
             {
-                var conditions = new List<string> { "LOWER(TRIM(AccountName)) = LOWER(TRIM(@account))" };
+                var conditions = new List<string>
+                {
+                    @"CASE
+                        WHEN LOWER(TRIM(AccountName)) = 'lhs' THEN 'purchase lhs'
+                        ELSE LOWER(TRIM(AccountName))
+                      END = CASE
+                        WHEN LOWER(TRIM(@account)) = 'lhs' THEN 'purchase lhs'
+                        ELSE LOWER(TRIM(@account))
+                      END"
+                };
                 cmd.Parameters.AddWithValue("@account", accountName);
                 if (fromDate.HasValue)
                 {
@@ -90,35 +103,38 @@ ORDER BY Date DESC, Id DESC;";
             return list;
         }
 
-        public List<LhsSummaryEntry> GetLhsSummary(DateTime? fromDate = null, DateTime? toDate = null)
+        public List<LhsSummaryEntry> GetLhsSummary(DateTime? fromDate = null, DateTime? toDate = null, string accountName = "Purchase LHS")
         {
             if (BackendSettings.UseRemoteApi)
             {
-                try
+                var route = "api/cbs/statements/lhs-summary";
+                var queryParts = new List<string>();
+                if (!string.IsNullOrWhiteSpace(accountName))
                 {
-                    var route = "api/cbs/statements/lhs-summary";
-                    var queryParts = new List<string>();
-                    if (fromDate.HasValue)
-                    {
-                        queryParts.Add("fromDate=" + RemoteApiClient.UrlEncode(fromDate.Value.ToString("yyyy-MM-dd")));
-                    }
-                    if (toDate.HasValue)
-                    {
-                        queryParts.Add("toDate=" + RemoteApiClient.UrlEncode(toDate.Value.ToString("yyyy-MM-dd")));
-                    }
-                    if (queryParts.Count > 0)
-                    {
-                        route += "?" + string.Join("&", queryParts);
-                    }
+                    queryParts.Add("account=" + RemoteApiClient.UrlEncode(accountName.Trim()));
+                }
+                if (fromDate.HasValue)
+                {
+                    queryParts.Add("fromDate=" + RemoteApiClient.UrlEncode(fromDate.Value.ToString("yyyy-MM-dd")));
+                }
+                if (toDate.HasValue)
+                {
+                    queryParts.Add("toDate=" + RemoteApiClient.UrlEncode(toDate.Value.ToString("yyyy-MM-dd")));
+                }
+                if (queryParts.Count > 0)
+                {
+                    route += "?" + string.Join("&", queryParts);
+                }
 
-                    return RemoteApiClient.GetList<LhsSummaryEntry>(route);
-                }
-                catch
-                {
-                }
+                return RemoteApiClient.GetList<LhsSummaryEntry>(route);
             }
 
-            var entries = GetByAccount("LHS", fromDate, toDate)
+            var normalizedAccount = string.IsNullOrWhiteSpace(accountName) ? "Purchase LHS" : accountName.Trim();
+            if (string.Equals(normalizedAccount, "LHS", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedAccount = "Purchase LHS";
+            }
+            var entries = GetByAccount(normalizedAccount, fromDate, toDate)
                 .OrderByDescending(x => x.Date)
                 .ThenByDescending(x => x.Id)
                 .ToList();
@@ -143,19 +159,55 @@ ORDER BY Date DESC, Id DESC;";
                 var idx = txt.IndexOf("Challan ", StringComparison.OrdinalIgnoreCase);
                 var chNo = idx >= 0 ? txt.Substring(idx + 8).Split(new[] { ' ', '-', '|', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() : string.Empty;
                 var ch = challans.FirstOrDefault(c => string.Equals((c.ChallanNumber ?? string.Empty).Trim(), (chNo ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase));
+                var isAdvance = txt.IndexOf("Advance Paid", StringComparison.OrdinalIgnoreCase) >= 0;
+                var isBalance = txt.IndexOf("Balance Paid", StringComparison.OrdinalIgnoreCase) >= 0;
                 return new LhsSummaryEntry
                 {
-                    Date = x.Date,
+                    Date = x.Date.Date,
+                    ChallanNumber = chNo ?? string.Empty,
                     BrokerName = ch?.BrokerName ?? string.Empty,
                     From = ch?.From ?? string.Empty,
                     To = ch?.To ?? string.Empty,
                     VehicleNumber = ch?.VehicleNumber ?? string.Empty,
+                    AdvanceNeft = isAdvance ? x.BankCr : 0m,
+                    AdvanceCash = isAdvance ? x.CashCr : 0m,
+                    BalanceNeft = isBalance ? x.BankCr : 0m,
+                    BalanceCash = isBalance ? x.CashCr : 0m,
                     BankDr = x.BankDr,
                     BankCr = x.BankCr,
                     CashDr = x.CashDr,
                     CashCr = x.CashCr
                 };
-            }).ToList();
+            })
+            .GroupBy(x => new
+            {
+                Date = x.Date.Date,
+                ChallanNumber = ((x.ChallanNumber ?? string.Empty).Trim()).ToUpperInvariant()
+            })
+            .Select(g =>
+            {
+                var first = g.First();
+                return new LhsSummaryEntry
+                {
+                    Date = g.Key.Date,
+                    ChallanNumber = first.ChallanNumber,
+                    BrokerName = first.BrokerName,
+                    From = first.From,
+                    To = first.To,
+                    VehicleNumber = first.VehicleNumber,
+                    AdvanceNeft = g.Sum(x => x.AdvanceNeft),
+                    AdvanceCash = g.Sum(x => x.AdvanceCash),
+                    BalanceNeft = g.Sum(x => x.BalanceNeft),
+                    BalanceCash = g.Sum(x => x.BalanceCash),
+                    BankDr = g.Sum(x => x.BankDr),
+                    BankCr = g.Sum(x => x.BankCr),
+                    CashDr = g.Sum(x => x.CashDr),
+                    CashCr = g.Sum(x => x.CashCr)
+                };
+            })
+            .OrderByDescending(x => x.Date)
+            .ThenByDescending(x => x.ChallanNumber)
+            .ToList();
         }
 
         public List<CashBankStatementEntry> Search(string filter)

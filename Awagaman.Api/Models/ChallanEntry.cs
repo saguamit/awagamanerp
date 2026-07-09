@@ -37,13 +37,13 @@ public class ChallanEntry
     public string? Remarks { get; set; }
     public decimal BillAmount { get; set; }
     public decimal Margin { get; set; }
-    public decimal ImportedBalance { get; set; }
-    public decimal ImportedDue { get; set; }
+    public decimal? ImportedBalance { get; set; }
+    public decimal? ImportedDue { get; set; }
     public int? SourcePurchaseId { get; set; }
     public decimal LHS => LorryHire + Other;
-    public decimal Balance => LorryHire - LessTDS - AdvanceAmount;
-    public decimal ChallanBalance => LHS - LessTDS - AdvanceAmount;
-    public decimal Due => (Balance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash;
-    public decimal ChallanDue => (ChallanBalance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash;
+    public decimal Balance => ImportedBalance ?? (LorryHire - LessTDS - AdvanceAmount);
+    public decimal ChallanBalance => ImportedBalance ?? (LHS - LessTDS - AdvanceAmount);
+    public decimal Due => ImportedDue ?? ((Balance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash);
+    public decimal ChallanDue => ImportedDue ?? ((ChallanBalance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash);
     public decimal ChallanMargin => BillAmount == 0m ? 0m : BillAmount - (LHS + Detention + Hamali);
 }

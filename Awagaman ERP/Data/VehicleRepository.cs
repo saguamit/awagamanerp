@@ -93,7 +93,11 @@ namespace Awagaman_ERP.Data
                     PANNumber = entry.PAN,
                     EngineNumber = entry.EngineNo,
                     ChassisNumber = entry.ChassisNo,
-                    VehicleType = entry.VehicleType
+                    VehicleType = entry.VehicleType,
+                    DriverName = entry.DriverName,
+                    DriverMobile = entry.DriverMobile,
+                    LicenceNumber = entry.LicenceNo,
+                    PolicyNumber = entry.PolicyNo
                 };
                 Upsert(payload);
                 return;
@@ -119,8 +123,8 @@ namespace Awagaman_ERP.Data
                         using (var ins = c.CreateCommand())
                         {
                             ins.CommandText = @"INSERT INTO VehicleLedger
-                                (Sr, VehicleNumber, OwnerName, PANNumber, EngineNumber, ChassisNumber, VehicleType)
-                                VALUES (@sr,@v,@o,@p,@e,@c,@t);";
+                                (Sr, VehicleNumber, OwnerName, PANNumber, EngineNumber, ChassisNumber, VehicleType, DriverName, DriverMobile, LicenceNumber, PolicyNumber)
+                                VALUES (@sr,@v,@o,@p,@e,@c,@t,@d,@m,@l,@pn);";
                             ins.Parameters.AddWithValue("@sr", nextSr);
                             ins.Parameters.AddWithValue("@v", vno);
                             ins.Parameters.AddWithValue("@o", (object)entry.OwnerName ?? DBNull.Value);
@@ -128,6 +132,10 @@ namespace Awagaman_ERP.Data
                             ins.Parameters.AddWithValue("@e", (object)entry.EngineNo ?? DBNull.Value);
                             ins.Parameters.AddWithValue("@c", (object)entry.ChassisNo ?? DBNull.Value);
                             ins.Parameters.AddWithValue("@t", (object)entry.VehicleType ?? DBNull.Value);
+                            ins.Parameters.AddWithValue("@d", (object)entry.DriverName ?? DBNull.Value);
+                            ins.Parameters.AddWithValue("@m", (object)entry.DriverMobile ?? DBNull.Value);
+                            ins.Parameters.AddWithValue("@l", (object)entry.LicenceNo ?? DBNull.Value);
+                            ins.Parameters.AddWithValue("@pn", (object)entry.PolicyNo ?? DBNull.Value);
                             ins.ExecuteNonQuery();
                         }
                     }
@@ -140,19 +148,28 @@ namespace Awagaman_ERP.Data
                                 PANNumber = CASE WHEN @p IS NOT NULL AND TRIM(@p) <> '' THEN @p ELSE PANNumber END,
                                 EngineNumber = CASE WHEN @e IS NOT NULL AND TRIM(@e) <> '' THEN @e ELSE EngineNumber END,
                                 ChassisNumber = CASE WHEN @c IS NOT NULL AND TRIM(@c) <> '' THEN @c ELSE ChassisNumber END,
-                                VehicleType = CASE WHEN @t IS NOT NULL AND TRIM(@t) <> '' THEN @t ELSE VehicleType END
+                                VehicleType = CASE WHEN @t IS NOT NULL AND TRIM(@t) <> '' THEN @t ELSE VehicleType END,
+                                DriverName = CASE WHEN @d IS NOT NULL AND TRIM(@d) <> '' THEN @d ELSE DriverName END,
+                                DriverMobile = CASE WHEN @m IS NOT NULL AND TRIM(@m) <> '' THEN @m ELSE DriverMobile END,
+                                LicenceNumber = CASE WHEN @l IS NOT NULL AND TRIM(@l) <> '' THEN @l ELSE LicenceNumber END,
+                                PolicyNumber = CASE WHEN @pn IS NOT NULL AND TRIM(@pn) <> '' THEN @pn ELSE PolicyNumber END
                                 WHERE Id = @id;";
                             upd.Parameters.AddWithValue("@o", (object)entry.OwnerName ?? DBNull.Value);
                             upd.Parameters.AddWithValue("@p", (object)entry.PAN ?? DBNull.Value);
                             upd.Parameters.AddWithValue("@e", (object)entry.EngineNo ?? DBNull.Value);
                             upd.Parameters.AddWithValue("@c", (object)entry.ChassisNo ?? DBNull.Value);
                             upd.Parameters.AddWithValue("@t", (object)entry.VehicleType ?? DBNull.Value);
+                            upd.Parameters.AddWithValue("@d", (object)entry.DriverName ?? DBNull.Value);
+                            upd.Parameters.AddWithValue("@m", (object)entry.DriverMobile ?? DBNull.Value);
+                            upd.Parameters.AddWithValue("@l", (object)entry.LicenceNo ?? DBNull.Value);
+                            upd.Parameters.AddWithValue("@pn", (object)entry.PolicyNo ?? DBNull.Value);
                             upd.Parameters.AddWithValue("@id", Convert.ToInt32(idObj));
                             upd.ExecuteNonQuery();
                         }
                     }
                 }
             }
+            MasterDataCache.InvalidateVehicles();
         }
 
         public void Upsert(VehicleEntry e)
@@ -180,13 +197,13 @@ namespace Awagaman_ERP.Data
                 if (e.Id <= 0)
                 {
                     cmd.CommandText = @"INSERT INTO VehicleLedger
-                        (Sr, VehicleNumber, OwnerName, PANNumber, EngineNumber, ChassisNumber, VehicleType)
-                        VALUES (@sr,@v,@o,@p,@e,@c,@t);";
+                        (Sr, VehicleNumber, OwnerName, PANNumber, EngineNumber, ChassisNumber, VehicleType, DriverName, DriverMobile, LicenceNumber, PolicyNumber)
+                        VALUES (@sr,@v,@o,@p,@e,@c,@t,@d,@m,@l,@pn);";
                 }
                 else
                 {
                     cmd.CommandText = @"UPDATE VehicleLedger SET
-                        Sr=@sr, VehicleNumber=@v, OwnerName=@o, PANNumber=@p, EngineNumber=@e, ChassisNumber=@c, VehicleType=@t
+                        Sr=@sr, VehicleNumber=@v, OwnerName=@o, PANNumber=@p, EngineNumber=@e, ChassisNumber=@c, VehicleType=@t, DriverName=@d, DriverMobile=@m, LicenceNumber=@l, PolicyNumber=@pn
                         WHERE Id=@id;";
                     cmd.Parameters.AddWithValue("@id", e.Id);
                 }
@@ -197,8 +214,13 @@ namespace Awagaman_ERP.Data
                 cmd.Parameters.AddWithValue("@e", (object)e.EngineNumber ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@c", (object)e.ChassisNumber ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@t", (object)e.VehicleType ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@d", (object)e.DriverName ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@m", (object)e.DriverMobile ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@l", (object)e.LicenceNumber ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@pn", (object)e.PolicyNumber ?? DBNull.Value);
                 cmd.ExecuteNonQuery();
             }
+            MasterDataCache.InvalidateVehicles();
         }
 
         public void Delete(VehicleEntry entry)
@@ -230,7 +252,11 @@ namespace Awagaman_ERP.Data
                 PANNumber = r["PANNumber"] as string,
                 EngineNumber = r["EngineNumber"] as string,
                 ChassisNumber = r["ChassisNumber"] as string,
-                VehicleType = r["VehicleType"] as string
+                VehicleType = r["VehicleType"] as string,
+                DriverName = r["DriverName"] as string,
+                DriverMobile = r["DriverMobile"] as string,
+                LicenceNumber = r["LicenceNumber"] as string,
+                PolicyNumber = r["PolicyNumber"] as string
             };
         }
     }

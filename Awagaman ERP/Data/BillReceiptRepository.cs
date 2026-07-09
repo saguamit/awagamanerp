@@ -70,21 +70,57 @@ ORDER BY ReceiptDate ASC, Id ASC;", c))
 
         public void Add(BillReceiptEntry entry)
         {
+            Upsert(entry);
+        }
+
+        public void Upsert(BillReceiptEntry entry)
+        {
             if (entry == null) return;
             if (BackendSettings.UseRemoteApi)
             {
-                entry.Id = RemoteApiClient.PostAndReadInt("api/bill-receipts", entry);
+                if (entry.Id <= 0)
+                {
+                    entry.Id = RemoteApiClient.PostAndReadInt("api/bill-receipts", entry);
+                }
+                else
+                {
+                    RemoteApiClient.Put($"api/bill-receipts/{entry.Id}", entry);
+                }
                 return;
             }
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = c.CreateCommand())
             {
                 c.Open();
-                cmd.CommandText = @"
+                if (entry.Id <= 0)
+                {
+                    cmd.CommandText = @"
 INSERT INTO BillReceipts
 (BillNo, Party, BillTotal, BillDate, ReceiptDate, RCVD, TDS, DED, MOP, MR, Remarks, DueAfter, CreatedAt)
 VALUES
-(@BillNo, @Party, @BillTotal, @BillDate, @ReceiptDate, @RCVD, @TDS, @DED, @MOP, @MR, @Remarks, @DueAfter, @CreatedAt);";
+(@BillNo, @Party, @BillTotal, @BillDate, @ReceiptDate, @RCVD, @TDS, @DED, @MOP, @MR, @Remarks, @DueAfter, @CreatedAt);
+SELECT last_insert_rowid();";
+                }
+                else
+                {
+                    cmd.CommandText = @"
+UPDATE BillReceipts
+SET BillNo = @BillNo,
+    Party = @Party,
+    BillTotal = @BillTotal,
+    BillDate = @BillDate,
+    ReceiptDate = @ReceiptDate,
+    RCVD = @RCVD,
+    TDS = @TDS,
+    DED = @DED,
+    MOP = @MOP,
+    MR = @MR,
+    Remarks = @Remarks,
+    DueAfter = @DueAfter,
+    CreatedAt = @CreatedAt
+WHERE Id = @Id;";
+                    cmd.Parameters.AddWithValue("@Id", entry.Id);
+                }
                 cmd.Parameters.AddWithValue("@BillNo", (object)entry.BillNo ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@Party", (object)entry.Party ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@BillTotal", entry.BillTotal);
@@ -98,7 +134,14 @@ VALUES
                 cmd.Parameters.AddWithValue("@Remarks", (object)entry.Remarks ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@DueAfter", entry.DueAfter);
                 cmd.Parameters.AddWithValue("@CreatedAt", entry.CreatedAt == default(DateTime) ? DateTime.Now.ToString("o") : entry.CreatedAt.ToString("o"));
-                cmd.ExecuteNonQuery();
+                if (entry.Id <= 0)
+                {
+                    entry.Id = Convert.ToInt32((long)cmd.ExecuteScalar());
+                }
+                else
+                {
+                    cmd.ExecuteNonQuery();
+                }
             }
         }
 

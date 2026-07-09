@@ -27,7 +27,7 @@ namespace Awagaman_ERP.Data
                     MasterDataCache.InvalidateCBSAccounts();
                     accounts = MasterDataCache.GetCBSAccounts(() => RemoteApiClient.GetList<CBSAccountEntry>("api/cbs/accounts"));
                 }
-                return accounts;
+                return NormalizeAndDeduplicate(accounts);
             }
             EnsureDefaults();
             var list = new List<CBSAccountEntry>();
@@ -49,7 +49,7 @@ namespace Awagaman_ERP.Data
                     }
                 }
             }
-            return list;
+            return NormalizeAndDeduplicate(list);
         }
 
         public List<string> GetActiveAccountNames()
@@ -125,6 +125,10 @@ namespace Awagaman_ERP.Data
         {
             if (entry == null) return;
             entry.AccountName = (entry.AccountName ?? string.Empty).Trim();
+            if (string.Equals(entry.AccountName, "LHS", StringComparison.OrdinalIgnoreCase))
+            {
+                entry.AccountName = "Purchase LHS";
+            }
             if (entry.AccountName.Length == 0) return;
 
             if (BackendSettings.UseRemoteApi)
@@ -200,14 +204,27 @@ namespace Awagaman_ERP.Data
                 {
                     Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "Bank A/c", IsActive = true });
                 }
-                if (FindByName("LHS") == null)
+                var legacyLhs = FindByName("LHS");
+                if (legacyLhs != null)
                 {
-                    Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "LHS", IsActive = true });
+                    legacyLhs.AccountName = "Purchase LHS";
+                    legacyLhs.IsActive = true;
+                    Upsert(legacyLhs);
+                }
+                if (FindByName("Purchase LHS") == null)
+                {
+                    Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "Purchase LHS", IsActive = true });
+                }
+                if (FindByName("Challan LHS") == null)
+                {
+                    Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "Challan LHS", IsActive = true });
                 }
                 if (FindByName("BFRS") == null)
                 {
                     Upsert(new CBSAccountEntry { Sr = GetMaxSr() + 1, AccountName = "BFRS", IsActive = true });
                 }
+
+                DeduplicateLocalSpecialAccounts();
             }
             catch { }
         }
@@ -222,7 +239,8 @@ namespace Awagaman_ERP.Data
 
                 changed |= EnsureRemoteDefaultAccount(accounts, "Cash A/c", ref maxSr);
                 changed |= EnsureRemoteDefaultAccount(accounts, "Bank A/c", ref maxSr);
-                changed |= EnsureRemoteDefaultAccount(accounts, "LHS", ref maxSr);
+                changed |= EnsureRemoteDefaultAccount(accounts, "Purchase LHS", ref maxSr);
+                changed |= EnsureRemoteDefaultAccount(accounts, "Challan LHS", ref maxSr);
                 changed |= EnsureRemoteDefaultAccount(accounts, "BFRS", ref maxSr);
 
                 return changed;
@@ -253,6 +271,73 @@ namespace Awagaman_ERP.Data
         {
             var key = (accountName ?? string.Empty).Trim();
             return accounts != null && accounts.Any(x => string.Equals((x.AccountName ?? string.Empty).Trim(), key, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private List<CBSAccountEntry> NormalizeAndDeduplicate(List<CBSAccountEntry> accounts)
+        {
+            accounts = accounts ?? new List<CBSAccountEntry>();
+            foreach (var account in accounts)
+            {
+                if (account != null && string.Equals((account.AccountName ?? string.Empty).Trim(), "LHS", StringComparison.OrdinalIgnoreCase))
+                {
+                    account.AccountName = "Purchase LHS";
+                }
+            }
+
+            return accounts
+                .Where(x => x != null && !string.IsNullOrWhiteSpace(x.AccountName))
+                .GroupBy(x => (x.AccountName ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.OrderByDescending(x => x.IsActive).ThenBy(x => x.Sr).ThenBy(x => x.Id).First())
+                .OrderBy(x => x.Sr)
+                .ThenBy(x => x.Id)
+                .ToList();
+        }
+
+        private void DeduplicateLocalSpecialAccounts()
+        {
+            var accounts = new List<CBSAccountEntry>();
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand("SELECT Id, Sr, AccountName, IsActive FROM CBSAccounts ORDER BY Sr, Id;", c))
+            {
+                c.Open();
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        accounts.Add(new CBSAccountEntry
+                        {
+                            Id = Convert.ToInt32(r["Id"]),
+                            Sr = Convert.ToInt32(r["Sr"]),
+                            AccountName = r["AccountName"] as string,
+                            IsActive = Convert.ToInt32(r["IsActive"]) == 1
+                        });
+                    }
+                }
+            }
+
+            var duplicateIds = accounts
+                .Where(x => x != null && (
+                    string.Equals((x.AccountName ?? string.Empty).Trim(), "Purchase LHS", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals((x.AccountName ?? string.Empty).Trim(), "Challan LHS", StringComparison.OrdinalIgnoreCase)))
+                .GroupBy(x => (x.AccountName ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+                .SelectMany(g => g.OrderByDescending(x => x.IsActive).ThenBy(x => x.Sr).ThenBy(x => x.Id).Skip(1))
+                .Select(x => x.Id)
+                .ToList();
+
+            if (duplicateIds.Count == 0) return;
+
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            {
+                c.Open();
+                foreach (var id in duplicateIds)
+                {
+                    using (var cmd = new SQLiteCommand("DELETE FROM CBSAccounts WHERE Id = @id;", c))
+                    {
+                        cmd.Parameters.AddWithValue("@id", id);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+            }
         }
     }
 }

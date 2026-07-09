@@ -522,8 +522,9 @@ LRNo {dir}, Sr, Id";
         private static List<LREntry> GetAllRemoteSafe()
         {
             return RemoteApiClient.GetList<LREntry>("api/lr")
-                .OrderBy(e => e.Sr)
-                .ThenBy(e => e.Id)
+                .OrderByDescending(e => GetLRSuffix(e?.LRNo))
+                .ThenByDescending(e => GetLRSequence(e?.LRNo))
+                .ThenByDescending(e => e?.Id ?? 0)
                 .ToList();
         }
 
@@ -558,6 +559,19 @@ LRNo {dir}, Sr, Id";
         private static IEnumerable<LREntry> ApplySort(IEnumerable<LREntry> source, string sortColumn, bool ascending)
         {
             var ordered = source ?? Enumerable.Empty<LREntry>();
+            if (string.Equals(sortColumn, "lrno", StringComparison.OrdinalIgnoreCase))
+            {
+                return ascending
+                    ? ordered
+                        .OrderBy(e => GetLRSuffix(e?.LRNo))
+                        .ThenBy(e => GetLRSequence(e?.LRNo))
+                        .ThenBy(e => e.Id)
+                    : ordered
+                        .OrderByDescending(e => GetLRSuffix(e?.LRNo))
+                        .ThenByDescending(e => GetLRSequence(e?.LRNo))
+                        .ThenByDescending(e => e.Id);
+            }
+
             Func<LREntry, object> keySelector;
             switch ((sortColumn ?? string.Empty).ToLowerInvariant())
             {
@@ -597,6 +611,29 @@ LRNo {dir}, Sr, Id";
             return !string.IsNullOrWhiteSpace(value) &&
                    !string.IsNullOrWhiteSpace(filter) &&
                    value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string GetLRSuffix(string lrNo)
+        {
+            var raw = (lrNo ?? string.Empty).Trim();
+            var slashIndex = raw.IndexOf('/');
+            return slashIndex >= 0 && slashIndex < raw.Length - 1
+                ? raw.Substring(slashIndex + 1).Trim()
+                : string.Empty;
+        }
+
+        private static int GetLRSequence(string lrNo)
+        {
+            var raw = (lrNo ?? string.Empty).Trim();
+            var prefix = raw;
+            var slashIndex = raw.IndexOf('/');
+            if (slashIndex > 0)
+            {
+                prefix = raw.Substring(0, slashIndex);
+            }
+
+            var digits = new string(prefix.Where(char.IsDigit).ToArray());
+            return int.TryParse(digits, out var parsed) ? parsed : 0;
         }
 
         private static bool MatchesSearch(LREntry entry, string searchFilter)

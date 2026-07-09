@@ -43,6 +43,8 @@ namespace Awagaman_ERP.Models
         private string _remarks;
         private decimal _billAmount;
         private decimal _margin;
+        private decimal? _importedBalance;
+        private decimal? _importedDue;
         private int? _sourcePurchaseId;
 
         public int Id { get => _id; set { _id = value; OnPropertyChanged(); } }
@@ -196,11 +198,23 @@ namespace Awagaman_ERP.Models
         [System.Xml.Serialization.XmlIgnore]
         public decimal Balance { get; set; }
 
+        public decimal? ImportedBalance
+        {
+            get => _importedBalance;
+            set
+            {
+                _importedBalance = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(Balance));
+                OnPropertyChanged(nameof(ChallanBalance));
+            }
+        }
+
         [System.Xml.Serialization.XmlIgnore]
         public decimal LHS => LorryHire + Other;
 
         [System.Xml.Serialization.XmlIgnore]
-        public decimal ChallanBalance => LHS - LessTDS - AdvanceAmount;
+        public decimal ChallanBalance => ImportedBalance ?? (LHS - LessTDS - AdvanceAmount);
 
         public decimal Detention { get => _detention; set { _detention = value; OnPropertyChanged(); if (!_suppressCalculations) RecalculateBalance(); } }
         public decimal Hamali { get => _hamali; set { _hamali = value; OnPropertyChanged(); if (!_suppressCalculations) RecalculateBalance(); } }
@@ -247,8 +261,20 @@ namespace Awagaman_ERP.Models
         [System.Xml.Serialization.XmlIgnore]
         public decimal Due { get; set; }
 
+        public decimal? ImportedDue
+        {
+            get => _importedDue;
+            set
+            {
+                _importedDue = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(Due));
+                OnPropertyChanged(nameof(ChallanDue));
+            }
+        }
+
         [System.Xml.Serialization.XmlIgnore]
-        public decimal ChallanDue => (ChallanBalance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash;
+        public decimal ChallanDue => ImportedDue ?? ((ChallanBalance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash);
 
         public string PaidTo { get => _paidTo; set { _paidTo = value; OnPropertyChanged(); } }
         public string Remarks { get => _remarks; set { _remarks = value; OnPropertyChanged(); } }
@@ -323,7 +349,7 @@ namespace Awagaman_ERP.Models
         {
             // Balance formula per ledger rule:
             // Balance = Lorry Hire - Less TDS - Advance
-            Balance = LorryHire - LessTDS - AdvanceAmount;
+            Balance = ImportedBalance ?? (LorryHire - LessTDS - AdvanceAmount);
             OnPropertyChanged(nameof(Balance));
             OnPropertyChanged(nameof(LHS));
             OnPropertyChanged(nameof(ChallanBalance));
@@ -352,7 +378,7 @@ namespace Awagaman_ERP.Models
 
         private void RecalculateDue()
         {
-            Due = (Balance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash;
+            Due = ImportedDue ?? ((Balance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash);
             OnPropertyChanged(nameof(Due));
             OnPropertyChanged(nameof(ChallanDue));
         }
@@ -397,6 +423,8 @@ namespace Awagaman_ERP.Models
                 Remarks = Remarks,
                 BillAmount = BillAmount,
                 Margin = Margin,
+                ImportedBalance = ImportedBalance,
+                ImportedDue = ImportedDue,
                 SourcePurchaseId = SourcePurchaseId
             };
             copy.Balance = Balance;

@@ -46,6 +46,23 @@ namespace Awagaman_ERP.Tests
 
             Assert.That(vm.TotalDue, Is.EqualTo(570m));
         }
+
+        [Test]
+        public void ResetToLatestChallanView_Uses_ChallanNumber_Descending()
+        {
+            var mockRepo = new Mock<IChallanRepository>();
+            mockRepo.Setup(r => r.GetAll()).Returns(new List<ChallanEntry>());
+            mockRepo.Setup(r => r.GetTotalCount()).Returns(0);
+            mockRepo.Setup(r => r.GetPage(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>())).Returns(new List<ChallanEntry>());
+
+            var vm = new ChallanViewModel(mockRepo.Object);
+            vm.SetSort("Date", true);
+
+            vm.ResetToLatestChallanView();
+
+            Assert.That(vm.GetSortColumn(), Is.EqualTo("ChallanNumber"));
+            Assert.That(vm.IsCurrentSortAscending, Is.False);
+        }
     }
 
     [TestFixture]
@@ -82,6 +99,22 @@ namespace Awagaman_ERP.Tests
             vm.Entries.Add(new LREntry { LRNo = "LR001" });
 
             Assert.That(vm.Entries.Count, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void EmptySort_Resets_To_LRNo_Descending_Default()
+        {
+            var mockRepo = new Mock<ILRRepository>();
+            mockRepo.Setup(r => r.GetAll()).Returns(new List<LREntry>());
+            mockRepo.Setup(r => r.GetTotalCount()).Returns(0);
+            mockRepo.Setup(r => r.GetPage(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>())).Returns(new List<LREntry>());
+
+            var vm = new LRLedgerViewModel(mockRepo.Object);
+            vm.SetSort("Date", true);
+            vm.SetSort(string.Empty, true);
+
+            Assert.That(vm.GetSortColumn(), Is.EqualTo("LRNo"));
+            Assert.That(vm.IsCurrentSortAscending, Is.False);
         }
     }
 

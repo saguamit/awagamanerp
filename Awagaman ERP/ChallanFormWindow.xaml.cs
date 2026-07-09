@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Awagaman_ERP.Data;
+using Awagaman_ERP.Helpers;
 using Awagaman_ERP.Models;
 using MahApps.Metro.Controls;
 
@@ -87,6 +88,7 @@ namespace Awagaman_ERP
 
         private void ChallanNo_LostFocus(object sender, RoutedEventArgs e)
         {
+            NormalizeChallanNumberInForm();
             var num = ChallanNoBox?.Text?.Trim();
             if (string.IsNullOrWhiteSpace(num)) { ChallanDuplicateWarning.Visibility = Visibility.Collapsed; return; }
             try
@@ -103,9 +105,28 @@ namespace Awagaman_ERP
 
         private void Save_Click(object sender, RoutedEventArgs e)
         {
+            NormalizeChallanNumberInForm();
             if (string.IsNullOrWhiteSpace(Result.ChallanNumber))
             {
                 MessageBox.Show("Challan Number cannot be empty.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(Result.BrokerName))
+            {
+                MessageBox.Show("Agent / Broker is mandatory.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(Result.From))
+            {
+                MessageBox.Show("From is mandatory.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(Result.To))
+            {
+                MessageBox.Show("To is mandatory.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
@@ -145,6 +166,20 @@ namespace Awagaman_ERP
                 DialogResult = true;
             }
             Close();
+        }
+
+        private void NormalizeChallanNumberInForm()
+        {
+            if (Result == null)
+            {
+                return;
+            }
+
+            var normalized = ChallanNumberFormatter.Normalize(Result.ChallanNumber, Result.Date);
+            if (!string.Equals(Result.ChallanNumber, normalized, System.StringComparison.Ordinal))
+            {
+                Result.ChallanNumber = normalized;
+            }
         }
 
         private void Cancel_Click(object sender, RoutedEventArgs e)
@@ -259,6 +294,10 @@ namespace Awagaman_ERP
             Result.EngineNo = v.EngineNumber;
             Result.ChassisNo = v.ChassisNumber;
             Result.VehicleType = v.VehicleType;
+            Result.DriverName = v.DriverName;
+            Result.DriverMobile = v.DriverMobile;
+            Result.LicenceNo = v.LicenceNumber;
+            Result.PolicyNo = v.PolicyNumber;
         }
 
         private void CurrencyTextBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)

@@ -6,6 +6,8 @@ namespace Awagaman.Api.DataAccess;
 
 internal sealed class LegacyDateTimeJsonConverter : JsonConverter<DateTime>
 {
+    private static readonly TimeZoneInfo BusinessTimeZone = ResolveBusinessTimeZone();
+
     public override DateTime Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         return ReadDateTime(ref reader);
@@ -36,20 +38,26 @@ internal sealed class LegacyDateTimeJsonConverter : JsonConverter<DateTime>
                 return legacy;
             }
 
+            if (LooksLikeOffsetOrUtc(text) &&
+                DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dto))
+            {
+                return ToBusinessLocal(dto);
+            }
+
             if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var iso))
             {
-                return iso;
+                return DateTime.SpecifyKind(iso, DateTimeKind.Unspecified);
             }
 
             if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsed))
             {
-                return parsed;
+                return DateTime.SpecifyKind(parsed, DateTimeKind.Unspecified);
             }
         }
 
         if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt64(out var unixMs))
         {
-            return DateTimeOffset.FromUnixTimeMilliseconds(unixMs).LocalDateTime;
+            return ToBusinessLocal(DateTimeOffset.FromUnixTimeMilliseconds(unixMs));
         }
 
         throw new JsonException($"Unable to parse DateTime value from token {reader.TokenType}.");
@@ -81,8 +89,51 @@ internal sealed class LegacyDateTimeJsonConverter : JsonConverter<DateTime>
             return false;
         }
 
-        value = DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).LocalDateTime;
+        value = ToBusinessLocal(DateTimeOffset.FromUnixTimeMilliseconds(milliseconds));
         return true;
+    }
+
+    private static bool LooksLikeOffsetOrUtc(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        if (text.EndsWith("Z", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var tIndex = text.IndexOf('T');
+        if (tIndex < 0)
+        {
+            return false;
+        }
+
+        return text.IndexOf('+', tIndex) >= 0 || text.IndexOf('-', tIndex) >= 0;
+    }
+
+    private static DateTime ToBusinessLocal(DateTimeOffset value)
+    {
+        var converted = TimeZoneInfo.ConvertTime(value, BusinessTimeZone);
+        return DateTime.SpecifyKind(converted.DateTime, DateTimeKind.Unspecified);
+    }
+
+    private static TimeZoneInfo ResolveBusinessTimeZone()
+    {
+        foreach (var id in new[] { "India Standard Time", "Asia/Kolkata", "Asia/Calcutta" })
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch
+            {
+            }
+        }
+
+        return TimeZoneInfo.Local;
     }
 }
 

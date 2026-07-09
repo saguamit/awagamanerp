@@ -23,8 +23,12 @@ namespace Awagaman_ERP.ViewModels
         private string _sortColumn = "LRNo";
         private bool _sortAscending = false;
         private bool _isLoadingPage;
-        public bool IsCurrentSortAscending => string.IsNullOrEmpty(_sortColumn) || _sortAscending;
+        private Dictionary<string, decimal> _challanLorryHireByChNo;
+        private Dictionary<string, decimal> _challanLorryHireByLrNo;
+        public bool IsCurrentSortAscending => GetEffectiveSortAscending();
         public string GetSortColumn() => _sortColumn;
+        private string GetEffectiveSortColumn() => string.IsNullOrWhiteSpace(_sortColumn) ? "LRNo" : _sortColumn;
+        private bool GetEffectiveSortAscending() => string.IsNullOrWhiteSpace(_sortColumn) ? false : _sortAscending;
         private List<LREntry> _nextPageCache;
         private List<LREntry> _prevPageCache;
 
@@ -115,25 +119,28 @@ namespace Awagaman_ERP.ViewModels
                 }
 
                 List<LREntry> items;
+                var sortColumn = GetEffectiveSortColumn();
+                var sortAscending = GetEffectiveSortAscending();
                 if (string.IsNullOrEmpty(_searchFilter))
                 {
-                    items = _repository.GetPage(CurrentPage, PageSize, _sortColumn, _sortAscending);
+                    items = _repository.GetPage(CurrentPage, PageSize, sortColumn, sortAscending);
                 }
                 else
                 {
-                    items = _repository.Search(_searchFilter, CurrentPage, PageSize, _sortColumn, _sortAscending);
-                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.Search(_searchFilter, 1, PageSize, _sortColumn, _sortAscending); }
+                    items = _repository.Search(_searchFilter, CurrentPage, PageSize, sortColumn, sortAscending);
+                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.Search(_searchFilter, 1, PageSize, sortColumn, sortAscending); }
                 }
 
+                ApplyDerivedLorryHire(items);
                 PagedEntries = new ObservableCollection<LREntry>(items);
                 MarkComments(PagedEntries);
 
                 if (CurrentPage < TotalPages)
                 {
                     if (string.IsNullOrEmpty(_searchFilter))
-                        _nextPageCache = _repository.GetPage(CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
+                        _nextPageCache = _repository.GetPage(CurrentPage + 1, PageSize, sortColumn, sortAscending);
                     else
-                        _nextPageCache = _repository.Search(_searchFilter, CurrentPage + 1, PageSize, _sortColumn, _sortAscending);
+                        _nextPageCache = _repository.Search(_searchFilter, CurrentPage + 1, PageSize, sortColumn, sortAscending);
                 }
                 else { _nextPageCache = null; }
 
@@ -208,8 +215,8 @@ namespace Awagaman_ERP.ViewModels
                 int np = CurrentPage + 1, ps = PageSize;
                 bool hf = !string.IsNullOrEmpty(_searchFilter);
                 string f = _searchFilter;
-                string sc = _sortColumn;
-                bool sa = _sortAscending;
+                string sc = GetEffectiveSortColumn();
+                bool sa = GetEffectiveSortAscending();
                 System.Threading.Tasks.Task.Run(() =>
                 {
                     var data = hf ? _repository.Search(f, np, ps, sc, sa) : _repository.GetPage(np, ps, sc, sa);
@@ -244,8 +251,16 @@ namespace Awagaman_ERP.ViewModels
                 return;
             }
 
-            _sortColumn = normalized;
-            _sortAscending = ascending;
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                _sortColumn = "LRNo";
+                _sortAscending = false;
+            }
+            else
+            {
+                _sortColumn = normalized;
+                _sortAscending = ascending;
+            }
             _countDirty = false;
             _nextPageCache = null;
             _prevPageCache = null;
@@ -289,7 +304,9 @@ namespace Awagaman_ERP.ViewModels
             _suppressPersistence = true;
             Entries.Clear();
 
-            foreach (var entry in _repository.GetAll())
+            var allEntries = _repository.GetAll();
+            ApplyDerivedLorryHire(allEntries);
+            foreach (var entry in allEntries)
             {
                 Entries.Add(entry);
             }
@@ -298,6 +315,109 @@ namespace Awagaman_ERP.ViewModels
             FilteredEntriesCount = Entries.Count;
             FilteredTotalFreight = Entries.Sum(x => x.TotalFreight);
             FilteredTotalBalance = Entries.Sum(x => x.Bal);
+        }
+
+        private void ApplyDerivedLorryHire(IEnumerable<LREntry> items)
+        {
+            if (items == null)
+            {
+                return;
+            }
+
+            _challanLorryHireByChNo = null;
+            _challanLorryHireByLrNo = null;
+            EnsureChallanLorryHireCache();
+            foreach (var entry in items)
+            {
+                if (entry == null)
+                {
+                    continue;
+                }
+
+                entry.ChallanLorryHire = ResolveChallanLorryHire(entry);
+            }
+        }
+
+        private decimal ResolveChallanLorryHire(LREntry entry)
+        {
+            if (entry == null)
+            {
+                return 0m;
+            }
+
+            var challanNo = NormalizeKey(entry.CHNo);
+            if (!string.IsNullOrWhiteSpace(challanNo) &&
+                _challanLorryHireByChNo != null &&
+                _challanLorryHireByChNo.TryGetValue(challanNo, out var lorryHireByChNo))
+            {
+                return lorryHireByChNo;
+            }
+
+            var lrNo = NormalizeKey(entry.LRNo);
+            if (!string.IsNullOrWhiteSpace(lrNo) &&
+                _challanLorryHireByLrNo != null &&
+                _challanLorryHireByLrNo.TryGetValue(lrNo, out var lorryHireByLrNo))
+            {
+                return lorryHireByLrNo;
+            }
+
+            return 0m;
+        }
+
+        private void EnsureChallanLorryHireCache()
+        {
+            if (_challanLorryHireByChNo != null && _challanLorryHireByLrNo != null)
+            {
+                return;
+            }
+
+            _challanLorryHireByChNo = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            _challanLorryHireByLrNo = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                var challanRepo = new ChallanRepository { LedgerMode = "Challan" };
+                foreach (var challan in challanRepo.GetAll())
+                {
+                    if (challan == null)
+                    {
+                        continue;
+                    }
+
+                    var normalizedChNo = NormalizeKey(challan.ChallanNumber);
+                    if (!string.IsNullOrWhiteSpace(normalizedChNo) && !_challanLorryHireByChNo.ContainsKey(normalizedChNo))
+                    {
+                        _challanLorryHireByChNo[normalizedChNo] = challan.LorryHire;
+                    }
+
+                    foreach (var lrNo in SplitLrNumbers(challan.LRNumber))
+                    {
+                        var normalizedLrNo = NormalizeKey(lrNo);
+                        if (!string.IsNullOrWhiteSpace(normalizedLrNo) && !_challanLorryHireByLrNo.ContainsKey(normalizedLrNo))
+                        {
+                            _challanLorryHireByLrNo[normalizedLrNo] = challan.LorryHire;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                _challanLorryHireByChNo.Clear();
+                _challanLorryHireByLrNo.Clear();
+            }
+        }
+
+        private static IEnumerable<string> SplitLrNumbers(string lrNumbers)
+        {
+            return (lrNumbers ?? string.Empty)
+                .Split(new[] { ',', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x));
+        }
+
+        private static string NormalizeKey(string value)
+        {
+            return (value ?? string.Empty).Trim();
         }
 
         private void Entries_CollectionChanged(object sender, NotifyCollectionChangedEventArgs e)

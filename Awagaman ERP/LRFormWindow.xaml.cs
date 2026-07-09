@@ -318,6 +318,50 @@ namespace Awagaman_ERP
                 return;
             }
 
+            if (string.IsNullOrWhiteSpace(CurrentEntry?.ConsignorName))
+            {
+                MessageBox.Show("Consignor Name is mandatory.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                ConsignorNameBox?.Focus();
+                ConsignorNameBox?.SelectAll();
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(CurrentEntry?.ConsignorAddress))
+            {
+                MessageBox.Show("Consignor Address is mandatory.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                ConsignorAddressBox?.Focus();
+                ConsignorAddressBox?.SelectAll();
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(CurrentEntry?.ConsignorGST))
+            {
+                MessageBox.Show("Consignor GST is mandatory.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                ConsignorGSTBox?.Focus();
+                ConsignorGSTBox?.SelectAll();
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(CurrentEntry?.ConsigneeName))
+            {
+                MessageBox.Show("Consignee Name is mandatory.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                ConsigneeNameBox?.Focus();
+                ConsigneeNameBox?.SelectAll();
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(CurrentEntry?.ConsigneeAddress))
+            {
+                MessageBox.Show("Consignee Address is mandatory.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(CurrentEntry?.ConsigneeGST))
+            {
+                MessageBox.Show("Consignee GST is mandatory.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
             var enteredLrNo = (CurrentEntry.LRNo ?? string.Empty).Trim();
             var duplicate = _existingEntries?
                 .FirstOrDefault(x => x.Id != CurrentEntry.Id &&

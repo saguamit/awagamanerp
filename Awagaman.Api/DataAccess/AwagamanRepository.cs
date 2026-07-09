@@ -1,12 +1,18 @@
 using Awagaman.Api.Models;
+using Awagaman.Api.Helpers;
 using Dapper;
 using System.Globalization;
+using System.Threading;
 
 namespace Awagaman.Api.DataAccess;
 
 public sealed class AwagamanRepository
 {
     private readonly IPgConnectionFactory _factory;
+    private readonly SemaphoreSlim _purchaseLhsSyncLock = new(1, 1);
+    private readonly SemaphoreSlim _challanLhsSyncLock = new(1, 1);
+    private volatile bool _purchaseLhsDirty = true;
+    private volatile bool _challanLhsDirty = true;
 
     public AwagamanRepository(IPgConnectionFactory factory)
     {
@@ -39,6 +45,44 @@ public sealed class AwagamanRepository
         await using var conn = _factory.Create();
         await conn.OpenAsync();
         return await conn.ExecuteAsync(sql, param);
+    }
+
+    public async Task ResetAllDataAsync()
+    {
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+
+        await conn.ExecuteAsync("DELETE FROM reporting_tracks;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM tracking_entries;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM bill_comments;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM lr_comments;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM challan_comments;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM bill_receipts;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM bills;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM challan_ledger_entries;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM challans;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM lr_entries;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM cash_bank_statements;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM vehicle_ledger;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM parties;", transaction: tx);
+
+        await tx.CommitAsync();
+
+        MarkLhsDirty("Purchase LHS");
+        MarkLhsDirty("Challan LHS");
+    }
+
+    public async Task ResetLRDataAsync()
+    {
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+
+        await conn.ExecuteAsync("DELETE FROM lr_comments;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM lr_entries;", transaction: tx);
+
+        await tx.CommitAsync();
     }
 
     public async Task<DashboardSummary> GetDashboardSummaryAsync()
@@ -129,12 +173,28 @@ SELECT
 
     private static string SortDirection(bool ascending) => ascending ? "ASC" : "DESC";
 
+    private static string ChallanFinancialYearSql() =>
+        @"COALESCE(
+            CASE
+                WHEN POSITION('/' IN COALESCE(challan_number, '')) > 0 THEN
+                    CASE
+                        WHEN COALESCE(NULLIF(regexp_replace(split_part(split_part(COALESCE(challan_number, ''), '/', 2), '-', 1), '[^0-9]', '', 'g'), ''), '0')::int >= 50
+                            THEN 1900 + COALESCE(NULLIF(regexp_replace(split_part(split_part(COALESCE(challan_number, ''), '/', 2), '-', 1), '[^0-9]', '', 'g'), ''), '0')::int
+                        ELSE 2000 + COALESCE(NULLIF(regexp_replace(split_part(split_part(COALESCE(challan_number, ''), '/', 2), '-', 1), '[^0-9]', '', 'g'), ''), '0')::int
+                    END
+            END,
+            CASE WHEN EXTRACT(MONTH FROM date) >= 4 THEN EXTRACT(YEAR FROM date)::int ELSE EXTRACT(YEAR FROM date)::int - 1 END
+        )";
+
+    private static string ChallanSequenceSql() =>
+        "COALESCE(NULLIF(regexp_replace(split_part(COALESCE(challan_number, ''), '/', 1), '[^0-9]', '', 'g'), '')::int, 0)";
+
     private static string BuildChallanOrderBy(string? sortColumn, bool ascending)
     {
         var dir = SortDirection(ascending);
         return (sortColumn ?? string.Empty).Trim().ToLowerInvariant() switch
         {
-            "challannumber" => $"challan_number {dir}, sr {dir}, id {dir}",
+            "challannumber" => $"{ChallanFinancialYearSql()} {dir}, {ChallanSequenceSql()} {dir}, sr {dir}, id {dir}",
             "date" => $"date {dir} NULLS LAST, sr {dir}, id {dir}",
             "lrnumber" => $"lr_number {dir}, sr {dir}, id {dir}",
             "brokername" => $"broker_name {dir}, sr {dir}, id {dir}",
@@ -181,7 +241,12 @@ SELECT
         var dir = SortDirection(ascending);
         return (sortColumn ?? string.Empty).Trim().ToLowerInvariant() switch
         {
-            "lrno" => $"lrno {dir}, sr {dir}, id {dir}",
+            "lrno" => $@"CASE
+                            WHEN POSITION('/' IN COALESCE(lrno, '')) > 0 THEN split_part(COALESCE(lrno, ''), '/', 2)
+                            ELSE ''
+                         END {dir},
+                         COALESCE(NULLIF(regexp_replace(split_part(COALESCE(lrno, ''), '/', 1), '[^0-9]', '', 'g'), '')::int, 0) {dir},
+                         lrno {dir}, sr {dir}, id {dir}",
             "date" => $"date {dir} NULLS LAST, sr {dir}, id {dir}",
             "consignorname" => $"consignor_name {dir}, sr {dir}, id {dir}",
             "consigneename" => $"consignee_name {dir}, sr {dir}, id {dir}",
@@ -262,36 +327,65 @@ SELECT
         ExecuteAsync("DELETE FROM parties WHERE id = @id;", new { id });
 
     public Task<IEnumerable<VehicleEntry>> GetVehiclesAsync() =>
-        QueryAsync<VehicleEntry>("SELECT id, sr, vehicle_number AS VehicleNumber, owner_name AS OwnerName, pan_number AS PANNumber, engine_number AS EngineNumber, chassis_number AS ChassisNumber, vehicle_type AS VehicleType FROM vehicle_ledger ORDER BY sr, id;");
+        QueryAsync<VehicleEntry>("SELECT id, sr, vehicle_number AS VehicleNumber, owner_name AS OwnerName, pan_number AS PANNumber, engine_number AS EngineNumber, chassis_number AS ChassisNumber, vehicle_type AS VehicleType, driver_name AS DriverName, driver_mobile AS DriverMobile, licence_number AS LicenceNumber, policy_number AS PolicyNumber FROM vehicle_ledger ORDER BY sr, id;");
 
     public Task<VehicleEntry?> GetVehicleAsync(int id) =>
-        QuerySingleOrDefaultAsync<VehicleEntry>("SELECT id, sr, vehicle_number AS VehicleNumber, owner_name AS OwnerName, pan_number AS PANNumber, engine_number AS EngineNumber, chassis_number AS ChassisNumber, vehicle_type AS VehicleType FROM vehicle_ledger WHERE id = @id;", new { id });
+        QuerySingleOrDefaultAsync<VehicleEntry>("SELECT id, sr, vehicle_number AS VehicleNumber, owner_name AS OwnerName, pan_number AS PANNumber, engine_number AS EngineNumber, chassis_number AS ChassisNumber, vehicle_type AS VehicleType, driver_name AS DriverName, driver_mobile AS DriverMobile, licence_number AS LicenceNumber, policy_number AS PolicyNumber FROM vehicle_ledger WHERE id = @id;", new { id });
 
     public Task<IEnumerable<VehicleEntry>> SearchVehiclesAsync(string query) =>
         QueryAsync<VehicleEntry>(
-            "SELECT id, sr, vehicle_number AS VehicleNumber, owner_name AS OwnerName, pan_number AS PANNumber, engine_number AS EngineNumber, chassis_number AS ChassisNumber, vehicle_type AS VehicleType FROM vehicle_ledger WHERE vehicle_number ILIKE @q ORDER BY vehicle_number LIMIT 20;",
+            "SELECT id, sr, vehicle_number AS VehicleNumber, owner_name AS OwnerName, pan_number AS PANNumber, engine_number AS EngineNumber, chassis_number AS ChassisNumber, vehicle_type AS VehicleType, driver_name AS DriverName, driver_mobile AS DriverMobile, licence_number AS LicenceNumber, policy_number AS PolicyNumber FROM vehicle_ledger WHERE vehicle_number ILIKE @q ORDER BY vehicle_number LIMIT 20;",
             new { q = $"%{query ?? string.Empty}%" });
 
     public async Task<int> UpsertVehicleAsync(VehicleEntry entry)
     {
         var sql = entry.Id <= 0
-            ? @"INSERT INTO vehicle_ledger (sr, vehicle_number, owner_name, pan_number, engine_number, chassis_number, vehicle_type)
-                VALUES (@Sr, @VehicleNumber, @OwnerName, @PANNumber, @EngineNumber, @ChassisNumber, @VehicleType)
+            ? @"INSERT INTO vehicle_ledger (sr, vehicle_number, owner_name, pan_number, engine_number, chassis_number, vehicle_type, driver_name, driver_mobile, licence_number, policy_number)
+                VALUES (@Sr, @VehicleNumber, @OwnerName, @PANNumber, @EngineNumber, @ChassisNumber, @VehicleType, @DriverName, @DriverMobile, @LicenceNumber, @PolicyNumber)
                 RETURNING id;"
-            : @"UPDATE vehicle_ledger SET sr = @Sr, vehicle_number = @VehicleNumber, owner_name = @OwnerName, pan_number = @PANNumber, engine_number = @EngineNumber, chassis_number = @ChassisNumber, vehicle_type = @VehicleType
+            : @"UPDATE vehicle_ledger SET sr = @Sr, vehicle_number = @VehicleNumber, owner_name = @OwnerName, pan_number = @PANNumber, engine_number = @EngineNumber, chassis_number = @ChassisNumber, vehicle_type = @VehicleType, driver_name = @DriverName, driver_mobile = @DriverMobile, licence_number = @LicenceNumber, policy_number = @PolicyNumber
                 WHERE id = @Id;
                SELECT @Id;";
         return await ExecuteScalarIntAsync(sql, entry);
     }
 
-    private async Task SyncLhsCBSFromChallanAsync(ChallanEntry entry)
+    private async Task SyncVehicleLedgerFromChallanAsync(ChallanEntry entry)
+    {
+        if (entry == null || string.IsNullOrWhiteSpace(entry.VehicleNumber))
+        {
+            return;
+        }
+
+        var vehicleNumber = entry.VehicleNumber.Trim().ToUpperInvariant();
+        var existing = (await SearchVehiclesAsync(vehicleNumber))
+            .FirstOrDefault(x => string.Equals((x.VehicleNumber ?? string.Empty).Trim(), vehicleNumber, StringComparison.OrdinalIgnoreCase));
+
+        await UpsertVehicleAsync(new VehicleEntry
+        {
+            Id = existing?.Id ?? 0,
+            Sr = existing?.Sr ?? (await GetVehiclesAsync()).Count() + 1,
+            VehicleNumber = vehicleNumber,
+            OwnerName = string.IsNullOrWhiteSpace(entry.OwnerName) ? existing?.OwnerName : entry.OwnerName,
+            PANNumber = string.IsNullOrWhiteSpace(entry.PAN) ? existing?.PANNumber : entry.PAN,
+            EngineNumber = string.IsNullOrWhiteSpace(entry.EngineNo) ? existing?.EngineNumber : entry.EngineNo,
+            ChassisNumber = string.IsNullOrWhiteSpace(entry.ChassisNo) ? existing?.ChassisNumber : entry.ChassisNo,
+            VehicleType = string.IsNullOrWhiteSpace(entry.VehicleType) ? existing?.VehicleType : entry.VehicleType,
+            DriverName = string.IsNullOrWhiteSpace(entry.DriverName) ? existing?.DriverName : entry.DriverName,
+            DriverMobile = string.IsNullOrWhiteSpace(entry.DriverMobile) ? existing?.DriverMobile : entry.DriverMobile,
+            LicenceNumber = string.IsNullOrWhiteSpace(entry.LicenceNo) ? existing?.LicenceNumber : entry.LicenceNo,
+            PolicyNumber = string.IsNullOrWhiteSpace(entry.PolicyNo) ? existing?.PolicyNumber : entry.PolicyNo
+        });
+    }
+
+    private async Task SyncChallanCBSFromChallanAsync(ChallanEntry entry, string accountName)
     {
         if (entry == null || string.IsNullOrWhiteSpace(entry.ChallanNumber))
         {
             return;
         }
 
-        await EnsureCBSAccountAsync("LHS");
+        accountName = string.IsNullOrWhiteSpace(accountName) ? "Purchase LHS" : accountName.Trim();
+        await EnsureCBSAccountAsync(accountName);
 
         var challanNo = entry.ChallanNumber.Trim();
         var advanceParticulars = $"Challan {challanNo} - Advance Paid";
@@ -306,12 +400,12 @@ SELECT
 
         if (advanceNeft != 0m || advanceCash != 0m)
         {
-            var advanceDate = entry.AdvanceDate ?? entry.Date;
+            var advanceDate = (entry.AdvanceDate ?? entry.Date).Date;
             await UpsertAutoCBSRowAsync(new CashBankStatementEntry
             {
                 Date = advanceDate,
                 CBS = ToCBSMonth(advanceDate),
-                AccountName = "LHS",
+                AccountName = accountName,
                 Particulars = advanceParticulars,
                 Remarks = "Auto from Challan",
                 BankDr = 0m,
@@ -322,17 +416,17 @@ SELECT
         }
         else
         {
-            await DeleteAutoCBSRowsAsync("LHS", advanceParticulars, "Auto from Challan");
+            await DeleteAutoCBSRowsAsync(accountName, advanceParticulars, "Auto from Challan");
         }
 
         if (entry.BalancePaidNEFT != 0m || entry.BalancePaidCash != 0m)
         {
-            var balanceDate = entry.BalancePaidDate ?? entry.Date;
+            var balanceDate = (entry.BalancePaidDate ?? entry.Date).Date;
             await UpsertAutoCBSRowAsync(new CashBankStatementEntry
             {
                 Date = balanceDate,
                 CBS = ToCBSMonth(balanceDate),
-                AccountName = "LHS",
+                AccountName = accountName,
                 Particulars = balanceParticulars,
                 Remarks = "Auto from Challan",
                 BankDr = 0m,
@@ -343,7 +437,7 @@ SELECT
         }
         else
         {
-            await DeleteAutoCBSRowsAsync("LHS", balanceParticulars, "Auto from Challan");
+            await DeleteAutoCBSRowsAsync(accountName, balanceParticulars, "Auto from Challan");
         }
     }
 
@@ -369,8 +463,8 @@ SELECT
         var isCash = IsCashMode(entry.MOP);
         await UpsertAutoCBSRowAsync(new CashBankStatementEntry
         {
-            Date = entry.ReceiptDate == default ? DateTime.Today : entry.ReceiptDate,
-            CBS = ToCBSMonth(entry.ReceiptDate == default ? DateTime.Today : entry.ReceiptDate),
+            Date = (entry.ReceiptDate == default ? DateTime.Today : entry.ReceiptDate).Date,
+            CBS = ToCBSMonth((entry.ReceiptDate == default ? DateTime.Today : entry.ReceiptDate).Date),
             AccountName = "BFRS",
             Particulars = particulars,
             Remarks = remarks,
@@ -384,6 +478,10 @@ SELECT
     private async Task EnsureCBSAccountAsync(string accountName)
     {
         var name = (accountName ?? string.Empty).Trim();
+        if (string.Equals(name, "LHS", StringComparison.OrdinalIgnoreCase))
+        {
+            name = "Purchase LHS";
+        }
         if (name.Length == 0)
         {
             return;
@@ -394,7 +492,13 @@ SELECT
         await conn.ExecuteAsync(@"
 WITH existing AS (
     SELECT id FROM cbs_accounts
-    WHERE lower(trim(account_name)) = lower(trim(@AccountName))
+    WHERE CASE
+              WHEN lower(trim(account_name)) = 'lhs' THEN 'purchase lhs'
+              ELSE lower(trim(account_name))
+          END = CASE
+                    WHEN lower(trim(@AccountName)) = 'lhs' THEN 'purchase lhs'
+                    ELSE lower(trim(@AccountName))
+                END
     LIMIT 1
 ),
 updated AS (
@@ -416,15 +520,27 @@ WHERE NOT EXISTS (SELECT 1 FROM existing);", new { AccountName = name });
         }
 
         var accountName = row.AccountName.Trim();
+        if (string.Equals(accountName, "LHS", StringComparison.OrdinalIgnoreCase))
+        {
+            accountName = "Purchase LHS";
+        }
         var particulars = row.Particulars.Trim();
         var remarks = (row.Remarks ?? string.Empty).Trim();
+        row.Date = row.Date.Date;
+        row.CBS = string.IsNullOrWhiteSpace(row.CBS) ? ToCBSMonth(row.Date) : row.CBS;
 
         await using var conn = _factory.Create();
         await conn.OpenAsync();
         var existingIds = (await conn.QueryAsync<int>(@"
 SELECT id
 FROM cash_bank_statements
-WHERE lower(trim(account_name)) = lower(trim(@AccountName))
+WHERE CASE
+          WHEN lower(trim(account_name)) = 'lhs' THEN 'purchase lhs'
+          ELSE lower(trim(account_name))
+      END = CASE
+                WHEN lower(trim(@AccountName)) = 'lhs' THEN 'purchase lhs'
+                ELSE lower(trim(@AccountName))
+            END
   AND lower(trim(particulars)) = lower(trim(@Particulars))
   AND lower(trim(COALESCE(remarks, ''))) = lower(trim(@Remarks))
 ORDER BY id;", new { AccountName = accountName, Particulars = particulars, Remarks = remarks })).ToList();
@@ -478,7 +594,13 @@ VALUES (COALESCE((SELECT MAX(sr) FROM cash_bank_statements), 0) + 1, @CBS, @Date
     {
         await ExecuteAsync(@"
 DELETE FROM cash_bank_statements
-WHERE lower(trim(account_name)) = lower(trim(@AccountName))
+WHERE CASE
+          WHEN lower(trim(account_name)) = 'lhs' THEN 'purchase lhs'
+          ELSE lower(trim(account_name))
+      END = CASE
+                WHEN lower(trim(@AccountName)) = 'lhs' THEN 'purchase lhs'
+                ELSE lower(trim(@AccountName))
+            END
   AND lower(trim(particulars)) = lower(trim(@Particulars))
   AND lower(trim(COALESCE(remarks, ''))) = lower(trim(@Remarks));", new
         {
@@ -486,6 +608,134 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
             Particulars = (particulars ?? string.Empty).Trim(),
             Remarks = (remarks ?? string.Empty).Trim()
         });
+    }
+
+    private static string NormalizeLhsAccountName(string? accountName)
+    {
+        var normalized = string.IsNullOrWhiteSpace(accountName) ? "Purchase LHS" : accountName.Trim();
+        if (string.Equals(normalized, "LHS", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "Purchase LHS";
+        }
+
+        return normalized;
+    }
+
+    private static string GetAutoAdvanceParticular(string challanNo) => $"Challan {challanNo} - Advance Paid";
+
+    private static string GetAutoBalanceParticular(string challanNo) => $"Challan {challanNo} - Balance Paid";
+
+    private bool IsLhsDirty(string accountName)
+    {
+        return string.Equals(accountName, "Challan LHS", StringComparison.OrdinalIgnoreCase)
+            ? _challanLhsDirty
+            : _purchaseLhsDirty;
+    }
+
+    private void MarkLhsDirty(string accountName)
+    {
+        if (string.Equals(accountName, "Challan LHS", StringComparison.OrdinalIgnoreCase))
+        {
+            _challanLhsDirty = true;
+        }
+        else
+        {
+            _purchaseLhsDirty = true;
+        }
+    }
+
+    private void MarkLhsClean(string accountName)
+    {
+        if (string.Equals(accountName, "Challan LHS", StringComparison.OrdinalIgnoreCase))
+        {
+            _challanLhsDirty = false;
+        }
+        else
+        {
+            _purchaseLhsDirty = false;
+        }
+    }
+
+    private async Task EnsureLhsRowsSynchronizedAsync(string? accountName)
+    {
+        var normalizedAccount = NormalizeLhsAccountName(accountName);
+        if (!IsLhsDirty(normalizedAccount))
+        {
+            return;
+        }
+
+        var isChallanLhs = string.Equals(normalizedAccount, "Challan LHS", StringComparison.OrdinalIgnoreCase);
+        var syncLock = isChallanLhs ? _challanLhsSyncLock : _purchaseLhsSyncLock;
+
+        await syncLock.WaitAsync();
+        try
+        {
+            if (!IsLhsDirty(normalizedAccount))
+            {
+                return;
+            }
+
+            var rows = (await QueryAsync<ChallanEntry>(
+                GetChallanSelectSql(isChallanLhs) + " ORDER BY sr, id;"))
+                .Where(x => x != null && !string.IsNullOrWhiteSpace(x.ChallanNumber))
+                .ToList();
+
+            var expectedParticulars = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in rows)
+            {
+                await SyncChallanCBSFromChallanAsync(row, normalizedAccount);
+
+                var challanNo = row.ChallanNumber!.Trim();
+                var advanceNeft = row.AdvanceNEFT;
+                var advanceCash = row.AdvanceCash;
+                if (advanceNeft == 0m && advanceCash == 0m && row.AdvanceAmount != 0m)
+                {
+                    advanceCash = row.AdvanceAmount;
+                }
+
+                if (advanceNeft != 0m || advanceCash != 0m)
+                {
+                    expectedParticulars.Add(GetAutoAdvanceParticular(challanNo));
+                }
+
+                if (row.BalancePaidNEFT != 0m || row.BalancePaidCash != 0m)
+                {
+                    expectedParticulars.Add(GetAutoBalanceParticular(challanNo));
+                }
+            }
+
+            await using var conn = _factory.Create();
+            await conn.OpenAsync();
+            var staleRows = await conn.QueryAsync<(int Id, string Particulars)>(@"
+SELECT id AS Id, particulars AS Particulars
+FROM cash_bank_statements
+WHERE CASE
+          WHEN LOWER(TRIM(account_name)) = 'lhs' THEN 'purchase lhs'
+          ELSE LOWER(TRIM(account_name))
+      END = CASE
+                WHEN LOWER(TRIM(@accountName)) = 'lhs' THEN 'purchase lhs'
+                ELSE LOWER(TRIM(@accountName))
+            END
+  AND LOWER(TRIM(COALESCE(remarks, ''))) = 'auto from challan'
+  AND particulars ILIKE 'Challan % - %';", new { accountName = normalizedAccount });
+
+            var staleIds = staleRows
+                .Where(x => string.IsNullOrWhiteSpace(x.Particulars) || !expectedParticulars.Contains(x.Particulars.Trim()))
+                .Select(x => x.Id)
+                .Distinct()
+                .ToArray();
+
+            if (staleIds.Length > 0)
+            {
+                await conn.ExecuteAsync("DELETE FROM cash_bank_statements WHERE id = ANY(@Ids);", new { Ids = staleIds });
+            }
+
+            MarkLhsClean(normalizedAccount);
+        }
+        finally
+        {
+            syncLock.Release();
+        }
     }
 
     private static string ToCBSMonth(DateTime date)
@@ -526,7 +776,7 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
     public Task<IEnumerable<ChallanEntry>> GetChallansAsync(string? ledgerKind = null)
     {
         var challanLedgerMode = IsChallanLedgerKind(ledgerKind);
-        return QueryAsync<ChallanEntry>(GetChallanSelectSql(challanLedgerMode) + " ORDER BY sr, id;");
+        return QueryAsync<ChallanEntry>(GetChallanSelectSql(challanLedgerMode) + " ORDER BY " + BuildChallanOrderBy("challannumber", ascending: false) + ";");
     }
 
     public async Task<PagedResult<ChallanEntry>> GetChallansPageAsync(
@@ -631,8 +881,9 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
         return QuerySingleOrDefaultAsync<ChallanEntry>($"{GetChallanSelectSql(challanLedgerMode)} WHERE id = @id;", new { id });
     }
 
-    public async Task<int> UpsertChallanAsync(ChallanEntry entry, string? ledgerKind = null)
+    public async Task<int> UpsertChallanAsync(ChallanEntry entry, string? ledgerKind = null, bool skipCbsSync = false)
     {
+        entry.ChallanNumber = ChallanNumberFormatter.Normalize(entry.ChallanNumber, entry.Date);
         var challanLedgerMode = IsChallanLedgerKind(ledgerKind);
         var tableName = GetChallanTableName(challanLedgerMode);
         var sql = entry.Id <= 0
@@ -692,12 +943,22 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
         entry.Id = id;
         if (challanLedgerMode)
         {
-            await SyncLhsCBSFromChallanAsync(entry);
+            if (!skipCbsSync)
+            {
+                await SyncChallanCBSFromChallanAsync(entry, "Challan LHS");
+            }
+            MarkLhsDirty("Challan LHS");
         }
         else
         {
+            if (!skipCbsSync)
+            {
+                await SyncChallanCBSFromChallanAsync(entry, "Purchase LHS");
+            }
             await SyncRemoteChallanMirrorAsync(entry);
+            MarkLhsDirty("Purchase LHS");
         }
+        await SyncVehicleLedgerFromChallanAsync(entry);
         return id;
     }
 
@@ -710,15 +971,23 @@ WHERE lower(trim(account_name)) = lower(trim(@AccountName))
         if (challanLedgerMode && challan != null && !string.IsNullOrWhiteSpace(challan.ChallanNumber))
         {
             var challanNo = challan.ChallanNumber.Trim();
-            await DeleteAutoCBSRowsAsync("LHS", $"Challan {challanNo} - Advance Paid", "Auto from Challan");
-            await DeleteAutoCBSRowsAsync("LHS", $"Challan {challanNo} - Balance Paid", "Auto from Challan");
+            await DeleteAutoCBSRowsAsync("Challan LHS", $"Challan {challanNo} - Advance Paid", "Auto from Challan");
+            await DeleteAutoCBSRowsAsync("Challan LHS", $"Challan {challanNo} - Balance Paid", "Auto from Challan");
+            MarkLhsDirty("Challan LHS");
         }
         else if (!challanLedgerMode && challan != null)
         {
+            if (!string.IsNullOrWhiteSpace(challan.ChallanNumber))
+            {
+                var challanNo = challan.ChallanNumber.Trim();
+                await DeleteAutoCBSRowsAsync("Purchase LHS", $"Challan {challanNo} - Advance Paid", "Auto from Challan");
+                await DeleteAutoCBSRowsAsync("Purchase LHS", $"Challan {challanNo} - Balance Paid", "Auto from Challan");
+            }
             await ExecuteAsync(@"DELETE FROM challan_ledger_entries
 WHERE source_purchase_id = @SourcePurchaseId
    OR lower(trim(challan_number)) = lower(trim(@ChallanNumber));",
                 new { SourcePurchaseId = challan.Id, ChallanNumber = challan.ChallanNumber ?? string.Empty });
+            MarkLhsDirty("Purchase LHS");
         }
 
         return affected;
@@ -746,7 +1015,7 @@ WHERE source_purchase_id = @SourcePurchaseId
         var mirror = CreateRemoteMirrorFromPurchase(purchaseEntry, existingMirror);
 
         mirror.SourcePurchaseId = purchaseEntry.Id;
-        await UpsertChallanAsync(mirror, "challan");
+        await UpsertChallanAsync(mirror, "challan", skipCbsSync: true);
     }
 
     private static ChallanEntry CreateRemoteMirrorFromPurchase(ChallanEntry purchaseEntry, ChallanEntry? existingMirror)
@@ -1017,13 +1286,38 @@ WHERE source_purchase_id = @SourcePurchaseId
         ExecuteAsync("DELETE FROM bills WHERE id = @id;", new { id });
 
     public Task<IEnumerable<CBSAccountEntry>> GetCBSAccountsAsync() =>
-        QueryAsync<CBSAccountEntry>("SELECT id, sr, account_name AS AccountName, is_active AS IsActive FROM cbs_accounts ORDER BY sr, id;");
+        QueryAsync<CBSAccountEntry>(@"
+SELECT id, sr, account_name AS AccountName, is_active AS IsActive
+FROM (
+    SELECT id,
+           sr,
+           CASE
+               WHEN lower(trim(account_name)) = 'lhs' THEN 'Purchase LHS'
+               ELSE account_name
+           END AS account_name,
+           is_active,
+           row_number() OVER (
+               PARTITION BY CASE
+                                WHEN lower(trim(account_name)) = 'lhs' THEN 'purchase lhs'
+                                ELSE lower(trim(account_name))
+                            END
+               ORDER BY is_active DESC, sr, id
+           ) AS rn
+    FROM cbs_accounts
+) q
+WHERE rn = 1
+ORDER BY sr, id;");
 
     public Task<CBSAccountEntry?> GetCBSAccountAsync(int id) =>
         QuerySingleOrDefaultAsync<CBSAccountEntry>("SELECT id, sr, account_name AS AccountName, is_active AS IsActive FROM cbs_accounts WHERE id = @id;", new { id });
 
     public async Task<int> UpsertCBSAccountAsync(CBSAccountEntry entry)
     {
+        entry.AccountName = (entry.AccountName ?? string.Empty).Trim();
+        if (string.Equals(entry.AccountName, "LHS", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.AccountName = "Purchase LHS";
+        }
         var sql = entry.Id <= 0
             ? @"INSERT INTO cbs_accounts (sr, account_name, is_active)
                 VALUES (@Sr, @AccountName, @IsActive)
@@ -1034,8 +1328,19 @@ WHERE source_purchase_id = @SourcePurchaseId
         return await ExecuteScalarIntAsync(sql, entry);
     }
 
+    public Task<int> DeleteCBSAccountAsync(int id) =>
+        ExecuteAsync("DELETE FROM cbs_accounts WHERE id = @id;", new { id });
+
     public Task<IEnumerable<CashBankStatementEntry>> GetCashBankStatementsAsync(string? accountName = null, DateTime? fromDate = null, DateTime? toDate = null)
     {
+        var normalizedAccount = string.IsNullOrWhiteSpace(accountName) ? null : NormalizeLhsAccountName(accountName);
+        if (normalizedAccount != null &&
+            (string.Equals(normalizedAccount, "Purchase LHS", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(normalizedAccount, "Challan LHS", StringComparison.OrdinalIgnoreCase)))
+        {
+            return GetCashBankStatementsWithLhsSyncAsync(normalizedAccount, fromDate, toDate);
+        }
+
         var sql = @"SELECT
             id, sr, cbs AS CBS, date, account_name AS AccountName, particulars AS Particulars, remarks AS Remarks,
             bank_dr AS BankDr, bank_cr AS BankCr, cash_dr AS CashDr, cash_cr AS CashCr
@@ -1069,29 +1374,77 @@ WHERE source_purchase_id = @SourcePurchaseId
         return QueryAsync<CashBankStatementEntry>(sql, parameters);
     }
 
-    public Task<IEnumerable<LhsSummaryEntry>> GetLhsSummaryAsync(DateTime? fromDate = null, DateTime? toDate = null)
+    private async Task<IEnumerable<CashBankStatementEntry>> GetCashBankStatementsWithLhsSyncAsync(string accountName, DateTime? fromDate, DateTime? toDate)
     {
+        await EnsureLhsRowsSynchronizedAsync(accountName);
+
+        var sql = @"SELECT
+            id, sr, cbs AS CBS, date, account_name AS AccountName, particulars AS Particulars, remarks AS Remarks,
+            bank_dr AS BankDr, bank_cr AS BankCr, cash_dr AS CashDr, cash_cr AS CashCr
+            FROM cash_bank_statements
+            WHERE CASE
+                      WHEN LOWER(TRIM(account_name)) = 'lhs' THEN 'purchase lhs'
+                      ELSE LOWER(TRIM(account_name))
+                  END = CASE
+                            WHEN LOWER(TRIM(@accountName)) = 'lhs' THEN 'purchase lhs'
+                            ELSE LOWER(TRIM(@accountName))
+                        END";
+
+        var parameters = new DynamicParameters(new { accountName });
+        if (fromDate.HasValue)
+        {
+            sql += " AND date::date >= @fromDate";
+            parameters.Add("fromDate", fromDate.Value.Date);
+        }
+        if (toDate.HasValue)
+        {
+            sql += " AND date::date <= @toDate";
+            parameters.Add("toDate", toDate.Value.Date);
+        }
+
+        sql += " ORDER BY date DESC, sr, id;";
+        return await QueryAsync<CashBankStatementEntry>(sql, parameters);
+    }
+
+    public async Task<IEnumerable<LhsSummaryEntry>> GetLhsSummaryAsync(DateTime? fromDate = null, DateTime? toDate = null, string? accountName = "Purchase LHS")
+    {
+        var normalizedAccount = NormalizeLhsAccountName(accountName);
+        await EnsureLhsRowsSynchronizedAsync(normalizedAccount);
+        var sourceTable = string.Equals(normalizedAccount, "Challan LHS", StringComparison.OrdinalIgnoreCase)
+            ? "challan_ledger_entries"
+            : "challans";
         var sql = @"
 SELECT
-    cbs.date AS Date,
+    cbs.date::date AS Date,
+    COALESCE(parsed.challan_number, '') AS ChallanNumber,
     COALESCE(ch.broker_name, '') AS BrokerName,
     COALESCE(ch.from_location, '') AS ""From"",
     COALESCE(ch.to_location, '') AS ""To"",
     COALESCE(ch.vehicle_number, '') AS VehicleNumber,
-    cbs.bank_dr AS BankDr,
-    cbs.bank_cr AS BankCr,
-    cbs.cash_dr AS CashDr,
-    cbs.cash_cr AS CashCr
+    SUM(CASE WHEN LOWER(COALESCE(cbs.particulars, '')) LIKE '%advance paid%' THEN cbs.bank_cr ELSE 0 END) AS AdvanceNeft,
+    SUM(CASE WHEN LOWER(COALESCE(cbs.particulars, '')) LIKE '%advance paid%' THEN cbs.cash_cr ELSE 0 END) AS AdvanceCash,
+    SUM(CASE WHEN LOWER(COALESCE(cbs.particulars, '')) LIKE '%balance paid%' THEN cbs.bank_cr ELSE 0 END) AS BalanceNeft,
+    SUM(CASE WHEN LOWER(COALESCE(cbs.particulars, '')) LIKE '%balance paid%' THEN cbs.cash_cr ELSE 0 END) AS BalanceCash,
+    SUM(cbs.bank_dr) AS BankDr,
+    SUM(cbs.bank_cr) AS BankCr,
+    SUM(cbs.cash_dr) AS CashDr,
+    SUM(cbs.cash_cr) AS CashCr
 FROM cash_bank_statements cbs
 LEFT JOIN LATERAL (
     SELECT (regexp_match(COALESCE(cbs.particulars, ''), 'Challan\s+([^\s\-\|\t\r\n]+)', 'i'))[1] AS challan_number
 ) parsed ON TRUE
-LEFT JOIN challans ch
+LEFT JOIN " + sourceTable + @" ch
     ON LOWER(TRIM(ch.challan_number)) = LOWER(TRIM(COALESCE(parsed.challan_number, '')))
-WHERE LOWER(TRIM(cbs.account_name)) = 'lhs'";
+WHERE CASE
+          WHEN LOWER(TRIM(cbs.account_name)) = 'lhs' THEN 'purchase lhs'
+          ELSE LOWER(TRIM(cbs.account_name))
+      END = CASE
+                WHEN LOWER(TRIM(@accountName)) = 'lhs' THEN 'purchase lhs'
+                ELSE LOWER(TRIM(@accountName))
+            END";
 
         var conditions = new List<string>();
-        var parameters = new DynamicParameters();
+        var parameters = new DynamicParameters(new { accountName = normalizedAccount });
         if (fromDate.HasValue)
         {
             conditions.Add("cbs.date::date >= @fromDate");
@@ -1107,8 +1460,16 @@ WHERE LOWER(TRIM(cbs.account_name)) = 'lhs'";
             sql += " AND " + string.Join(" AND ", conditions);
         }
 
-        sql += " ORDER BY cbs.date DESC, cbs.sr, cbs.id;";
-        return QueryAsync<LhsSummaryEntry>(sql, parameters);
+        sql += @"
+GROUP BY
+    cbs.date::date,
+    COALESCE(parsed.challan_number, ''),
+    COALESCE(ch.broker_name, ''),
+    COALESCE(ch.from_location, ''),
+    COALESCE(ch.to_location, ''),
+    COALESCE(ch.vehicle_number, '')
+ORDER BY cbs.date::date DESC, COALESCE(parsed.challan_number, '') DESC;";
+        return await QueryAsync<LhsSummaryEntry>(sql, parameters);
     }
 
     public Task<IEnumerable<ChallanEntry>> GetChallansByNumbersAsync(IEnumerable<string> challanNumbers, string? ledgerKind = null)
@@ -1138,6 +1499,8 @@ ORDER BY date DESC, sr, id;", new { challanNumbers = keys });
 
     public async Task<int> UpsertCashBankStatementAsync(CashBankStatementEntry entry)
     {
+        entry.Date = entry.Date.Date;
+        entry.CBS = string.IsNullOrWhiteSpace(entry.CBS) ? ToCBSMonth(entry.Date) : entry.CBS;
         var sql = entry.Id <= 0
             ? @"INSERT INTO cash_bank_statements (sr, cbs, date, account_name, particulars, remarks, bank_dr, bank_cr, cash_dr, cash_cr)
                 VALUES (@Sr, @CBS, @Date, @AccountName, @Particulars, @Remarks, @BankDr, @BankCr, @CashDr, @CashCr)
@@ -1148,6 +1511,9 @@ ORDER BY date DESC, sr, id;", new { challanNumbers = keys });
                SELECT @Id;";
         return await ExecuteScalarIntAsync(sql, entry);
     }
+
+    public Task<int> DeleteCashBankStatementAsync(int id) =>
+        ExecuteAsync("DELETE FROM cash_bank_statements WHERE id = @id;", new { id });
 
     public Task<IEnumerable<BillReceiptEntry>> GetBillReceiptsAsync() =>
         QueryAsync<BillReceiptEntry>(@"SELECT

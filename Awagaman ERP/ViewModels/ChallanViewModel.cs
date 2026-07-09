@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows;
 using Awagaman_ERP.Data;
+using Awagaman_ERP.Helpers;
 using Awagaman_ERP.Models;
 
 namespace Awagaman_ERP.ViewModels
@@ -39,9 +40,11 @@ namespace Awagaman_ERP.ViewModels
         // Exposed for the Sorting event handler to determine toggle direction
         public bool IsCurrentSortAscending
         {
-            get => string.IsNullOrEmpty(_sortColumn) || _sortAscending;
+            get => GetEffectiveSortAscending();
         }
         public string GetSortColumn() => _sortColumn;
+        private string GetEffectiveSortColumn() => string.IsNullOrWhiteSpace(_sortColumn) ? "ChallanNumber" : _sortColumn;
+        private bool GetEffectiveSortAscending() => string.IsNullOrWhiteSpace(_sortColumn) ? false : _sortAscending;
         private List<ChallanEntry> _nextPageCache;
         private List<ChallanEntry> _prevPageCache;
         private bool _isLoadingPage;
@@ -118,7 +121,14 @@ namespace Awagaman_ERP.ViewModels
                 _pageLoaded = false;
                 _nextPageCache = null;
                 _prevPageCache = null;
-                CurrentPage = 1;
+                _currentPage = 1;
+                OnPropertyChanged(nameof(CurrentPage));
+                OnPropertyChanged(nameof(PageInfo));
+                OnPropertyChanged(nameof(CanGoPrevious));
+                OnPropertyChanged(nameof(CanGoNext));
+                OnPropertyChanged(nameof(CanGoFirst));
+                OnPropertyChanged(nameof(CanGoLast));
+                OnPropertyChanged(nameof(HasLoadedPage));
             }
         }
 
@@ -396,19 +406,21 @@ namespace Awagaman_ERP.ViewModels
                         : _repository.GetTotalDue(_searchFilter, UseLhsDerivedValues);
 
                 List<ChallanEntry> items;
+                var sortColumn = GetEffectiveSortColumn();
+                var sortAscending = GetEffectiveSortAscending();
                 if (_hasAdvancedFilter)
                 {
-                    items = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, CurrentPage, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues);
-                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, 1, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues); }
+                    items = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, CurrentPage, PageSize, sortColumn, sortAscending, UseLhsDerivedValues);
+                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, 1, PageSize, sortColumn, sortAscending, UseLhsDerivedValues); }
                 }
                 else if (string.IsNullOrEmpty(_searchFilter))
                 {
-                    items = _repository.GetPage(CurrentPage, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues);
+                    items = _repository.GetPage(CurrentPage, PageSize, sortColumn, sortAscending, UseLhsDerivedValues);
                 }
                 else
                 {
-                    items = _repository.Search(_searchFilter, CurrentPage, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues);
-                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.Search(_searchFilter, 1, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues); }
+                    items = _repository.Search(_searchFilter, CurrentPage, PageSize, sortColumn, sortAscending, UseLhsDerivedValues);
+                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.Search(_searchFilter, 1, PageSize, sortColumn, sortAscending, UseLhsDerivedValues); }
                 }
 
                 PagedEntries = new ObservableCollection<ChallanEntry>(items);
@@ -420,11 +432,11 @@ namespace Awagaman_ERP.ViewModels
                 if (!BackendSettings.UseRemoteApi && CurrentPage < TotalPages)
                 {
                     if (_hasAdvancedFilter)
-                        _nextPageCache = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, CurrentPage + 1, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues);
+                        _nextPageCache = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, CurrentPage + 1, PageSize, sortColumn, sortAscending, UseLhsDerivedValues);
                     else if (string.IsNullOrEmpty(_searchFilter))
-                        _nextPageCache = _repository.GetPage(CurrentPage + 1, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues);
+                        _nextPageCache = _repository.GetPage(CurrentPage + 1, PageSize, sortColumn, sortAscending, UseLhsDerivedValues);
                     else
-                        _nextPageCache = _repository.Search(_searchFilter, CurrentPage + 1, PageSize, _sortColumn, _sortAscending, UseLhsDerivedValues);
+                        _nextPageCache = _repository.Search(_searchFilter, CurrentPage + 1, PageSize, sortColumn, sortAscending, UseLhsDerivedValues);
                 }
                 else
                 {
@@ -495,28 +507,14 @@ namespace Awagaman_ERP.ViewModels
             var filterFrom = _filterFrom;
             var filterTo = _filterTo;
             var hasAdvancedFilter = _hasAdvancedFilter;
-            var sortColumn = _sortColumn;
-            var sortAscending = _sortAscending;
+            var sortColumn = GetEffectiveSortColumn();
+            var sortAscending = GetEffectiveSortAscending();
             var countDirty = _countDirty;
 
             Task.Run(() =>
             {
                 var result = new PageLoadResult();
                 result.CurrentPage = requestedPage;
-
-                if (countDirty)
-                {
-                    if (hasAdvancedFilter)
-                        result.TotalCount = _repository.GetTotalCountAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo);
-                    else if (string.IsNullOrEmpty(searchFilter))
-                        result.TotalCount = _repository.GetTotalCount();
-                    else
-                        result.TotalCount = _repository.GetTotalCount(searchFilter);
-                }
-                else
-                {
-                    result.TotalCount = _totalCount;
-                }
 
                 if (hasAdvancedFilter)
                     result.TotalDue = _repository.GetTotalDueAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, UseLhsDerivedValues);
@@ -525,26 +523,63 @@ namespace Awagaman_ERP.ViewModels
                 else
                     result.TotalDue = _repository.GetTotalDue(searchFilter, UseLhsDerivedValues);
 
-                if (hasAdvancedFilter)
+                var challanRepository = _repository as ChallanRepository;
+                if (challanRepository != null)
                 {
-                    result.Items = _repository.SearchAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, requestedPage, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
+                    var pageResult = hasAdvancedFilter
+                        ? challanRepository.GetRemotePageResult(requestedPage, requestedPageSize, null, sortColumn, sortAscending, filterChallanNo, filterLRNo, filterFrom, filterTo, UseLhsDerivedValues)
+                        : challanRepository.GetRemotePageResult(requestedPage, requestedPageSize, searchFilter, sortColumn, sortAscending, null, null, null, null, UseLhsDerivedValues);
+
+                    result.TotalCount = pageResult?.TotalCount ?? 0;
+                    result.Items = pageResult?.Items ?? new List<ChallanEntry>();
+
                     if (!result.Items.Any() && requestedPage > 1)
                     {
                         result.CurrentPage = 1;
-                        result.Items = _repository.SearchAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, 1, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
+                        pageResult = hasAdvancedFilter
+                            ? challanRepository.GetRemotePageResult(1, requestedPageSize, null, sortColumn, sortAscending, filterChallanNo, filterLRNo, filterFrom, filterTo, UseLhsDerivedValues)
+                            : challanRepository.GetRemotePageResult(1, requestedPageSize, searchFilter, sortColumn, sortAscending, null, null, null, null, UseLhsDerivedValues);
+                        result.TotalCount = pageResult?.TotalCount ?? 0;
+                        result.Items = pageResult?.Items ?? new List<ChallanEntry>();
                     }
-                }
-                else if (string.IsNullOrEmpty(searchFilter))
-                {
-                    result.Items = _repository.GetPage(requestedPage, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
                 }
                 else
                 {
-                    result.Items = _repository.Search(searchFilter, requestedPage, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
-                    if (!result.Items.Any() && requestedPage > 1)
+                    if (countDirty)
                     {
-                        result.CurrentPage = 1;
-                        result.Items = _repository.Search(searchFilter, 1, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
+                        if (hasAdvancedFilter)
+                            result.TotalCount = _repository.GetTotalCountAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo);
+                        else if (string.IsNullOrEmpty(searchFilter))
+                            result.TotalCount = _repository.GetTotalCount();
+                        else
+                            result.TotalCount = _repository.GetTotalCount(searchFilter);
+                    }
+                    else
+                    {
+                        result.TotalCount = _totalCount;
+                    }
+
+                    if (hasAdvancedFilter)
+                    {
+                        result.Items = _repository.SearchAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, requestedPage, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
+                        if (!result.Items.Any() && requestedPage > 1)
+                        {
+                            result.CurrentPage = 1;
+                            result.Items = _repository.SearchAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, 1, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
+                        }
+                    }
+                    else if (string.IsNullOrEmpty(searchFilter))
+                    {
+                        result.Items = _repository.GetPage(requestedPage, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
+                    }
+                    else
+                    {
+                        result.Items = _repository.Search(searchFilter, requestedPage, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
+                        if (!result.Items.Any() && requestedPage > 1)
+                        {
+                            result.CurrentPage = 1;
+                            result.Items = _repository.Search(searchFilter, 1, requestedPageSize, sortColumn, sortAscending, UseLhsDerivedValues);
+                        }
                     }
                 }
 
@@ -831,19 +866,36 @@ namespace Awagaman_ERP.ViewModels
                 return;
             }
 
-            if (!PagedEntries.Any(x => x.Id == entry.Id && entry.Id > 0))
+            var existing = PagedEntries.FirstOrDefault(x => x != null && ((entry.Id > 0 && x.Id == entry.Id) ||
+                (!string.IsNullOrWhiteSpace(entry.ChallanNumber) &&
+                 string.Equals(x.ChallanNumber, entry.ChallanNumber, StringComparison.OrdinalIgnoreCase))));
+
+            var insertedNewRow = false;
+
+            if (existing != null)
             {
-                if (_sortAscending)
+                var index = PagedEntries.IndexOf(existing);
+                if (index >= 0)
                 {
-                    PagedEntries.Add(entry);
+                    PagedEntries[index] = entry;
                 }
-                else
+            }
+            else
+            {
+                var insertIndex = GetInsertIndexForCurrentSort(entry);
+                PagedEntries.Insert(insertIndex, entry);
+                insertedNewRow = true;
+
+                if (PagedEntries.Count > PageSize)
                 {
-                    PagedEntries.Insert(0, entry);
+                    PagedEntries.RemoveAt(PagedEntries.Count - 1);
                 }
             }
 
-            _totalCount = Math.Max(_totalCount + 1, PagedEntries.Count);
+            if (insertedNewRow)
+            {
+                _totalCount = Math.Max(_totalCount + 1, PagedEntries.Count);
+            }
             FilteredEntriesCount = _totalCount;
             _countDirty = true;
             _nextPageCache = null;
@@ -929,14 +981,139 @@ namespace Awagaman_ERP.ViewModels
             OnPropertyChanged(nameof(CanGoLast));
         }
 
+        private int GetInsertIndexForCurrentSort(ChallanEntry entry)
+        {
+            if (PagedEntries == null || PagedEntries.Count == 0)
+            {
+                return 0;
+            }
+
+            for (var i = 0; i < PagedEntries.Count; i++)
+            {
+                if (CompareEntriesForCurrentSort(entry, PagedEntries[i]) < 0)
+                {
+                    return i;
+                }
+            }
+
+            return PagedEntries.Count;
+        }
+
+        private int CompareEntriesForCurrentSort(ChallanEntry left, ChallanEntry right)
+        {
+            if (left == null && right == null) return 0;
+            if (left == null) return 1;
+            if (right == null) return -1;
+
+            var sortKey = GetEffectiveSortColumn().Trim().ToLowerInvariant();
+            var multiplier = GetEffectiveSortAscending() ? 1 : -1;
+
+            int CompareString(string a, string b) => string.Compare(a ?? string.Empty, b ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            int CompareDate(DateTime a, DateTime b) => DateTime.Compare(a, b);
+            int CompareDecimal(decimal a, decimal b) => decimal.Compare(a, b);
+
+            int result;
+            switch (sortKey)
+            {
+                case "challannumber":
+                    result = ChallanNumberFormatter.GetFinancialYearStart(left.ChallanNumber, left.Date)
+                        .CompareTo(ChallanNumberFormatter.GetFinancialYearStart(right.ChallanNumber, right.Date));
+                    if (result == 0)
+                    {
+                        result = ChallanNumberFormatter.GetSequence(left.ChallanNumber)
+                            .CompareTo(ChallanNumberFormatter.GetSequence(right.ChallanNumber));
+                    }
+                    if (result == 0)
+                    {
+                        result = CompareString(left.ChallanNumber, right.ChallanNumber);
+                    }
+                    break;
+                case "date":
+                    result = CompareDate(left.Date, right.Date);
+                    break;
+                case "lrnumber":
+                    result = CompareString(left.LRNumber, right.LRNumber);
+                    break;
+                case "brokername":
+                    result = CompareString(left.BrokerName, right.BrokerName);
+                    break;
+                case "from":
+                case "fromlocation":
+                    result = CompareString(left.From, right.From);
+                    break;
+                case "to":
+                case "tolocation":
+                    result = CompareString(left.To, right.To);
+                    break;
+                case "vehiclenumber":
+                    result = CompareString(left.VehicleNumber, right.VehicleNumber);
+                    break;
+                case "vehicletype":
+                    result = CompareString(left.VehicleType, right.VehicleType);
+                    break;
+                case "lorryhire":
+                    result = CompareDecimal(left.LorryHire, right.LorryHire);
+                    break;
+                case "other":
+                case "otheramount":
+                    result = CompareDecimal(left.Other, right.Other);
+                    break;
+                case "lhs":
+                    result = CompareDecimal(left.LHS, right.LHS);
+                    break;
+                case "balance":
+                    result = CompareDecimal(UseLhsDerivedValues ? left.ChallanBalance : left.Balance, UseLhsDerivedValues ? right.ChallanBalance : right.Balance);
+                    break;
+                case "due":
+                    result = CompareDecimal(UseLhsDerivedValues ? left.ChallanDue : left.Due, UseLhsDerivedValues ? right.ChallanDue : right.Due);
+                    break;
+                case "margin":
+                    result = CompareDecimal(UseLhsDerivedValues ? left.ChallanMargin : left.Margin, UseLhsDerivedValues ? right.ChallanMargin : right.Margin);
+                    break;
+                case "sr":
+                default:
+                    result = left.Sr.CompareTo(right.Sr);
+                    break;
+            }
+
+            result *= multiplier;
+            if (result != 0)
+            {
+                return result;
+            }
+
+            return multiplier * left.Id.CompareTo(right.Id);
+        }
+
         public void SetSort(string column, bool ascending)
         {
-            _sortColumn = column ?? "";
-            _sortAscending = ascending;
+            if (string.IsNullOrWhiteSpace(column))
+            {
+                _sortColumn = "ChallanNumber";
+                _sortAscending = false;
+            }
+            else
+            {
+                _sortColumn = column;
+                _sortAscending = ascending;
+            }
             _countDirty = false;
             _nextPageCache = null;
             _prevPageCache = null;
-            LoadPage();
+            _pageLoaded = false;
+            CurrentPage = 1;
+            SaveColumnSettings();
+        }
+
+        public void ResetToLatestChallanView()
+        {
+            _sortColumn = "ChallanNumber";
+            _sortAscending = false;
+            _countDirty = true;
+            _nextPageCache = null;
+            _prevPageCache = null;
+            _pageLoaded = false;
+            CurrentPage = 1;
             SaveColumnSettings();
         }
 

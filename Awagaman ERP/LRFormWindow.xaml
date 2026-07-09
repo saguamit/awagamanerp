@@ -149,7 +149,7 @@
                             </Grid.ColumnDefinitions>
                             
                             <StackPanel Grid.Column="0">
-                                <TextBlock Text="LR No." Style="{StaticResource FieldLabelStyle}" />
+                                <TextBlock Text="LR No. *" Style="{StaticResource FieldLabelStyle}" />
                                 <TextBox Text="{Binding CurrentEntry.LRNo, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" LostFocus="LRNo_LostFocus" />
                             </StackPanel>
                             
@@ -199,7 +199,7 @@
                     <Border Grid.Column="0" Style="{StaticResource CardStyle}" Background="#F7FFF8" BorderBrush="#CFEBD3">
                         <StackPanel>
                             <TextBlock Text="Consignor" Style="{StaticResource SectionHeaderStyle}" />
-                            <TextBlock Text="Name" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBlock Text="Name *" Style="{StaticResource FieldLabelStyle}" />
                             <Grid>
                                 <TextBox x:Name="ConsignorNameBox" Text="{Binding CurrentEntry.ConsignorName, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,12" LostFocus="PartyName_LostFocus" TextChanged="ConsignorName_TextChanged" />
                                 <Popup x:Name="ConsignorPopup" PlacementTarget="{Binding ElementName=ConsignorNameBox}" Placement="Bottom" StaysOpen="False" Width="{Binding ActualWidth, ElementName=ConsignorNameBox}">
@@ -208,9 +208,9 @@
                                     </Border>
                                 </Popup>
                             </Grid>
-                            <TextBlock Text="Address" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBlock Text="Address *" Style="{StaticResource FieldLabelStyle}" />
                             <TextBox x:Name="ConsignorAddressBox" Text="{Binding CurrentEntry.ConsignorAddress, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,12" />
-                            <TextBlock Text="GST" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBlock Text="GST *" Style="{StaticResource FieldLabelStyle}" />
                             <TextBox x:Name="ConsignorGSTBox" Text="{Binding CurrentEntry.ConsignorGST, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" CharacterCasing="Upper" />
                         </StackPanel>
                     </Border>
@@ -218,7 +218,7 @@
                     <Border Grid.Column="2" Style="{StaticResource CardStyle}" Background="#FFFDF6" BorderBrush="#F0E2B8">
                         <StackPanel>
                             <TextBlock Text="Consignee" Style="{StaticResource SectionHeaderStyle}" />
-                            <TextBlock Text="Name" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBlock Text="Name *" Style="{StaticResource FieldLabelStyle}" />
                             <Grid>
                                 <TextBox x:Name="ConsigneeNameBox" Text="{Binding CurrentEntry.ConsigneeName, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,12" LostFocus="ConsigneeName_LostFocus" TextChanged="ConsigneeName_TextChanged" />
                                 <Popup x:Name="ConsigneePopup" PlacementTarget="{Binding ElementName=ConsigneeNameBox}" Placement="Bottom" StaysOpen="False" Width="{Binding ActualWidth, ElementName=ConsigneeNameBox}">
@@ -227,9 +227,9 @@
                                     </Border>
                                 </Popup>
                             </Grid>
-                            <TextBlock Text="Address" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBlock Text="Address *" Style="{StaticResource FieldLabelStyle}" />
                             <TextBox Text="{Binding CurrentEntry.ConsigneeAddress, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,12" />
-                            <TextBlock Text="GST" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBlock Text="GST *" Style="{StaticResource FieldLabelStyle}" />
                             <TextBox Text="{Binding CurrentEntry.ConsigneeGST, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" CharacterCasing="Upper" />
                         </StackPanel>
                     </Border>

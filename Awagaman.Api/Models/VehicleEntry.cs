@@ -10,4 +10,8 @@ public class VehicleEntry
     public string? EngineNumber { get; set; }
     public string? ChassisNumber { get; set; }
     public string? VehicleType { get; set; }
+    public string? DriverName { get; set; }
+    public string? DriverMobile { get; set; }
+    public string? LicenceNumber { get; set; }
+    public string? PolicyNumber { get; set; }
 }

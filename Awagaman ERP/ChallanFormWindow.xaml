@@ -163,7 +163,7 @@
                                 </Grid.RowDefinitions>
 
                                 <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,8">
-                                    <TextBlock Text="Challan No" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBlock Text="Challan No *" Style="{StaticResource FieldLabelStyle}" />
                                     <TextBox x:Name="ChallanNoBox" Text="{Binding ChallanNumber, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" LostFocus="ChallanNo_LostFocus" />
                                     <TextBlock x:Name="ChallanDuplicateWarning" Text="! This challan number already exists" FontSize="11" Foreground="#E53935" Visibility="Collapsed" Margin="0,2,0,0" />
                                 </StackPanel>
@@ -173,7 +173,7 @@
                                 </StackPanel>
 
                                 <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,0,8">
-                                    <TextBlock Text="Agent / Broker" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBlock Text="Agent / Broker *" Style="{StaticResource FieldLabelStyle}" />
                                     <TextBox Text="{Binding BrokerName, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
                                 </StackPanel>
                                 <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,0,0,8">
@@ -188,11 +188,11 @@
                                 </StackPanel>
 
                                 <StackPanel Grid.Row="2" Grid.Column="0">
-                                    <TextBlock Text="Origin (From)" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBlock Text="Origin (From) *" Style="{StaticResource FieldLabelStyle}" />
                                     <TextBox Text="{Binding From, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
                                 </StackPanel>
                                 <StackPanel Grid.Row="2" Grid.Column="2">
-                                    <TextBlock Text="Destination (To)" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBlock Text="Destination (To) *" Style="{StaticResource FieldLabelStyle}" />
                                     <TextBox Text="{Binding To, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
                                 </StackPanel>
                             </Grid>

@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
+using System.Collections;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Text;
 using System.Web.Script.Serialization;
 
@@ -11,7 +12,7 @@ namespace Awagaman_ERP.Data
     internal static class RemoteApiClient
     {
         private static readonly HttpClient Client = CreateClient();
-        private static readonly JavaScriptSerializer Serializer = new JavaScriptSerializer();
+        private static readonly JavaScriptSerializer Serializer = CreateSerializer();
 
         private static HttpClient CreateClient()
         {
@@ -19,6 +20,15 @@ namespace Awagaman_ERP.Data
             var client = new HttpClient { BaseAddress = new Uri(baseUrl.EndsWith("/") ? baseUrl : baseUrl + "/") };
             client.Timeout = TimeSpan.FromSeconds(10);
             return client;
+        }
+
+        private static JavaScriptSerializer CreateSerializer()
+        {
+            return new JavaScriptSerializer
+            {
+                MaxJsonLength = int.MaxValue,
+                RecursionLimit = 256
+            };
         }
 
         public static List<T> GetList<T>(string route)
@@ -70,6 +80,15 @@ namespace Awagaman_ERP.Data
             Client.DeleteAsync(route).GetAwaiter().GetResult().EnsureSuccessStatusCode();
         }
 
+        public static void PostNoContent(string route)
+        {
+            ApplyAuthHeader();
+            using (var response = Client.PostAsync(route, new StringContent(string.Empty, Encoding.UTF8, "application/json")).GetAwaiter().GetResult())
+            {
+                response.EnsureSuccessStatusCode();
+            }
+        }
+
         private static void ApplyAuthHeader()
         {
             if (string.IsNullOrWhiteSpace(AuthSession.Token))
@@ -84,7 +103,7 @@ namespace Awagaman_ERP.Data
         private static async System.Threading.Tasks.Task<string> SendJson(HttpMethod method, string route, object body)
         {
             ApplyAuthHeader();
-            var json = Serializer.Serialize(body);
+            var json = Serializer.Serialize(SanitizeForApi(body));
             using (var request = new HttpRequestMessage(method, route))
             {
                 request.Content = new StringContent(json, Encoding.UTF8, "application/json");
@@ -123,6 +142,71 @@ namespace Awagaman_ERP.Data
             }
 
             return 0;
+        }
+
+        private static object SanitizeForApi(object value)
+        {
+            if (value == null)
+            {
+                return null;
+            }
+
+            var type = value.GetType();
+            if (type == typeof(string) || type.IsPrimitive || type.IsEnum || type == typeof(decimal))
+            {
+                return value;
+            }
+
+            if (value is DateTime dateTime)
+            {
+                return FormatBusinessDate(dateTime);
+            }
+
+            if (value is DateTimeOffset dateTimeOffset)
+            {
+                return FormatBusinessDate(dateTimeOffset.DateTime);
+            }
+
+            if (value is IDictionary dictionary)
+            {
+                var normalized = new Dictionary<string, object>();
+                foreach (DictionaryEntry entry in dictionary)
+                {
+                    normalized[Convert.ToString(entry.Key) ?? string.Empty] = SanitizeForApi(entry.Value);
+                }
+                return normalized;
+            }
+
+            if (value is IEnumerable enumerable && !(value is string))
+            {
+                var normalized = new List<object>();
+                foreach (var item in enumerable)
+                {
+                    normalized.Add(SanitizeForApi(item));
+                }
+                return normalized;
+            }
+
+            var result = new Dictionary<string, object>();
+            foreach (var property in type.GetProperties(BindingFlags.Instance | BindingFlags.Public))
+            {
+                if (!property.CanRead || property.GetIndexParameters().Length > 0)
+                {
+                    continue;
+                }
+
+                result[property.Name] = SanitizeForApi(property.GetValue(value, null));
+            }
+
+            return result;
+        }
+
+        private static string FormatBusinessDate(DateTime value)
+        {
+            var normalized = value.Kind == DateTimeKind.Utc
+                ? value.ToLocalTime()
+                : value;
+            return DateTime.SpecifyKind(normalized, DateTimeKind.Unspecified).ToString("yyyy-MM-ddTHH:mm:ss.fffffff");
         }
     }
 }

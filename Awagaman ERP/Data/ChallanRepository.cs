@@ -6,6 +6,7 @@ using System.Data.SQLite;
 using System.IO;
 using System.Linq;
 using System.Xml.Serialization;
+using Awagaman_ERP.Helpers;
 using Awagaman_ERP.Models;
 
 namespace Awagaman_ERP.Data
@@ -28,6 +29,29 @@ namespace Awagaman_ERP.Data
 
         private string ActiveTableName => IsChallanLedgerMode ? ChallanLedgerTableName : PurchaseTableName;
 
+        private static string NormalizeLookupChallanNumber(string challanNumber)
+        {
+            var raw = (challanNumber ?? string.Empty).Trim();
+            if (raw.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            var slashIndex = raw.IndexOf('/');
+            if (slashIndex > 0)
+            {
+                var prefix = raw.Substring(0, slashIndex);
+                var suffix = raw.Substring(slashIndex + 1).Trim();
+                var digits = new string(prefix.Where(char.IsDigit).ToArray());
+                if (digits.Length > 0 && suffix.Length > 0)
+                {
+                    return $"{digits.PadLeft(Math.Max(3, digits.Length), '0')}/{suffix}";
+                }
+            }
+
+            return ChallanNumberFormatter.Normalize(raw, DateTime.Today);
+        }
+
         private string AppendLedgerQuery(string route)
         {
             if (!IsChallanLedgerMode)
@@ -47,9 +71,10 @@ namespace Awagaman_ERP.Data
                 return RemoteApiClient.GetList<ChallanEntry>(AppendLedgerQuery("api/challans"));
             }
             var entries = new List<ChallanEntry>();
+            var orderBy = BuildOrderBy("challannumber", ascending: false);
 
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
-            using (var command = new SQLiteCommand($"SELECT * FROM {ActiveTableName} ORDER BY Sr, Id;", connection))
+            using (var command = new SQLiteCommand($"SELECT * FROM {ActiveTableName} ORDER BY {orderBy};", connection))
             {
                 connection.Open();
                 using (var reader = command.ExecuteReader())
@@ -456,19 +481,29 @@ namespace Awagaman_ERP.Data
         public ChallanEntry FindByChallanNumber(string challanNumber)
         {
             if (string.IsNullOrWhiteSpace(challanNumber)) return null;
+            var normalizedInput = NormalizeLookupChallanNumber(challanNumber);
             if (BackendSettings.UseRemoteApi)
             {
-                return GetAllRemoteSafe().Find(e => string.Equals((e.ChallanNumber ?? string.Empty).Trim(), challanNumber.Trim(), StringComparison.OrdinalIgnoreCase));
+                return GetAllRemoteSafe().Find(e =>
+                    string.Equals(
+                        NormalizeLookupChallanNumber(e.ChallanNumber),
+                        normalizedInput,
+                        StringComparison.OrdinalIgnoreCase));
             }
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = new SQLiteCommand($"SELECT * FROM {ActiveTableName} WHERE LOWER(ChallanNumber) = LOWER(@num) LIMIT 1;", connection))
             {
-                command.Parameters.AddWithValue("@num", challanNumber.Trim());
+                command.Parameters.AddWithValue("@num", normalizedInput);
                 connection.Open();
                 using (var reader = command.ExecuteReader())
                     if (reader.Read()) return MapReader(reader);
             }
-            return null;
+
+            return GetAll()
+                .FirstOrDefault(e => string.Equals(
+                    NormalizeLookupChallanNumber(e.ChallanNumber),
+                    normalizedInput,
+                    StringComparison.OrdinalIgnoreCase));
         }
 
         public ChallanEntry FindById(int id)
@@ -543,6 +578,8 @@ namespace Awagaman_ERP.Data
                 return;
             }
 
+            entry.ChallanNumber = ChallanNumberFormatter.Normalize(entry.ChallanNumber, entry.Date);
+
             if (BackendSettings.UseRemoteApi)
             {
                 try
@@ -571,6 +608,7 @@ namespace Awagaman_ERP.Data
 
                     throw;
                 }
+                MasterDataCache.InvalidateVehicles();
                 return;
             }
 
@@ -854,7 +892,9 @@ WHERE SourcePurchaseId = @SourcePurchaseId
         private List<ChallanEntry> GetAllRemoteSafe()
         {
             return RemoteApiClient.GetList<ChallanEntry>(AppendLedgerQuery("api/challans"))
-                .OrderBy(e => e.Sr)
+                .OrderBy(e => ChallanNumberFormatter.GetFinancialYearStart(e.ChallanNumber, e.Date))
+                .ThenBy(e => ChallanNumberFormatter.GetSequence(e.ChallanNumber))
+                .ThenBy(e => e.Sr)
                 .ThenBy(e => e.Id)
                 .ToList();
         }
@@ -885,33 +925,78 @@ WHERE SourcePurchaseId = @SourcePurchaseId
             }
             catch
             {
-                var filtered = GetAllRemoteSafe().Where(e =>
-                    (string.IsNullOrWhiteSpace(searchFilter) ||
-                     Contains(e.ChallanNumber, searchFilter) ||
-                     Contains(e.LRNumber, searchFilter) ||
-                     Contains(e.VehicleNumber, searchFilter) ||
-                     Contains(e.VehicleType, searchFilter) ||
-                     Contains(e.DriverName, searchFilter) ||
-                     Contains(e.BrokerName, searchFilter) ||
-                     Contains(e.From, searchFilter) ||
-                     Contains(e.To, searchFilter) ||
-                     Contains(e.OwnerName, searchFilter)) &&
-                    (string.IsNullOrWhiteSpace(challanNo) || Contains(e.ChallanNumber, challanNo)) &&
-                    (string.IsNullOrWhiteSpace(lrNo) || Contains(e.LRNumber, lrNo)) &&
-                    (string.IsNullOrWhiteSpace(from) || Contains(e.From, from)) &&
-                    (string.IsNullOrWhiteSpace(to) || Contains(e.To, to)));
-                var sorted = ApplySort(filtered, sortColumn, sortAscending, useLhsDerived).ToList();
-                return new RemotePagedResult<ChallanEntry>
-                {
-                    TotalCount = sorted.Count,
-                    Items = sorted.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToList()
-                };
+                var effectiveSortColumn = string.IsNullOrWhiteSpace(sortColumn) ? "ChallanNumber" : sortColumn;
+                return BuildRemotePageFromLocalSort(pageNumber, pageSize, searchFilter, effectiveSortColumn, sortAscending, challanNo, lrNo, from, to, useLhsDerived);
             }
+        }
+
+        internal RemotePagedResult<ChallanEntry> GetRemotePageResult(
+            int pageNumber,
+            int pageSize,
+            string searchFilter,
+            string sortColumn,
+            bool sortAscending,
+            string challanNo = null,
+            string lrNo = null,
+            string from = null,
+            string to = null,
+            bool useLhsDerived = false)
+        {
+            return GetRemotePage(pageNumber, pageSize, searchFilter, sortColumn, sortAscending, challanNo, lrNo, from, to, useLhsDerived);
+        }
+
+        private RemotePagedResult<ChallanEntry> BuildRemotePageFromLocalSort(
+            int pageNumber,
+            int pageSize,
+            string searchFilter,
+            string sortColumn,
+            bool sortAscending,
+            string challanNo,
+            string lrNo,
+            string from,
+            string to,
+            bool useLhsDerived)
+        {
+            var filtered = GetAllRemoteSafe().Where(e =>
+                (string.IsNullOrWhiteSpace(searchFilter) ||
+                 Contains(e.ChallanNumber, searchFilter) ||
+                 Contains(e.LRNumber, searchFilter) ||
+                 Contains(e.VehicleNumber, searchFilter) ||
+                 Contains(e.VehicleType, searchFilter) ||
+                 Contains(e.DriverName, searchFilter) ||
+                 Contains(e.BrokerName, searchFilter) ||
+                 Contains(e.From, searchFilter) ||
+                 Contains(e.To, searchFilter) ||
+                 Contains(e.OwnerName, searchFilter)) &&
+                (string.IsNullOrWhiteSpace(challanNo) || Contains(e.ChallanNumber, challanNo)) &&
+                (string.IsNullOrWhiteSpace(lrNo) || Contains(e.LRNumber, lrNo)) &&
+                (string.IsNullOrWhiteSpace(from) || Contains(e.From, from)) &&
+                (string.IsNullOrWhiteSpace(to) || Contains(e.To, to)));
+
+            var sorted = ApplySort(filtered, sortColumn, sortAscending, useLhsDerived).ToList();
+            return new RemotePagedResult<ChallanEntry>
+            {
+                TotalCount = sorted.Count,
+                Items = sorted.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToList()
+            };
         }
 
         private static IEnumerable<ChallanEntry> ApplySort(IEnumerable<ChallanEntry> source, string sortColumn, bool ascending, bool useLhsDerived = false)
         {
             var ordered = source ?? Enumerable.Empty<ChallanEntry>();
+            if (string.Equals(sortColumn, "challannumber", StringComparison.OrdinalIgnoreCase))
+            {
+                return ascending
+                    ? ordered
+                        .OrderBy(e => ChallanNumberFormatter.GetFinancialYearStart(e.ChallanNumber, e.Date))
+                        .ThenBy(e => ChallanNumberFormatter.GetSequence(e.ChallanNumber))
+                        .ThenBy(e => e.Id)
+                    : ordered
+                        .OrderByDescending(e => ChallanNumberFormatter.GetFinancialYearStart(e.ChallanNumber, e.Date))
+                        .ThenByDescending(e => ChallanNumberFormatter.GetSequence(e.ChallanNumber))
+                        .ThenByDescending(e => e.Id);
+            }
+
             Func<ChallanEntry, object> keySelector;
             switch ((sortColumn ?? string.Empty).ToLowerInvariant())
             {
@@ -1115,7 +1200,23 @@ WHERE SourcePurchaseId = @SourcePurchaseId
             // Map property names to DB column names
             switch (sortColumn.ToLower())
             {
-                case "challannumber": return $"SUBSTR(ChallanNumber, INSTR(ChallanNumber, '/') + 1) {dir}, CAST(SUBSTR(ChallanNumber, 1, INSTR(ChallanNumber, '/') - 1) AS INTEGER) {dir}, Sr, Id";
+                case "challannumber":
+                    return $@"COALESCE(
+                                   CASE
+                                       WHEN INSTR(COALESCE(ChallanNumber, ''), '/') > 0 THEN
+                                           CASE
+                                               WHEN CAST(COALESCE(NULLIF(SUBSTR(TRIM(SUBSTR(ChallanNumber, INSTR(ChallanNumber, '/') + 1)), 1, 2), ''), '0') AS INTEGER) >= 50
+                                                   THEN 1900 + CAST(COALESCE(NULLIF(SUBSTR(TRIM(SUBSTR(ChallanNumber, INSTR(ChallanNumber, '/') + 1)), 1, 2), ''), '0') AS INTEGER)
+                                               ELSE 2000 + CAST(COALESCE(NULLIF(SUBSTR(TRIM(SUBSTR(ChallanNumber, INSTR(ChallanNumber, '/') + 1)), 1, 2), ''), '0') AS INTEGER)
+                                           END
+                                   END,
+                                   CASE WHEN CAST(STRFTIME('%m', Date) AS INTEGER) >= 4
+                                       THEN CAST(STRFTIME('%Y', Date) AS INTEGER)
+                                       ELSE CAST(STRFTIME('%Y', Date) AS INTEGER) - 1
+                                   END
+                               ) {dir},
+                               CAST(COALESCE(NULLIF(TRIM(SUBSTR(ChallanNumber, 1, CASE WHEN INSTR(ChallanNumber, '/') > 0 THEN INSTR(ChallanNumber, '/') - 1 ELSE LENGTH(ChallanNumber) END)), ''), '0') AS INTEGER) {dir},
+                               Sr {dir}, Id {dir}";
                 case "sr": return $"Sr {dir}, Id";
                 case "date": return $"Date {dir}, Sr, Id";
                 case "lrnumber": return $"LRNumber {dir}, Sr, Id";

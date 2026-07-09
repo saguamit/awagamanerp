@@ -503,6 +503,12 @@ lrs.MapDelete("/{id:int}", async (HttpContext context, int id, AwagamanRepositor
     await WriteAuditAsync(context, repo, "LR Ledger", "Delete", id.ToString(), "Deleted LR.");
     return Results.NoContent();
 });
+lrs.MapPost("/reset-all", async (HttpContext context, AwagamanRepository repo) =>
+{
+    await repo.ResetLRDataAsync();
+    await WriteAuditAsync(context, repo, "LR Ledger", "Reset", "All LR Data", "Deleted all LR ledger data.");
+    return Results.NoContent();
+});
 
 var bills = app.MapGroup("/api/bills");
 bills.MapGet("/", async (AwagamanRepository repo) =>
@@ -611,12 +617,18 @@ cbsAccounts.MapPut("/{id:int}", async (HttpContext context, int id, CBSAccountEn
     await WriteAuditAsync(context, repo, "CBS Accounts", "Update", entry.AccountName, $"Updated CBS account {entry.AccountName}.");
     return Results.NoContent();
 });
+cbsAccounts.MapDelete("/{id:int}", async (HttpContext context, int id, AwagamanRepository repo) =>
+{
+    await repo.DeleteCBSAccountAsync(id);
+    await WriteAuditAsync(context, repo, "CBS Accounts", "Delete", id.ToString(), "Deleted CBS account.");
+    return Results.NoContent();
+});
 
 var cbsEntries = app.MapGroup("/api/cbs/statements");
 cbsEntries.MapGet("/", async (string? account, DateTime? fromDate, DateTime? toDate, AwagamanRepository repo) =>
     Results.Ok(await repo.GetCashBankStatementsAsync(account, fromDate, toDate)));
-cbsEntries.MapGet("/lhs-summary", async (DateTime? fromDate, DateTime? toDate, AwagamanRepository repo) =>
-    Results.Ok(await repo.GetLhsSummaryAsync(fromDate, toDate)));
+cbsEntries.MapGet("/lhs-summary", async (string? account, DateTime? fromDate, DateTime? toDate, AwagamanRepository repo) =>
+    Results.Ok(await repo.GetLhsSummaryAsync(fromDate, toDate, account)));
 cbsEntries.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
 {
     var item = await repo.GetCashBankStatementAsync(id);
@@ -633,6 +645,12 @@ cbsEntries.MapPut("/{id:int}", async (HttpContext context, int id, CashBankState
     entry.Id = id;
     await repo.UpsertCashBankStatementAsync(entry);
     await WriteAuditAsync(context, repo, "CBS Ledger", "Update", entry.AccountName, $"Updated CBS entry for {entry.AccountName}.");
+    return Results.NoContent();
+});
+cbsEntries.MapDelete("/{id:int}", async (HttpContext context, int id, AwagamanRepository repo) =>
+{
+    await repo.DeleteCashBankStatementAsync(id);
+    await WriteAuditAsync(context, repo, "CBS Ledger", "Delete", id.ToString(), "Deleted CBS entry.");
     return Results.NoContent();
 });
 
@@ -699,6 +717,13 @@ comments.MapDelete("/bill/{id:int}", async (HttpContext context, int id, Awagama
 {
     await repo.DeleteBillCommentAsync(id);
     await WriteAuditAsync(context, repo, "Bill Comments", "Delete", id.ToString(), "Deleted bill comment.");
+    return Results.NoContent();
+});
+
+app.MapPost("/api/admin/reset-all", async (HttpContext context, AwagamanRepository repo) =>
+{
+    await repo.ResetAllDataAsync();
+    await WriteAuditAsync(context, repo, "System", "Reset", "All Data", "Deleted all application data.");
     return Results.NoContent();
 });
 

@@ -16,6 +16,7 @@ namespace Awagaman_ERP
         public BillEntry Result { get; private set; }
         public bool WasSaved { get; private set; }
         private readonly bool _isEditMode;
+        private readonly string _originalBillNo;
         private bool _ignorePartySelection;
         private readonly DispatcherTimer _partySuggestionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
 
@@ -26,6 +27,7 @@ namespace Awagaman_ERP
             Result = new BillEntry { BillDate = DateTime.Today, Date = DateTime.Today };
             DataContext = Result;
             _isEditMode = false;
+            _originalBillNo = string.Empty;
             Loaded += BillFormWindow_Loaded;
         }
 
@@ -45,6 +47,7 @@ namespace Awagaman_ERP
             };
             DataContext = Result;
             _isEditMode = true;
+            _originalBillNo = (existing.BillNo ?? string.Empty).Trim();
             Loaded += BillFormWindow_Loaded;
         }
 
@@ -408,9 +411,27 @@ namespace Awagaman_ERP
 
         private void Save_Click(object sender, RoutedEventArgs e)
         {
+            Result.BillNo = NormalizeBillNumberInput(Result.BillNo);
+
             if (string.IsNullOrWhiteSpace(Result.BillNo))
             {
                 MessageBox.Show("Bill Number cannot be empty.", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var slashIndex = Result.BillNo.LastIndexOf('/');
+            var uniquePart = slashIndex >= 0 && slashIndex < Result.BillNo.Length - 1
+                ? Result.BillNo.Substring(slashIndex + 1).Trim()
+                : string.Empty;
+            if (slashIndex < 0 || string.IsNullOrWhiteSpace(uniquePart))
+            {
+                MessageBox.Show($"Enter the unique bill number after FY.\nExample: {BillPrefixSettings.GetPrefix()}/1", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (IsDuplicateBillNumber(Result.BillNo))
+            {
+                MessageBox.Show($"Bill Number '{Result.BillNo}' already exists.", "Duplicate Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
 
@@ -461,23 +482,7 @@ namespace Awagaman_ERP
         {
             try
             {
-                var raw = (Result?.BillNo ?? string.Empty).Trim();
-                if (string.IsNullOrWhiteSpace(raw)) return;
-
-                // If user enters only a number, apply default prefix automatically.
-                if (int.TryParse(raw, out var onlyNumber))
-                {
-                    var prefix = BillPrefixSettings.GetPrefix();
-                    Result.BillNo = $"{prefix}/{onlyNumber}";
-                    return;
-                }
-
-                // If user enters custom prefix only, append next number for that prefix.
-                if (!raw.Contains("/"))
-                {
-                    var next = GetNextBillSequence(raw);
-                    Result.BillNo = $"{raw}/{next}";
-                }
+                Result.BillNo = NormalizeBillNumberInput(Result?.BillNo);
             }
             catch (Exception ex)
             {
@@ -485,25 +490,37 @@ namespace Awagaman_ERP
             }
         }
 
-        private static int GetNextBillSequence(string prefix)
+        private static string NormalizeBillNumberInput(string value)
         {
-            var pfx = (prefix ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(pfx)) pfx = BillPrefixSettings.GetPrefix();
-
-            var max = 0;
-            foreach (var bill in new BillRepository().GetAll())
+            var raw = (value ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(raw))
             {
-                var billNo = (bill.BillNo ?? string.Empty).Trim();
-                if (!billNo.StartsWith(pfx + "/", StringComparison.OrdinalIgnoreCase)) continue;
-                var idx = billNo.LastIndexOf('/');
-                if (idx < 0 || idx == billNo.Length - 1) continue;
-                if (int.TryParse(billNo.Substring(idx + 1).Trim(), out var n) && n > max)
-                {
-                    max = n;
-                }
+                return raw;
             }
 
-            return max + 1;
+            if (int.TryParse(raw, out var onlyNumber))
+            {
+                return $"{BillPrefixSettings.GetPrefix()}/{onlyNumber}";
+            }
+
+            return raw;
+        }
+
+        private bool IsDuplicateBillNumber(string billNo)
+        {
+            var candidate = (billNo ?? string.Empty).Trim();
+            if (candidate.Length == 0)
+            {
+                return false;
+            }
+
+            if (_isEditMode && string.Equals(candidate, _originalBillNo, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return new BillRepository().GetAll()
+                .Any(bill => string.Equals((bill.BillNo ?? string.Empty).Trim(), candidate, StringComparison.OrdinalIgnoreCase));
         }
     }
 }

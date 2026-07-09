@@ -247,6 +247,7 @@
                                     
                                     <DataGridTextColumn Header="CH No." Binding="{Binding CHNo}" Width="90" IsReadOnly="True" dgx:DataGridFilterColumn.Template="{StaticResource MultiFilterTemplate}" />
                                     
+                                    <DataGridTextColumn Header="Lorry Hire" Binding="{Binding ChallanLorryHire}" Width="90" FontWeight="SemiBold" Foreground="#0F766E" IsReadOnly="True" />
                                     <DataGridTextColumn Header="Total Freight" Binding="{Binding TotalFreight}" Width="90" FontWeight="SemiBold" Foreground="#18609A" />
                                     <DataGridTextColumn Header="NEFT" Binding="{Binding NEFT}" Width="80" />
                                     <DataGridTextColumn Header="CASH" Binding="{Binding CASH}" Width="80" />

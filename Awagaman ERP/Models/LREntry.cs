@@ -43,6 +43,7 @@ namespace Awagaman_ERP.Models
         private string _billNo;
         private DateTime? _billDate;
         private decimal _billAmount;
+        private decimal _challanLorryHire;
         private string _billParty;
         private string _broker;
         private string _frtType;
@@ -119,6 +120,7 @@ namespace Awagaman_ERP.Models
         
         public decimal TotalBill => TotalFreight + Detention + Hamali + Others + StCharge;
         public decimal Bal => (NEFT + CASH) - TDS + Ded;
+        public decimal ChallanLorryHire { get => _challanLorryHire; set { _challanLorryHire = value; OnPropertyChanged(); } }
         
         public string BillNo { get => _billNo; set { _billNo = value; OnPropertyChanged(); } }
         public DateTime? BillDate { get => _billDate; set { _billDate = value; OnPropertyChanged(); } }
