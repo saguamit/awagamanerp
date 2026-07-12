@@ -21,9 +21,12 @@ namespace Awagaman_ERP
     public partial class App : Application
     {
         private const string SingleInstanceMutexName = "AwagamanERP.SingleInstance";
+        private const string SingleInstanceRestoreEventName = "AwagamanERP.SingleInstance.Restore";
         private static Process _localApiProcess;
         private static Mutex _singleInstanceMutex;
         private static bool _ownsSingleInstanceMutex;
+        private static EventWaitHandle _restoreRequestEvent;
+        private static Thread _restoreRequestThread;
         private Forms.NotifyIcon _trayIcon;
         private bool _allowRealShutdown;
         private bool _trayHintShown;
@@ -131,9 +134,11 @@ namespace Awagaman_ERP
                 _singleInstanceMutex = new Mutex(true, SingleInstanceMutexName, out _ownsSingleInstanceMutex);
                 if (_ownsSingleInstanceMutex)
                 {
+                    StartRestoreRequestListener();
                     return true;
                 }
 
+                SignalExistingInstanceRestore();
                 BringExistingInstanceToFront();
                 return false;
             }
@@ -159,14 +164,87 @@ namespace Awagaman_ERP
             {
                 try
                 {
+                    _restoreRequestEvent?.Dispose();
+                }
+                catch
+                {
+                }
+
+                try
+                {
                     _singleInstanceMutex?.Dispose();
                 }
                 catch
                 {
                 }
 
+                _restoreRequestEvent = null;
                 _singleInstanceMutex = null;
                 _ownsSingleInstanceMutex = false;
+            }
+        }
+
+        private static void StartRestoreRequestListener()
+        {
+            try
+            {
+                if (_restoreRequestEvent == null)
+                {
+                    _restoreRequestEvent = new EventWaitHandle(false, EventResetMode.AutoReset, SingleInstanceRestoreEventName);
+                }
+
+                if (_restoreRequestThread != null && _restoreRequestThread.IsAlive)
+                {
+                    return;
+                }
+
+                _restoreRequestThread = new Thread(() =>
+                {
+                    while (_ownsSingleInstanceMutex && _restoreRequestEvent != null)
+                    {
+                        try
+                        {
+                            _restoreRequestEvent.WaitOne();
+                            Current?.Dispatcher.BeginInvoke(new Action(() =>
+                            {
+                                try
+                                {
+                                    var app = Current as App;
+                                    app?.RestoreMainWindow();
+                                }
+                                catch
+                                {
+                                }
+                            }));
+                        }
+                        catch
+                        {
+                            break;
+                        }
+                    }
+                })
+                {
+                    IsBackground = true,
+                    Name = "AwagamanERP-RestoreListener"
+                };
+                _restoreRequestThread.Start();
+            }
+            catch
+            {
+            }
+        }
+
+        private static void SignalExistingInstanceRestore()
+        {
+            try
+            {
+                using (var restoreEvent = EventWaitHandle.OpenExisting(SingleInstanceRestoreEventName))
+                {
+                    restoreEvent.Set();
+                }
+            }
+            catch
+            {
             }
         }
 
@@ -311,6 +389,35 @@ namespace Awagaman_ERP
             HideMainWindowToTray();
         }
 
+        private bool HasVisibleOwnedWindows()
+        {
+            try
+            {
+                if (MainWindow == null)
+                {
+                    return false;
+                }
+
+                foreach (Window window in Current.Windows)
+                {
+                    if (window == null || ReferenceEquals(window, MainWindow))
+                    {
+                        continue;
+                    }
+
+                    if (ReferenceEquals(window.Owner, MainWindow) && window.IsVisible)
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
         private void HideMainWindowToTray()
         {
             try
@@ -323,6 +430,13 @@ namespace Awagaman_ERP
                 if (MainWindow.WindowState != WindowState.Minimized)
                 {
                     _restoreWindowState = MainWindow.WindowState;
+                }
+
+                if (HasVisibleOwnedWindows())
+                {
+                    MainWindow.ShowInTaskbar = true;
+                    MainWindow.WindowState = WindowState.Minimized;
+                    return;
                 }
 
                 MainWindow.ShowInTaskbar = false;

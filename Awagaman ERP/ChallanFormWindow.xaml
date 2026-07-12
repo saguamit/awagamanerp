@@ -169,7 +169,7 @@
                                 </StackPanel>
                                 <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,8">
                                     <TextBlock Text="Date" Style="{StaticResource FieldLabelStyle}" />
-                                    <DatePicker SelectedDate="{Binding Date, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputDatePickerStyle}" />
+                                    <DatePicker x:Name="ChallanDatePicker" SelectedDate="{Binding Date, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputDatePickerStyle}" SelectedDateChanged="ChallanDatePicker_SelectedDateChanged" />
                                 </StackPanel>
 
                                 <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,0,8">

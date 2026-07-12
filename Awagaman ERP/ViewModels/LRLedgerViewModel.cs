@@ -240,6 +240,74 @@ namespace Awagaman_ERP.ViewModels
             LoadPage();
         }
 
+        public void AcceptSavedEntry(LREntry entry)
+        {
+            if (entry == null)
+            {
+                return;
+            }
+
+            _suppressPersistence = true;
+            try
+            {
+                if (!Entries.Any(x => (entry.Id > 0 && x.Id == entry.Id) ||
+                                      (!string.IsNullOrWhiteSpace(entry.LRNo) &&
+                                       string.Equals(x.LRNo, entry.LRNo, StringComparison.OrdinalIgnoreCase))))
+                {
+                    Entries.Add(entry);
+                }
+            }
+            finally
+            {
+                _suppressPersistence = false;
+            }
+
+            var existing = PagedEntries.FirstOrDefault(x => x != null && ((entry.Id > 0 && x.Id == entry.Id) ||
+                (!string.IsNullOrWhiteSpace(entry.LRNo) &&
+                 string.Equals(x.LRNo, entry.LRNo, StringComparison.OrdinalIgnoreCase))));
+
+            if (existing != null)
+            {
+                var index = PagedEntries.IndexOf(existing);
+                if (index >= 0)
+                {
+                    var updated = entry;
+                    ApplyDerivedLorryHire(new List<LREntry> { updated });
+                    PagedEntries[index] = updated;
+                }
+            }
+            else
+            {
+                _totalCount++;
+                var canInsertIntoCurrentPage =
+                    CurrentPage == 1 &&
+                    string.IsNullOrWhiteSpace(_searchFilter) &&
+                    string.Equals(GetEffectiveSortColumn(), "LRNo", StringComparison.OrdinalIgnoreCase) &&
+                    !GetEffectiveSortAscending();
+
+                if (canInsertIntoCurrentPage)
+                {
+                    var inserted = entry;
+                    ApplyDerivedLorryHire(new List<LREntry> { inserted });
+                    PagedEntries.Insert(0, inserted);
+                    if (PagedEntries.Count > PageSize)
+                    {
+                        PagedEntries.RemoveAt(PagedEntries.Count - 1);
+                    }
+                }
+            }
+
+            FilteredEntriesCount = Math.Max(_totalCount, PagedEntries.Count);
+            _countDirty = true;
+            _nextPageCache = null;
+            _prevPageCache = null;
+            OnPropertyChanged(nameof(TotalCount));
+            OnPropertyChanged(nameof(PageInfo));
+            OnPropertyChanged(nameof(TotalPages));
+            OnPropertyChanged(nameof(CanGoPrevious));
+            OnPropertyChanged(nameof(CanGoNext));
+        }
+
         public void SetSort(string column, bool ascending)
         {
             var normalized = column ?? "";

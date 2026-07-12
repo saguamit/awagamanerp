@@ -216,7 +216,7 @@ namespace Awagaman_ERP.Models
         public decimal LHS => LorryHire + Other;
 
         [System.Xml.Serialization.XmlIgnore]
-        public decimal ChallanBalance => ImportedBalance ?? (LHS - LessTDS - AdvanceAmount);
+        public decimal ChallanBalance => PreserveImportedBilling ? (ImportedBalance ?? (LHS - LessTDS - AdvanceAmount)) : (LHS - LessTDS - AdvanceAmount);
 
         public decimal Detention { get => _detention; set { _detention = value; OnPropertyChanged(); if (!_suppressCalculations) RecalculateBalance(); } }
         public decimal Hamali { get => _hamali; set { _hamali = value; OnPropertyChanged(); if (!_suppressCalculations) RecalculateBalance(); } }
@@ -276,7 +276,7 @@ namespace Awagaman_ERP.Models
         }
 
         [System.Xml.Serialization.XmlIgnore]
-        public decimal ChallanDue => ImportedDue ?? ((ChallanBalance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash);
+        public decimal ChallanDue => PreserveImportedBilling ? (ImportedDue ?? ((ChallanBalance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash)) : ((ChallanBalance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash);
 
         public string PaidTo { get => _paidTo; set { _paidTo = value; OnPropertyChanged(); } }
         public string Remarks { get => _remarks; set { _remarks = value; OnPropertyChanged(); } }
@@ -363,7 +363,7 @@ namespace Awagaman_ERP.Models
         {
             // Balance formula per ledger rule:
             // Balance = Lorry Hire - Less TDS - Advance
-            Balance = ImportedBalance ?? (LorryHire - LessTDS - AdvanceAmount);
+            Balance = PreserveImportedBilling ? (ImportedBalance ?? (LorryHire - LessTDS - AdvanceAmount)) : (LorryHire - LessTDS - AdvanceAmount);
             OnPropertyChanged(nameof(Balance));
             OnPropertyChanged(nameof(LHS));
             OnPropertyChanged(nameof(ChallanBalance));
@@ -392,7 +392,7 @@ namespace Awagaman_ERP.Models
 
         private void RecalculateDue()
         {
-            Due = ImportedDue ?? ((Balance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash);
+            Due = PreserveImportedBilling ? (ImportedDue ?? ((Balance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash)) : ((Balance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash);
             OnPropertyChanged(nameof(Due));
             OnPropertyChanged(nameof(ChallanDue));
         }

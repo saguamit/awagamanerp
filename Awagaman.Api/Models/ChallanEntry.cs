@@ -42,9 +42,9 @@ public class ChallanEntry
     public bool PreserveImportedBilling { get; set; }
     public int? SourcePurchaseId { get; set; }
     public decimal LHS => LorryHire + Other;
-    public decimal Balance => ImportedBalance ?? (LorryHire - LessTDS - AdvanceAmount);
-    public decimal ChallanBalance => ImportedBalance ?? (LHS - LessTDS - AdvanceAmount);
-    public decimal Due => ImportedDue ?? ((Balance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash);
-    public decimal ChallanDue => ImportedDue ?? ((ChallanBalance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash);
+    public decimal Balance => PreserveImportedBilling ? (ImportedBalance ?? (LorryHire - LessTDS - AdvanceAmount)) : (LorryHire - LessTDS - AdvanceAmount);
+    public decimal ChallanBalance => PreserveImportedBilling ? (ImportedBalance ?? (LHS - LessTDS - AdvanceAmount)) : (LHS - LessTDS - AdvanceAmount);
+    public decimal Due => PreserveImportedBilling ? (ImportedDue ?? ((Balance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash)) : ((Balance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash);
+    public decimal ChallanDue => PreserveImportedBilling ? (ImportedDue ?? ((ChallanBalance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash)) : ((ChallanBalance + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash);
     public decimal ChallanMargin => BillAmount == 0m ? 0m : BillAmount - (LHS + Detention + Hamali);
 }

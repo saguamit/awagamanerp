@@ -529,6 +529,193 @@ LRNo {d}, Sr, Id";
             }
         }
 
+        public List<BillPartyDueSummaryItem> GetPartyDueSummary()
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<BillPartyDueSummaryItem>("api/bills/party-due-summary");
+            }
+
+            var list = new List<BillPartyDueSummaryItem>();
+            const string dueExpr = "(b.Freight + b.Detention + b.HML + b.OTHR + b.StCharge - b.RCVD - b.TDS - b.DED)";
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand($@"
+SELECT
+    TRIM(COALESCE(NULLIF(b.Party, ''), NULLIF(lr.BillParty, ''), NULLIF(lr.ConsignorName, ''), '')) AS Party,
+    COUNT(DISTINCT TRIM(COALESCE(b.BillNo, ''))) AS Bills,
+    COALESCE(SUM({dueExpr}), 0) AS Due
+FROM Bills b
+LEFT JOIN LREntries lr
+    ON lower(trim(COALESCE(lr.LRNo, ''))) = lower(trim(COALESCE(b.LRNo, '')))
+WHERE trim(COALESCE(b.BillNo, '')) <> ''
+  AND {dueExpr} > 0
+GROUP BY TRIM(COALESCE(NULLIF(b.Party, ''), NULLIF(lr.BillParty, ''), NULLIF(lr.ConsignorName, ''), ''))
+ORDER BY Due DESC, Party ASC;", c))
+            {
+                c.Open();
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        list.Add(new BillPartyDueSummaryItem
+                        {
+                            Party = Convert.ToString(r["Party"]) ?? string.Empty,
+                            Bills = Convert.ToInt32(r["Bills"]),
+                            Due = GetDecimal(r["Due"])
+                        });
+                    }
+                }
+            }
+
+            return list;
+        }
+
+        public List<BillDueDetailItem> GetBillDueDetailsForParty(string party)
+        {
+            party = (party ?? string.Empty).Trim();
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<BillDueDetailItem>($"api/bills/party-due-details?party={RemoteApiClient.UrlEncode(party)}");
+            }
+
+            var list = new List<BillDueDetailItem>();
+            const string dueExpr = "(b.Freight + b.Detention + b.HML + b.OTHR + b.StCharge - b.RCVD - b.TDS - b.DED)";
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand($@"
+SELECT
+    TRIM(COALESCE(b.BillNo, '')) AS BillNo,
+    REPLACE(COALESCE(group_concat(DISTINCT TRIM(COALESCE(b.LRNo, ''))), ''), ',', ', ') AS LRNos,
+    REPLACE(COALESCE(group_concat(DISTINCT TRIM(COALESCE(NULLIF(b.FromLoc, ''), lr.FromLocation, ''))), ''), ',', ', ') AS FromLocs,
+    REPLACE(COALESCE(group_concat(DISTINCT TRIM(COALESCE(NULLIF(b.ToLoc, ''), lr.ToLocation, ''))), ''), ',', ', ') AS ToLocs,
+    COALESCE(SUM({dueExpr}), 0) AS Due
+FROM Bills b
+LEFT JOIN LREntries lr
+    ON lower(trim(COALESCE(lr.LRNo, ''))) = lower(trim(COALESCE(b.LRNo, '')))
+WHERE trim(COALESCE(b.BillNo, '')) <> ''
+  AND {dueExpr} > 0
+  AND TRIM(COALESCE(NULLIF(b.Party, ''), NULLIF(lr.BillParty, ''), NULLIF(lr.ConsignorName, ''), '')) = @party
+GROUP BY TRIM(COALESCE(b.BillNo, ''))
+ORDER BY Due DESC, BillNo DESC;", c))
+            {
+                cmd.Parameters.AddWithValue("@party", party);
+                c.Open();
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        list.Add(new BillDueDetailItem
+                        {
+                            BillNo = Convert.ToString(r["BillNo"]) ?? string.Empty,
+                            LRNos = Convert.ToString(r["LRNos"]) ?? string.Empty,
+                            From = Convert.ToString(r["FromLocs"]) ?? string.Empty,
+                            To = Convert.ToString(r["ToLocs"]) ?? string.Empty,
+                            Due = GetDecimal(r["Due"])
+                        });
+                    }
+                }
+            }
+
+            return list;
+        }
+
+        public List<string> GetPendingBillParties(string partyFilter = "")
+        {
+            partyFilter = (partyFilter ?? string.Empty).Trim();
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<string>($"api/bills/pending-parties?partyFilter={RemoteApiClient.UrlEncode(partyFilter)}");
+            }
+
+            var list = new List<string>();
+            const string resolvedPartyExpr = "TRIM(COALESCE(NULLIF(b.Party, ''), NULLIF(lr.BillParty, ''), NULLIF(lr.ConsignorName, ''), ''))";
+            const string dueExpr = "(b.Freight + b.Detention + b.HML + b.OTHR + b.StCharge - b.RCVD - b.TDS - b.DED)";
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand($@"
+SELECT DISTINCT {resolvedPartyExpr} AS Party
+FROM Bills b
+LEFT JOIN LREntries lr
+    ON lower(trim(COALESCE(lr.LRNo, ''))) = lower(trim(COALESCE(b.LRNo, '')))
+WHERE trim(COALESCE(b.BillNo, '')) <> ''
+  AND {dueExpr} > 0
+  AND {resolvedPartyExpr} <> ''
+  AND (@partyFilter = '' OR {resolvedPartyExpr} LIKE @partySearch)
+ORDER BY Party ASC;", c))
+            {
+                cmd.Parameters.AddWithValue("@partyFilter", partyFilter);
+                cmd.Parameters.AddWithValue("@partySearch", "%" + partyFilter + "%");
+                c.Open();
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        list.Add(Convert.ToString(r["Party"]) ?? string.Empty);
+                    }
+                }
+            }
+
+            return list;
+        }
+
+        public List<BillPendingOptionItem> GetPendingBillOptions(string partyFilter = "", string billNoFilter = "")
+        {
+            partyFilter = (partyFilter ?? string.Empty).Trim();
+            billNoFilter = (billNoFilter ?? string.Empty).Trim();
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<BillPendingOptionItem>(
+                    $"api/bills/pending-options?partyFilter={RemoteApiClient.UrlEncode(partyFilter)}&billNoFilter={RemoteApiClient.UrlEncode(billNoFilter)}");
+            }
+
+            var list = new List<BillPendingOptionItem>();
+            const string resolvedPartyExpr = "TRIM(COALESCE(NULLIF(b.Party, ''), NULLIF(lr.BillParty, ''), NULLIF(lr.ConsignorName, ''), ''))";
+            const string dueExpr = "(b.Freight + b.Detention + b.HML + b.OTHR + b.StCharge - b.RCVD - b.TDS - b.DED)";
+            const string totalExpr = "(b.Freight + b.Detention + b.HML + b.OTHR + b.StCharge)";
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand($@"
+SELECT
+    TRIM(COALESCE(b.BillNo, '')) AS BillNo,
+    MAX({resolvedPartyExpr}) AS Party,
+    REPLACE(COALESCE(group_concat(DISTINCT TRIM(COALESCE(b.LRNo, ''))), ''), ',', ', ') AS LRNos,
+    COALESCE(SUM({totalExpr}), 0) AS Total,
+    COALESCE(SUM(b.RCVD), 0) AS RCVD,
+    COALESCE(SUM(b.TDS), 0) AS TDS,
+    COALESCE(SUM(b.DED), 0) AS DED
+FROM Bills b
+LEFT JOIN LREntries lr
+    ON lower(trim(COALESCE(lr.LRNo, ''))) = lower(trim(COALESCE(b.LRNo, '')))
+WHERE trim(COALESCE(b.BillNo, '')) <> ''
+  AND {dueExpr} > 0
+  AND (@partyFilter = '' OR {resolvedPartyExpr} LIKE @partySearch)
+  AND (@billNoFilter = '' OR TRIM(COALESCE(b.BillNo, '')) LIKE @billSearch)
+GROUP BY TRIM(COALESCE(b.BillNo, ''))
+ORDER BY BillNo DESC;", c))
+            {
+                cmd.Parameters.AddWithValue("@partyFilter", partyFilter);
+                cmd.Parameters.AddWithValue("@partySearch", "%" + partyFilter + "%");
+                cmd.Parameters.AddWithValue("@billNoFilter", billNoFilter);
+                cmd.Parameters.AddWithValue("@billSearch", "%" + billNoFilter + "%");
+                c.Open();
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        list.Add(new BillPendingOptionItem
+                        {
+                            BillNo = Convert.ToString(r["BillNo"]) ?? string.Empty,
+                            Party = Convert.ToString(r["Party"]) ?? string.Empty,
+                            LRNos = Convert.ToString(r["LRNos"]) ?? string.Empty,
+                            Total = GetDecimal(r["Total"]),
+                            RCVD = GetDecimal(r["RCVD"]),
+                            TDS = GetDecimal(r["TDS"]),
+                            DED = GetDecimal(r["DED"])
+                        });
+                    }
+                }
+            }
+
+            return list;
+        }
+
         private static RemoteBillSummary GetRemoteSummary(string filter = "", string party = "", bool dueOnly = false)
         {
             var query = "api/bills/summary";

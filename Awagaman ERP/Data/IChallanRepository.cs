@@ -16,6 +16,7 @@ namespace Awagaman_ERP.Data
         decimal GetTotalDue(string searchFilter = "", bool useLhsDerived = false);
         decimal GetTotalDueAdvanced(string challanNo, string lrNo, string from, string to, bool useLhsDerived = false);
         int GetMaxSr();
+        List<ChallanEntry> GetPendingBookingItems(int limit = 0);
         ChallanEntry FindByChallanNumber(string challanNumber);
         HashSet<int> GetChallanIdsWithComments();
         void Upsert(ChallanEntry entry);

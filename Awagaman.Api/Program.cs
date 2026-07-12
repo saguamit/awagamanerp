@@ -319,6 +319,17 @@ challans.MapPost("/by-numbers", async (string? ledgerKind, List<string> challanN
         return Results.Problem(ex.ToString(), statusCode: 500);
     }
 });
+challans.MapGet("/pending-bookings", async (int? limit, string? ledgerKind, AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetPendingBookingItemsAsync(limit ?? 0, ledgerKind));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
 challans.MapGet("/max-sr", async (string? ledgerKind, AwagamanRepository repo) =>
 {
     try
@@ -468,11 +479,33 @@ lrs.MapGet("/page", async (int page, int pageSize, string? search, string? sort,
         return Results.Problem(ex.ToString(), statusCode: 500);
     }
 });
+lrs.MapGet("/pending-bill-page", async (int page, int pageSize, string? search, AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetPendingBillLREntriesPageAsync(page, pageSize, search));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
 lrs.MapGet("/summary", async (string? search, AwagamanRepository repo) =>
 {
     try
     {
         return Results.Ok(await repo.GetLREntriesSummaryAsync(search));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
+lrs.MapGet("/exists", async (string? lrNo, int? excludeId, AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(new { exists = await repo.LRNumberExistsAsync(lrNo, excludeId ?? 0) });
     }
     catch (Exception ex)
     {
@@ -527,6 +560,50 @@ bills.MapGet("/summary", async (string? search, string? party, bool? dueOnly, Aw
     try
     {
         return Results.Ok(await repo.GetBillsSummaryAsync(search, party, dueOnly ?? false));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
+bills.MapGet("/party-due-summary", async (AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetBillPartyDueSummaryAsync());
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
+bills.MapGet("/party-due-details", async (string? party, AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetBillDueDetailsForPartyAsync(party));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
+bills.MapGet("/pending-parties", async (string? partyFilter, AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetPendingBillPartiesAsync(partyFilter));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
+bills.MapGet("/pending-options", async (string? partyFilter, string? billNoFilter, AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetPendingBillOptionsAsync(partyFilter, billNoFilter));
     }
     catch (Exception ex)
     {

@@ -571,6 +571,24 @@ namespace Awagaman_ERP.Data
                 .ToList();
         }
 
+        public List<ChallanEntry> GetPendingBookingItems(int limit = 0)
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                var route = AppendLedgerQuery("api/challans/pending-bookings");
+                if (limit > 0)
+                {
+                    route += route.Contains("?")
+                        ? $"&limit={limit}"
+                        : $"?limit={limit}";
+                }
+
+                return RemoteApiClient.GetList<ChallanEntry>(route);
+            }
+
+            return GetAll();
+        }
+
         public HashSet<int> GetChallanIdsWithComments()
         {
             var ids = new HashSet<int>();

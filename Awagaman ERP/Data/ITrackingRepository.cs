@@ -11,5 +11,6 @@ namespace Awagaman_ERP.Data
         void Upsert(TrackingEntry entry);
         void AddReportingTrack(ReportingTrackEntry entry);
         void Delete(TrackingEntry entry);
+        void DeleteByChallanNo(string challanNo);
     }
 }

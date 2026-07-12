@@ -148,10 +148,10 @@ billed_lrs AS (
     ) part
 )
 SELECT
-    (SELECT COUNT(*) FROM challans) AS ChallanCount,
-    (SELECT COUNT(*) FROM challans
+    (SELECT COUNT(*) FROM challan_ledger_entries) AS ChallanCount,
+    (SELECT COUNT(*) FROM challan_ledger_entries
         WHERE (lorry_hire - less_tds + detention + hamali - deduction - advance_amount - balance_paid_neft - balance_paid_cash) > 0) AS DueChallanCount,
-    COALESCE((SELECT SUM(lorry_hire - less_tds + detention + hamali - deduction - advance_amount - balance_paid_neft - balance_paid_cash) FROM challans), 0) AS ChallanDueAmount,
+    COALESCE((SELECT SUM(lorry_hire - less_tds + detention + hamali - deduction - advance_amount - balance_paid_neft - balance_paid_cash) FROM challan_ledger_entries), 0) AS ChallanDueAmount,
     COALESCE((SELECT SUM(freight + detention + hml + othr + st_charge - rcvd - tds - ded) FROM bills), 0) AS BillDueAmount,
     COALESCE((SELECT SUM(bank_dr - bank_cr) FROM cash_bank_statements), 0) AS CBSBankNet,
     COALESCE((SELECT SUM(cash_dr - cash_cr) FROM cash_bank_statements), 0) AS CBSCashNet,
@@ -810,6 +810,104 @@ WHERE CASE
         return QueryAsync<ChallanEntry>(GetChallanSelectSql(challanLedgerMode) + " ORDER BY " + BuildChallanOrderBy("challannumber", ascending: false) + ";");
     }
 
+    public async Task<IEnumerable<ChallanEntry>> GetPendingBookingItemsAsync(int limit = 0, string? ledgerKind = null)
+    {
+        var challanLedgerMode = IsChallanLedgerKind(ledgerKind);
+        var tableName = GetChallanTableName(challanLedgerMode);
+        var limitClause = limit > 0 ? "LIMIT @limit" : string.Empty;
+        var sql = $@"
+WITH split_pending AS (
+    SELECT
+        c.id,
+        c.challan_number AS ChallanNumber,
+        c.date AS date_sort,
+        c.from_location AS ""From"",
+        c.to_location AS ""To"",
+        c.vehicle_number AS VehicleNumber,
+        c.broker_name AS BrokerName,
+        c.lorry_hire AS LorryHire,
+        btrim(token.lr_no) AS LRNumber
+    FROM {tableName} c
+    CROSS JOIN LATERAL regexp_split_to_table(COALESCE(c.lr_number, ''), E'[,;\\s]+') AS token(lr_no)
+    WHERE btrim(token.lr_no) <> ''
+      AND NOT EXISTS (
+          SELECT 1
+          FROM lr_entries l
+          WHERE lower(btrim(COALESCE(l.lrno, ''))) = lower(btrim(token.lr_no))
+      )
+),
+blank_pending AS (
+    SELECT
+        c.id,
+        c.challan_number AS ChallanNumber,
+        c.date AS date_sort,
+        c.from_location AS ""From"",
+        c.to_location AS ""To"",
+        c.vehicle_number AS VehicleNumber,
+        c.broker_name AS BrokerName,
+        c.lorry_hire AS LorryHire,
+        ''::text AS LRNumber
+    FROM {tableName} c
+    WHERE btrim(COALESCE(c.lr_number, '')) = ''
+      AND NOT EXISTS (
+          SELECT 1
+          FROM lr_entries l
+          WHERE lower(btrim(COALESCE(l.chno, ''))) = lower(btrim(COALESCE(c.challan_number, '')))
+      )
+)
+SELECT
+    id,
+    0 AS sr,
+    ChallanNumber,
+    COALESCE(date_sort, CURRENT_DATE) AS date,
+    LRNumber,
+    BrokerName,
+    ""From"",
+    ""To"",
+    VehicleNumber,
+    NULL::text AS VehicleType,
+    NULL::text AS DriverName,
+    NULL::text AS DriverMobile,
+    NULL::text AS EngineNo,
+    NULL::text AS LicenceNo,
+    NULL::text AS PolicyNo,
+    NULL::text AS ChassisNo,
+    NULL::text AS OwnerName,
+    NULL::text AS PAN,
+    LorryHire,
+    0::numeric AS LessTDS,
+    0::numeric AS AdvanceAmount,
+    0::numeric AS AdvanceNEFT,
+    0::numeric AS AdvanceCash,
+    NULL::date AS AdvanceDate,
+    0::numeric AS Detention,
+    0::numeric AS Hamali,
+    0::numeric AS Other,
+    0::numeric AS Deduction,
+    0::numeric AS BalancePaidNEFT,
+    0::numeric AS BalancePaidCash,
+    NULL::date AS BalancePaidDate,
+    NULL::text AS PaidTo,
+    NULL::text AS Remarks,
+    0::numeric AS BillAmount,
+    0::numeric AS Margin,
+    NULL::numeric AS ImportedBalance,
+    NULL::numeric AS ImportedDue,
+    false AS PreserveImportedBilling,
+    {(challanLedgerMode ? "NULL::integer AS SourcePurchaseId" : "NULL::integer AS SourcePurchaseId")}
+FROM (
+    SELECT * FROM split_pending
+    UNION ALL
+    SELECT * FROM blank_pending
+) pending
+ORDER BY id DESC, LRNumber DESC
+{limitClause};";
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        return await conn.QueryAsync<ChallanEntry>(sql, new { limit });
+    }
+
     public async Task<PagedResult<ChallanEntry>> GetChallansPageAsync(
         int page,
         int pageSize,
@@ -921,6 +1019,7 @@ WHERE CASE
         entry.ChallanNumber = ChallanNumberFormatter.Normalize(entry.ChallanNumber, entry.Date);
         var challanLedgerMode = IsChallanLedgerKind(ledgerKind);
         var tableName = GetChallanTableName(challanLedgerMode);
+        NormalizeChallanImportedBilling(entry, challanLedgerMode);
         var sql = entry.Id <= 0
             ? challanLedgerMode
                 ? $@"INSERT INTO {tableName} (
@@ -995,6 +1094,31 @@ WHERE CASE
         }
         await SyncVehicleLedgerFromChallanAsync(entry);
         return id;
+    }
+
+    private static void NormalizeChallanImportedBilling(ChallanEntry entry, bool challanLedgerMode)
+    {
+        if (entry == null)
+        {
+            return;
+        }
+
+        var computedBalance = challanLedgerMode
+            ? (entry.LHS - entry.LessTDS - entry.AdvanceAmount)
+            : (entry.LorryHire - entry.LessTDS - entry.AdvanceAmount);
+        var computedDue = (computedBalance + entry.Detention + entry.Hamali + entry.Deduction)
+            - entry.BalancePaidNEFT
+            - entry.BalancePaidCash;
+
+        if (entry.PreserveImportedBilling)
+        {
+            entry.ImportedBalance ??= computedBalance;
+            entry.ImportedDue ??= computedDue;
+            return;
+        }
+
+        entry.ImportedBalance = computedBalance;
+        entry.ImportedDue = computedDue;
     }
 
     public async Task<int> DeleteChallanAsync(int id, string? ledgerKind = null)
@@ -1156,6 +1280,61 @@ WHERE source_purchase_id = @SourcePurchaseId
         return new PagedResult<LREntry> { Items = items, TotalCount = total };
     }
 
+    public async Task<PagedResult<LREntry>> GetPendingBillLREntriesPageAsync(int page, int pageSize, string? search)
+    {
+        page = NormalizePage(page);
+        pageSize = NormalizePageSize(pageSize);
+        var offset = (page - 1) * pageSize;
+        var parameters = new DynamicParameters();
+        parameters.Add("limit", pageSize);
+        parameters.Add("offset", offset);
+        var q = (search ?? string.Empty).Trim();
+
+        var pendingWhere = @"
+WHERE NULLIF(TRIM(COALESCE(lr.lrno, '')), '') IS NOT NULL
+  AND NULLIF(TRIM(COALESCE(lr.bill_no, '')), '') IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM bills b
+      WHERE lower(trim(COALESCE(b.lr_no, ''))) = lower(trim(COALESCE(lr.lrno, '')))
+        AND NULLIF(TRIM(COALESCE(b.bill_no, '')), '') IS NOT NULL
+  )";
+
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            pendingWhere += @"
+  AND (
+      lr.lrno ILIKE @search OR
+      lr.consignor_name ILIKE @search OR
+      lr.bill_party ILIKE @search OR
+      lr.from_location ILIKE @search OR
+      lr.to_location ILIKE @search OR
+      lr.vehicle_no ILIKE @search OR
+      lr.chno ILIKE @search
+  )";
+            parameters.Add("search", $"%{q}%");
+        }
+
+        const string select = @"SELECT
+            lr.id, lr.sr, lr.lrno AS LRNo, lr.date, lr.consignor_name AS ConsignorName, lr.consignor_address AS ConsignorAddress, lr.consignor_gst AS ConsignorGST,
+            lr.consignee_name AS ConsigneeName, lr.consignee_address AS ConsigneeAddress, lr.consignee_gst AS ConsigneeGST,
+            lr.from_location AS ""From"", lr.to_location AS ""To"", lr.vehicle_no AS VehicleNo, lr.vehicle_type AS VehicleType,
+            lr.weight AS Weight, lr.size_l AS SizeL, lr.size_w AS SizeW, lr.size_h AS SizeH, lr.actual_weight AS ActualWeight, lr.charged_weight AS ChargedWeight,
+            lr.pkg AS PKG, lr.pkg_type AS PkgType, lr.description AS Description, lr.invoice AS Invoice, lr.value AS Value, lr.chno AS CHNo,
+            lr.total_freight AS TotalFreight, lr.hamali AS Hamali, lr.detention AS Detention, lr.others AS Others, lr.st_charge AS StCharge,
+            lr.neft AS NEFT, lr.cash AS CASH, lr.tds AS TDS, lr.ded AS Ded, lr.bill_no AS BillNo, lr.bill_date AS BillDate, lr.bill AS BILL,
+            lr.challan_lorry_hire AS ChallanLorryHire,
+            lr.bill_party AS BillParty, lr.broker AS Broker, lr.frt_type AS FrtType, lr.pay_type AS PayType, lr.comm AS Comm, lr.paid AS Paid,
+            lr.preserve_imported_billing AS PreserveImportedBilling
+            FROM lr_entries lr";
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM lr_entries lr {pendingWhere};", parameters);
+        var items = (await conn.QueryAsync<LREntry>($"{select} {pendingWhere} ORDER BY lr.id DESC LIMIT @limit OFFSET @offset;", parameters)).ToList();
+        return new PagedResult<LREntry> { Items = items, TotalCount = total };
+    }
+
     public async Task<LRSummaryResult> GetLREntriesSummaryAsync(string? search)
     {
         var parameters = new DynamicParameters();
@@ -1194,6 +1373,23 @@ WHERE source_purchase_id = @SourcePurchaseId
             bill_party AS BillParty, broker AS Broker, frt_type AS FrtType, pay_type AS PayType, comm AS Comm, paid AS Paid,
             preserve_imported_billing AS PreserveImportedBilling
             FROM lr_entries WHERE id = @id;", new { id });
+
+    public async Task<bool> LRNumberExistsAsync(string? lrNo, int excludeId = 0)
+    {
+        var normalized = (lrNo ?? string.Empty).Trim();
+        if (normalized.Length == 0)
+        {
+            return false;
+        }
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        return await conn.ExecuteScalarAsync<int>(@"
+SELECT COUNT(*)
+FROM lr_entries
+WHERE lower(btrim(COALESCE(lrno, ''))) = lower(btrim(@lrNo))
+  AND (@excludeId <= 0 OR id <> @excludeId);", new { lrNo = normalized, excludeId }) > 0;
+    }
 
     public async Task<int> UpsertLREntryAsync(LREntry entry)
     {
@@ -1308,6 +1504,109 @@ WHERE source_purchase_id = @SourcePurchaseId
                FROM bills
                {where};",
             parameters);
+    }
+
+    public async Task<IEnumerable<BillPartyDueSummaryItem>> GetBillPartyDueSummaryAsync()
+    {
+        const string dueExpr = "(b.freight + b.detention + b.hml + b.othr + b.st_charge - b.rcvd - b.tds - b.ded)";
+        const string sql = $@"
+SELECT
+    TRIM(COALESCE(NULLIF(b.party, ''), NULLIF(l.bill_party, ''), NULLIF(l.consignor_name, ''), '')) AS Party,
+    COUNT(DISTINCT NULLIF(TRIM(COALESCE(b.bill_no, '')), ''))::int AS Bills,
+    COALESCE(SUM({dueExpr}), 0)::numeric AS Due
+FROM bills b
+LEFT JOIN lr_entries l
+    ON lower(trim(COALESCE(l.lrno, ''))) = lower(trim(COALESCE(b.lr_no, '')))
+WHERE NULLIF(TRIM(COALESCE(b.bill_no, '')), '') IS NOT NULL
+  AND {dueExpr} > 0
+GROUP BY TRIM(COALESCE(NULLIF(b.party, ''), NULLIF(l.bill_party, ''), NULLIF(l.consignor_name, ''), ''))
+ORDER BY Due DESC, Party ASC;";
+        return await QueryAsync<BillPartyDueSummaryItem>(sql);
+    }
+
+    public async Task<IEnumerable<BillDueDetailItem>> GetBillDueDetailsForPartyAsync(string? party)
+    {
+        const string dueExpr = "(b.freight + b.detention + b.hml + b.othr + b.st_charge - b.rcvd - b.tds - b.ded)";
+        const string resolvedPartyExpr = "TRIM(COALESCE(NULLIF(b.party, ''), NULLIF(l.bill_party, ''), NULLIF(l.consignor_name, ''), ''))";
+        const string sql = $@"
+SELECT
+    TRIM(COALESCE(b.bill_no, '')) AS BillNo,
+    COALESCE(string_agg(DISTINCT NULLIF(TRIM(COALESCE(b.lr_no, '')), ''), ', '), '') AS LRNos,
+    COALESCE(string_agg(DISTINCT NULLIF(TRIM(COALESCE(NULLIF(b.from_loc, ''), l.from_location, '')), ''), ', '), '') AS ""From"",
+    COALESCE(string_agg(DISTINCT NULLIF(TRIM(COALESCE(NULLIF(b.to_loc, ''), l.to_location, '')), ''), ', '), '') AS ""To"",
+    COALESCE(SUM({dueExpr}), 0)::numeric AS Due
+FROM bills b
+LEFT JOIN lr_entries l
+    ON lower(trim(COALESCE(l.lrno, ''))) = lower(trim(COALESCE(b.lr_no, '')))
+WHERE NULLIF(TRIM(COALESCE(b.bill_no, '')), '') IS NOT NULL
+  AND {dueExpr} > 0
+  AND {resolvedPartyExpr} = @party
+GROUP BY TRIM(COALESCE(b.bill_no, ''))
+ORDER BY Due DESC, BillNo DESC;";
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        return await conn.QueryAsync<BillDueDetailItem>(sql, new { party = (party ?? string.Empty).Trim() });
+    }
+
+    public async Task<IEnumerable<string>> GetPendingBillPartiesAsync(string? partyFilter)
+    {
+        const string resolvedPartyExpr = "TRIM(COALESCE(NULLIF(b.party, ''), NULLIF(l.bill_party, ''), NULLIF(l.consignor_name, ''), ''))";
+        const string dueExpr = "(b.freight + b.detention + b.hml + b.othr + b.st_charge - b.rcvd - b.tds - b.ded)";
+        const string sql = $@"
+SELECT DISTINCT {resolvedPartyExpr} AS Party
+FROM bills b
+LEFT JOIN lr_entries l
+    ON lower(trim(COALESCE(l.lrno, ''))) = lower(trim(COALESCE(b.lr_no, '')))
+WHERE NULLIF(TRIM(COALESCE(b.bill_no, '')), '') IS NOT NULL
+  AND {dueExpr} > 0
+  AND {resolvedPartyExpr} <> ''
+  AND (@partyFilter = '' OR {resolvedPartyExpr} ILIKE @partySearch)
+ORDER BY Party ASC;";
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        var rows = await conn.QueryAsync<string>(sql, new
+        {
+            partyFilter = (partyFilter ?? string.Empty).Trim(),
+            partySearch = "%" + (partyFilter ?? string.Empty).Trim() + "%"
+        });
+        return rows;
+    }
+
+    public async Task<IEnumerable<BillPendingOptionItem>> GetPendingBillOptionsAsync(string? partyFilter, string? billNoFilter)
+    {
+        const string resolvedPartyExpr = "TRIM(COALESCE(NULLIF(b.party, ''), NULLIF(l.bill_party, ''), NULLIF(l.consignor_name, ''), ''))";
+        const string dueExpr = "(b.freight + b.detention + b.hml + b.othr + b.st_charge - b.rcvd - b.tds - b.ded)";
+        const string totalExpr = "(b.freight + b.detention + b.hml + b.othr + b.st_charge)";
+        const string sql = $@"
+SELECT
+    TRIM(COALESCE(b.bill_no, '')) AS BillNo,
+    MAX({resolvedPartyExpr}) AS Party,
+    COALESCE(string_agg(DISTINCT NULLIF(TRIM(COALESCE(b.lr_no, '')), ''), ', '), '') AS LRNos,
+    COALESCE(SUM({totalExpr}), 0)::numeric AS Total,
+    COALESCE(SUM(b.rcvd), 0)::numeric AS RCVD,
+    COALESCE(SUM(b.tds), 0)::numeric AS TDS,
+    COALESCE(SUM(b.ded), 0)::numeric AS DED
+FROM bills b
+LEFT JOIN lr_entries l
+    ON lower(trim(COALESCE(l.lrno, ''))) = lower(trim(COALESCE(b.lr_no, '')))
+WHERE NULLIF(TRIM(COALESCE(b.bill_no, '')), '') IS NOT NULL
+  AND {dueExpr} > 0
+  AND (@partyFilter = '' OR {resolvedPartyExpr} ILIKE @partySearch)
+  AND (@billNoFilter = '' OR TRIM(COALESCE(b.bill_no, '')) ILIKE @billSearch)
+GROUP BY TRIM(COALESCE(b.bill_no, ''))
+ORDER BY BillNo DESC;";
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        return await conn.QueryAsync<BillPendingOptionItem>(sql, new
+        {
+            partyFilter = (partyFilter ?? string.Empty).Trim(),
+            partySearch = "%" + (partyFilter ?? string.Empty).Trim() + "%",
+            billNoFilter = (billNoFilter ?? string.Empty).Trim(),
+            billSearch = "%" + (billNoFilter ?? string.Empty).Trim() + "%"
+        });
     }
 
     public Task<BillEntry?> GetBillAsync(int id) =>

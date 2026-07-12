@@ -17,7 +17,6 @@ namespace Awagaman_ERP
     {
         private LREntry _currentEntry;
         private System.Collections.Generic.IEnumerable<ChallanEntry> _challanEntries;
-        private System.Collections.Generic.IEnumerable<LREntry> _existingEntries;
         private decimal? _challanLorryHire;
         private readonly DispatcherTimer _partySuggestionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         private string _pendingSuggestionText;
@@ -64,8 +63,6 @@ namespace Awagaman_ERP
             InitializeComponent();
             ConfigureDebounceTimers();
             _challanEntries = challanEntries;
-            _existingEntries = existingEntries;
-
             if (prefillFrom != null)
             {
                 CurrentEntry = new LREntry
@@ -376,16 +373,7 @@ namespace Awagaman_ERP
             }
 
             var enteredLrNo = (CurrentEntry.LRNo ?? string.Empty).Trim();
-            var duplicate = _existingEntries?
-                .FirstOrDefault(x => x.Id != CurrentEntry.Id &&
-                                     string.Equals((x.LRNo ?? string.Empty).Trim(), enteredLrNo, StringComparison.OrdinalIgnoreCase));
-
-            if (duplicate == null && LRNoExistsInDatabase(enteredLrNo, CurrentEntry.Id))
-            {
-                duplicate = new LREntry { LRNo = enteredLrNo };
-            }
-
-            if (duplicate != null)
+            if (LRNoExistsInDatabase(enteredLrNo, CurrentEntry.Id))
             {
                 MessageBox.Show($"LR No '{CurrentEntry.LRNo}' already exists in LR Ledger.", "Duplicate Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
@@ -399,10 +387,6 @@ namespace Awagaman_ERP
                 return;
             }
 
-            // Auto-save parties to Party Ledger
-            SavePartyIfNew(CurrentEntry.ConsignorName, CurrentEntry.ConsignorAddress, CurrentEntry.ConsignorGST);
-            SavePartyIfNew(CurrentEntry.ConsigneeName, CurrentEntry.ConsigneeAddress, CurrentEntry.ConsigneeGST);
-
             Result = CurrentEntry;
             WasSaved = true;
             if (System.Windows.Interop.ComponentDispatcher.IsThreadModal)
@@ -415,9 +399,7 @@ namespace Awagaman_ERP
         private static bool LRNoExistsInDatabase(string lrNo, int excludeId)
         {
             if (string.IsNullOrWhiteSpace(lrNo)) return false;
-            return new LRRepository().GetAll().Any(x =>
-                x.Id != excludeId &&
-                string.Equals((x.LRNo ?? string.Empty).Trim(), lrNo.Trim(), StringComparison.OrdinalIgnoreCase));
+            return new LRRepository().ExistsLRNo(lrNo, excludeId);
         }
 
         private void ConsignorName_TextChanged(object sender, TextChangedEventArgs e)

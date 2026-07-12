@@ -64,6 +64,68 @@ namespace Awagaman_ERP.Data
             return entries;
         }
 
+        internal RemotePagedResult<LREntry> GetPendingBillPage(int pageNumber, int pageSize, string searchFilter = "")
+        {
+            pageNumber = Math.Max(pageNumber, 1);
+            pageSize = Math.Max(pageSize, 1);
+            searchFilter = (searchFilter ?? string.Empty).Trim();
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetPage<LREntry>($"api/lr/pending-bill-page?page={pageNumber}&pageSize={pageSize}&search={RemoteApiClient.UrlEncode(searchFilter)}");
+            }
+
+            var result = new RemotePagedResult<LREntry>();
+            int offset = (pageNumber - 1) * pageSize;
+            var pendingWhere = @"
+WHERE TRIM(COALESCE(lr.LRNo, '')) <> ''
+  AND TRIM(COALESCE(lr.BillNo, '')) = ''
+  AND NOT EXISTS (
+      SELECT 1
+      FROM Bills b
+      WHERE LOWER(TRIM(COALESCE(b.LRNo, ''))) = LOWER(TRIM(COALESCE(lr.LRNo, '')))
+        AND TRIM(COALESCE(b.BillNo, '')) <> ''
+  )";
+
+            if (!string.IsNullOrWhiteSpace(searchFilter))
+            {
+                pendingWhere += @"
+  AND (
+      lr.LRNo LIKE @search OR
+      lr.ConsignorName LIKE @search OR
+      lr.BillParty LIKE @search OR
+      lr.FromLocation LIKE @search OR
+      lr.ToLocation LIKE @search OR
+      lr.VehicleNo LIKE @search OR
+      lr.CHNo LIKE @search
+  )";
+            }
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var countCommand = new SQLiteCommand($"SELECT COUNT(*) FROM LREntries lr {pendingWhere};", connection))
+            using (var pageCommand = new SQLiteCommand($"SELECT * FROM LREntries lr {pendingWhere} ORDER BY lr.Date DESC, lr.Id DESC LIMIT @limit OFFSET @offset;", connection))
+            {
+                if (!string.IsNullOrWhiteSpace(searchFilter))
+                {
+                    countCommand.Parameters.AddWithValue("@search", "%" + searchFilter + "%");
+                    pageCommand.Parameters.AddWithValue("@search", "%" + searchFilter + "%");
+                }
+                pageCommand.Parameters.AddWithValue("@limit", pageSize);
+                pageCommand.Parameters.AddWithValue("@offset", offset);
+                connection.Open();
+                result.TotalCount = Convert.ToInt32(countCommand.ExecuteScalar());
+                using (var reader = pageCommand.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        result.Items.Add(ReadEntry(reader));
+                    }
+                }
+            }
+
+            return result;
+        }
+
         public List<LREntry> Search(string searchFilter, int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true)
         {
             if (BackendSettings.UseRemoteApi)
@@ -230,6 +292,35 @@ WHERE LRNo LIKE @f OR ConsignorName LIKE @f OR ConsignorAddress LIKE @f OR Consi
             {
                 connection.Open();
                 return Convert.ToInt32(command.ExecuteScalar());
+            }
+        }
+
+        public bool ExistsLRNo(string lrNo, int excludeId = 0)
+        {
+            lrNo = (lrNo ?? string.Empty).Trim();
+            if (lrNo.Length == 0)
+            {
+                return false;
+            }
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                var route = $"api/lr/exists?lrNo={RemoteApiClient.UrlEncode(lrNo)}&excludeId={excludeId}";
+                return RemoteApiClient.Get<RemoteExistsResult>(route)?.Exists ?? false;
+            }
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = @"
+SELECT COUNT(*)
+FROM LREntries
+WHERE LOWER(TRIM(COALESCE(LRNo, ''))) = LOWER(TRIM(@lrNo))
+  AND (@excludeId <= 0 OR Id <> @excludeId);";
+                command.Parameters.AddWithValue("@lrNo", lrNo);
+                command.Parameters.AddWithValue("@excludeId", excludeId);
+                connection.Open();
+                return Convert.ToInt32(command.ExecuteScalar() ?? 0) > 0;
             }
         }
 
@@ -717,6 +808,11 @@ LRNo {dir}, Sr, Id";
                     Items = sorted.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToList()
                 };
             }
+        }
+
+        private sealed class RemoteExistsResult
+        {
+            public bool Exists { get; set; }
         }
 
         private static IEnumerable<LREntry> ApplySort(IEnumerable<LREntry> source, string sortColumn, bool ascending)

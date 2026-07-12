@@ -239,6 +239,38 @@ SELECT last_insert_rowid();";
             }
         }
 
+        public void DeleteByChallanNo(string challanNo)
+        {
+            challanNo = (challanNo ?? string.Empty).Trim();
+            if (challanNo.Length == 0)
+            {
+                return;
+            }
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                var matches = GetAll()
+                    .Where(x => string.Equals((x.ChallanNo ?? string.Empty).Trim(), challanNo, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                foreach (var entry in matches)
+                {
+                    Delete(entry);
+                }
+
+                return;
+            }
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = connection.CreateCommand())
+            {
+                connection.Open();
+                command.CommandText = "DELETE FROM TrackingEntries WHERE LOWER(TRIM(COALESCE(ChallanNo, ''))) = LOWER(TRIM(@ChallanNo));";
+                command.Parameters.AddWithValue("@ChallanNo", challanNo);
+                command.ExecuteNonQuery();
+            }
+        }
+
         private static void AddParameters(SQLiteCommand command, TrackingEntry entry)
         {
             command.Parameters.AddWithValue("@Sr", entry.Sr);

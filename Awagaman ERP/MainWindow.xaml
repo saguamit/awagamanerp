@@ -433,7 +433,7 @@
                                 <Button x:Name="TabTrackingLedger" Content="Tracking Ledger" Style="{StaticResource TabButtonStyle}" Width="134" Click="OpenTrackingLedger_Click" />
                             </StackPanel>
 
-                            <Button Grid.Column="1" Content="Reset Data" Background="#C62828" Foreground="White" BorderThickness="0" Padding="12,6" FontSize="12" Cursor="Hand" Click="ResetAllData_Click" ToolTip="Delete all ledger data" Margin="8,8,12,8" VerticalAlignment="Center" />
+                            <Button x:Name="TopResetDataButton" Grid.Column="1" Content="Reset Data" Background="#C62828" Foreground="White" BorderThickness="0" Padding="12,6" FontSize="12" Cursor="Hand" Click="ResetAllData_Click" ToolTip="Delete all ledger data" Margin="8,8,12,8" VerticalAlignment="Center" />
                         </Grid>
                     </Border>
 
@@ -865,9 +865,9 @@
                                 <TextBlock Text="Search &amp; Filter" FontSize="12" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,16,0" />
                                 <TextBox x:Name="BillSearchBox" TextChanged="BillSearchBox_TextChanged" Width="200" Height="26" BorderBrush="{StaticResource BorderLight}" FontSize="12" Padding="4,2" Margin="0,0,16,0" />
                                 <Button Content="↻" Background="{StaticResource ThemeGreen}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="BillRefresh_Click" ToolTip="Clear Filters" />
-                                <Button Content="🗑" Background="#E53935" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="BillDeleteSelected_Click" ToolTip="Delete Selected" />
-                                <Button Content="📂" Background="#1565C0" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ImportBill_Click" ToolTip="Import Bills from CSV" />
-                                <Button Content="?" Background="#374151" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenImportGuide_Click" ToolTip="Import column names" />
+                                <Button x:Name="BillDeleteButton" Content="🗑" Background="#E53935" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="BillDeleteSelected_Click" ToolTip="Delete Selected" />
+                                <Button x:Name="BillImportButton" Content="📂" Background="#1565C0" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ImportBill_Click" ToolTip="Import Bills from CSV" />
+                                <Button x:Name="BillImportGuideButton" Content="?" Background="#374151" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenImportGuide_Click" ToolTip="Import column names" />
                                 <Button Content="Rs." Background="#00897B" Foreground="White" BorderThickness="0" Width="34" Height="26" Margin="4,0" Cursor="Hand" Click="OpenReceiveBillAmount_Click" ToolTip="Receive Bill Amount" />
                                 <Button Content="🧾" Background="#6D4C41" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenBillReceiptHistory_Click" ToolTip="Bill Receipt History" />
                                 <Button Content="Σ" Background="#6D4C41" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenPartyBillSummary_Click" ToolTip="Party-wise Bill Due Summary" />
@@ -996,8 +996,8 @@
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="Party Ledger" FontSize="20" FontWeight="Bold" Foreground="#333" VerticalAlignment="Center" />
                                 <Button Grid.Column="1" Content="+ Add Row" Height="26" Margin="0,0,8,0" Padding="10,0" Background="#00B08B" Foreground="White" BorderThickness="0" Cursor="Hand" Click="PartyAddRow_Click" />
-                                <Button Grid.Column="2" Content="📂 Import" Height="26" Margin="0,0,8,0" Padding="10,0" Background="#1565C0" Foreground="White" BorderThickness="0" Cursor="Hand" Click="ImportParty_Click" />
-                                <Button Grid.Column="3" Content="🗑 Delete" Height="26" Margin="0,0,8,0" Padding="10,0" Background="#DC2626" Foreground="White" BorderThickness="0" Cursor="Hand" Click="PartyDeleteSelected_Click" />
+                                <Button x:Name="PartyImportButton" Grid.Column="2" Content="📂 Import" Height="26" Margin="0,0,8,0" Padding="10,0" Background="#1565C0" Foreground="White" BorderThickness="0" Cursor="Hand" Click="ImportParty_Click" />
+                                <Button x:Name="PartyDeleteButton" Grid.Column="3" Content="🗑 Delete" Height="26" Margin="0,0,8,0" Padding="10,0" Background="#DC2626" Foreground="White" BorderThickness="0" Cursor="Hand" Click="PartyDeleteSelected_Click" />
                                 <TextBox Grid.Column="4" x:Name="PartySearchBox" TextChanged="PartySearchBox_TextChanged" Width="200" Height="26" FontSize="12" Padding="4,2" BorderBrush="#CCC" />
                             </Grid>
                             <DataGrid x:Name="PartyGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
@@ -1031,7 +1031,7 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="Vehicle Ledger" FontSize="20" FontWeight="Bold" Foreground="#333" VerticalAlignment="Center" />
-                                <Button Grid.Column="1" Content="🗑 Delete" Height="26" Margin="0,0,8,0" Padding="10,0" Background="#DC2626" Foreground="White" BorderThickness="0" Cursor="Hand" Click="VehicleDeleteSelected_Click" HorizontalAlignment="Right" />
+                                <Button x:Name="VehicleDeleteButton" Grid.Column="1" Content="🗑 Delete" Height="26" Margin="0,0,8,0" Padding="10,0" Background="#DC2626" Foreground="White" BorderThickness="0" Cursor="Hand" Click="VehicleDeleteSelected_Click" HorizontalAlignment="Right" />
                                 <TextBox Grid.Column="2" x:Name="VehicleSearchBox" TextChanged="VehicleSearchBox_TextChanged" Width="220" Height="26" FontSize="12" Padding="4,2" BorderBrush="#CCC" HorizontalAlignment="Right" />
                             </Grid>
                             <DataGrid x:Name="VehicleGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
@@ -1076,7 +1076,7 @@
                                 <TextBox Grid.Column="1" x:Name="CBSSearchBox" Width="180" Height="28" Margin="0,0,8,0" Padding="6,2" VerticalContentAlignment="Center" Text="Search CBS..." Foreground="#9CA3AF" TextChanged="CBSSearchBox_TextChanged" GotFocus="CBSSearchBox_GotFocus" LostFocus="CBSSearchBox_LostFocus" />
                                 <Button Grid.Column="2" Content="+ Account" Height="28" Margin="0,0,8,0" Padding="10,0" Background="#1565C0" Foreground="White" BorderThickness="0" Cursor="Hand" Click="CBSAddAccount_Click" />
                                 <Button Grid.Column="3" Content="+ Entry" Height="28" Margin="0,0,8,0" Padding="10,0" Background="#00B08B" Foreground="White" BorderThickness="0" Cursor="Hand" Click="CBSAddEntry_Click" />
-                                <Button Grid.Column="4" Content="🗑 Delete" Height="28" Padding="10,0" Background="#DC2626" Foreground="White" BorderThickness="0" Cursor="Hand" Click="CBSDeleteSelected_Click" />
+                                <Button x:Name="CBSDeleteButton" Grid.Column="4" Content="🗑 Delete" Height="28" Padding="10,0" Background="#DC2626" Foreground="White" BorderThickness="0" Cursor="Hand" Click="CBSDeleteSelected_Click" />
                                 <Button Grid.Column="5" Content="Summary" Height="28" Margin="8,0,0,0" Padding="10,0" Background="#4B5563" Foreground="White" BorderThickness="0" Cursor="Hand" Click="CBSAccountSummary_Click" />
                             </Grid>
 
@@ -1358,7 +1358,7 @@
                             <!-- Create + Reset Buttons -->
                             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                                 <Button x:Name="CreatePurchaseButton" Content="+ Create Purchase" Style="{StaticResource GreenButtonStyle}" Click="OpenChallanForm_Click" ToolTip="Ctrl+N" Margin="0,0,8,0" />
-                                <Button Content="Reset Data" Background="#C62828" Foreground="White" BorderThickness="0" Padding="12,6" FontSize="12" Cursor="Hand" Click="ResetAllData_Click" ToolTip="Delete all ledger data" />
+                                <Button x:Name="LedgerResetDataButton" Content="Reset Data" Background="#C62828" Foreground="White" BorderThickness="0" Padding="12,6" FontSize="12" Cursor="Hand" Click="ResetAllData_Click" ToolTip="Delete all ledger data" />
                             </StackPanel>
 
                         </Grid>
@@ -1397,10 +1397,10 @@
                             <Button Background="#7B1FA2" Foreground="White" BorderThickness="0" Width="80" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="MakeBuilty_Click" ToolTip="Create LR from selected Challan" FontSize="11">Make Builty</Button>
                             <Button Content="Rs." Background="#00897B" Foreground="White" BorderThickness="0" Width="34" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="OpenChallanPay_Click" ToolTip="Pay Challan (Broker-wise)" />
 
-                            <Button Content="Import" Background="#1565C0" Foreground="White" BorderThickness="0" Width="58" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="ImportChallan_Click" ToolTip="Import Challans from CSV" />
-                            <Button Content="?" Background="#374151" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="OpenImportGuide_Click" ToolTip="Import column names" />
+                            <Button x:Name="ChallanImportButton" Content="Import" Background="#1565C0" Foreground="White" BorderThickness="0" Width="58" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="ImportChallan_Click" ToolTip="Import Challans from CSV" />
+                            <Button x:Name="ChallanImportGuideButton" Content="?" Background="#374151" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="OpenImportGuide_Click" ToolTip="Import column names" />
 
-                            <Button Content="Del" Background="#E53935" Foreground="White" BorderThickness="0" Width="38" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="DeleteSelected_Click" ToolTip="Delete Selected" />
+                            <Button x:Name="ChallanDeleteButton" Content="Del" Background="#E53935" Foreground="White" BorderThickness="0" Width="38" Height="26" Margin="4,0,4,8" Cursor="Hand" Click="DeleteSelected_Click" ToolTip="Delete Selected" />
 
                         </WrapPanel>
 
@@ -1869,10 +1869,10 @@
 
                                 <Button Content="↻" Background="{StaticResource ThemeGreen}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="LRRefresh_Click" ToolTip="Clear Filters &amp; Search" />
 
-                                <Button Content="🗑" Background="#E53935" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="LRDeleteSelected_Click" ToolTip="Delete Selected" />
+                                <Button x:Name="LRDeleteButton" Content="🗑" Background="#E53935" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="LRDeleteSelected_Click" ToolTip="Delete Selected" />
 
-                                <Button Content="📂" Background="#1565C0" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ImportLR_Click" ToolTip="Import LR from CSV" />
-                                <Button Content="?" Background="#374151" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenImportGuide_Click" ToolTip="Import column names" />
+                                <Button x:Name="LRImportButton" Content="📂" Background="#1565C0" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ImportLR_Click" ToolTip="Import LR from CSV" />
+                                <Button x:Name="LRImportGuideButton" Content="?" Background="#374151" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenImportGuide_Click" ToolTip="Import column names" />
 
                                 <Button Content="📇" Background="#7B1FA2" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenPartyLedger_Click" ToolTip="Party Ledger" />
 
@@ -2199,7 +2199,7 @@
                                 </ComboBox>
                                 <Button Content="↻" Background="{StaticResource ThemeGreen}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="TrackingRefresh_Click" ToolTip="Clear Filters" />
                                 <Button Content="✎" Background="#FF9800" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenTrackingEntryForm_Click" ToolTip="Edit Selected" />
-                                <Button Content="🗑" Background="#E53935" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="TrackingDeleteSelected_Click" ToolTip="Delete Selected" />
+                                <Button x:Name="TrackingDeleteButton" Content="🗑" Background="#E53935" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="TrackingDeleteSelected_Click" ToolTip="Delete Selected" />
                             </StackPanel>
                         </Border>
 
