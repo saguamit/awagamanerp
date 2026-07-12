@@ -50,6 +50,7 @@ namespace Awagaman_ERP.Models
         private string _payType;
         private decimal _comm;
         private string _paid;
+        private bool _preserveImportedBilling;
 
         public int Id { get => _id; set { _id = value; OnPropertyChanged(); } }
         public int Sr { get => _sr; set { _sr = value; OnPropertyChanged(); } }
@@ -118,19 +119,20 @@ namespace Awagaman_ERP.Models
             } 
         }
         
-        public decimal TotalBill => TotalFreight + Detention + Hamali + Others + StCharge;
+        public decimal TotalBill => PreserveImportedBilling ? BILL : (TotalFreight + Detention + Hamali + Others + StCharge);
         public decimal Bal => (NEFT + CASH) - TDS + Ded;
         public decimal ChallanLorryHire { get => _challanLorryHire; set { _challanLorryHire = value; OnPropertyChanged(); } }
         
         public string BillNo { get => _billNo; set { _billNo = value; OnPropertyChanged(); } }
         public DateTime? BillDate { get => _billDate; set { _billDate = value; OnPropertyChanged(); } }
-        public decimal BILL { get => _billAmount; set { _billAmount = value; OnPropertyChanged(); } }
+        public decimal BILL { get => _billAmount; set { _billAmount = value; OnPropertyChanged(); OnPropertyChanged(nameof(TotalBill)); } }
         public string BillParty { get => _billParty; set { _billParty = value; OnPropertyChanged(); } }
         public string Broker { get => _broker; set { _broker = value; OnPropertyChanged(); } }
         public string FrtType { get => _frtType; set { _frtType = value; OnPropertyChanged(); } }
         public string PayType { get => _payType; set { _payType = value; OnPropertyChanged(); } }
         public decimal Comm { get => _comm; set { _comm = value; OnPropertyChanged(); } }
         public string Paid { get => _paid; set { _paid = value; OnPropertyChanged(); } }
+        public bool PreserveImportedBilling { get => _preserveImportedBilling; set { _preserveImportedBilling = value; OnPropertyChanged(); OnPropertyChanged(nameof(TotalBill)); } }
 
         private bool _hasComments;
         [System.Xml.Serialization.XmlIgnore]

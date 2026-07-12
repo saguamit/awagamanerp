@@ -1,11 +1,13 @@
 using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 
 namespace Awagaman_ERP.Models
 {
     public class BillEntry : INotifyPropertyChanged
     {
+        private static readonly Regex FinancialYearRegex = new Regex(@"\b\d{2}-\d{2}\b", RegexOptions.Compiled);
         private int _id;
         private int _sr;
         private string _billNo;
@@ -64,6 +66,63 @@ namespace Awagaman_ERP.Models
         public string GroupColor { get => _groupColor; set { _groupColor = value; OnPropertyChanged(); } }
         [System.Xml.Serialization.XmlIgnore]
         public string BillNoDisplay { get => _billNoDisplay; set { _billNoDisplay = value; OnPropertyChanged(); } }
+        [System.Xml.Serialization.XmlIgnore]
+        public string BillNoLedgerDisplay => FormatLedgerBillNo(BillNo, BillDate);
+        [System.Xml.Serialization.XmlIgnore]
+        public string GroupKey
+        {
+            get
+            {
+                var billNo = (BillNo ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(billNo))
+                {
+                    return "__ROW__:" + Id + ":" + Sr + ":" + (LRNo ?? string.Empty).Trim() + ":" + Date.ToString("yyyyMMdd");
+                }
+
+                var party = (Party ?? string.Empty).Trim();
+                var billDate = BillDate.ToString("yyyyMMdd");
+                return billNo + "|" + billDate + "|" + party;
+            }
+        }
+
+        public static string FormatLedgerBillNo(string billNo, DateTime billDate)
+        {
+            var raw = (billNo ?? string.Empty).Trim();
+            if (raw.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            var fy = GetFinancialYearLabel(billDate);
+            var upper = raw.ToUpperInvariant();
+            var slashIndex = raw.IndexOf('/');
+
+            if (slashIndex > 0 && slashIndex < raw.Length - 1)
+            {
+                var left = raw.Substring(0, slashIndex).Trim();
+                var right = raw.Substring(slashIndex + 1).Trim();
+
+                if (upper.StartsWith("FBD "))
+                {
+                    return right.Length == 0 ? raw : $"{right}/FBD {fy}";
+                }
+
+                if (FinancialYearRegex.IsMatch(right))
+                {
+                    return $"{left}/FBD {fy}";
+                }
+            }
+
+            return $"{raw}/FBD {fy}";
+        }
+
+        private static string GetFinancialYearLabel(DateTime date)
+        {
+            var effective = date == default ? DateTime.Today : date;
+            var startYear = effective.Month >= 4 ? effective.Year : effective.Year - 1;
+            var endYear = startYear + 1;
+            return (startYear % 100).ToString("D2") + "-" + (endYear % 100).ToString("D2");
+        }
 
         public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));

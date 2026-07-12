@@ -94,6 +94,13 @@ namespace Awagaman_ERP.ViewModels
                     _countDirty = false;
                 }
 
+                var maxPage = Math.Max(1, TotalPages);
+                if (_currentPage > maxPage)
+                {
+                    _currentPage = maxPage;
+                    OnPropertyChanged(nameof(CurrentPage));
+                }
+
                 List<BillEntry> items;
                 if (string.IsNullOrEmpty(_searchFilter))
                 {
@@ -104,9 +111,19 @@ namespace Awagaman_ERP.ViewModels
                     items = _repository.Search(_searchFilter, CurrentPage, PageSize, _sortColumn, _sortAscending);
                     if (!items.Any() && CurrentPage > 1)
                     {
-                        CurrentPage = 1;
+                        _currentPage = 1;
+                        OnPropertyChanged(nameof(CurrentPage));
                         items = _repository.Search(_searchFilter, 1, PageSize, _sortColumn, _sortAscending);
                     }
+                }
+
+                if (!items.Any() && _currentPage > 1)
+                {
+                    _currentPage = 1;
+                    OnPropertyChanged(nameof(CurrentPage));
+                    items = string.IsNullOrEmpty(_searchFilter)
+                        ? _repository.GetPage(1, PageSize, _sortColumn, _sortAscending)
+                        : _repository.Search(_searchFilter, 1, PageSize, _sortColumn, _sortAscending);
                 }
 
                 PagedEntries = new ObservableCollection<BillEntry>(items);
@@ -114,6 +131,13 @@ namespace Awagaman_ERP.ViewModels
                 FilteredEntriesCount = _totalCount;
                 FilteredTotalDue = _repository.GetTotalDue(_searchFilter);
                 _pageLoaded = true;
+                OnPropertyChanged(nameof(TotalCount));
+                OnPropertyChanged(nameof(TotalPages));
+                OnPropertyChanged(nameof(PageInfo));
+                OnPropertyChanged(nameof(CanGoPrevious));
+                OnPropertyChanged(nameof(CanGoNext));
+                OnPropertyChanged(nameof(CanGoFirst));
+                OnPropertyChanged(nameof(CanGoLast));
             }
             catch (Exception ex)
             {
@@ -171,14 +195,38 @@ namespace Awagaman_ERP.ViewModels
 
             Task.Run(() =>
             {
+                var totalCount = countDirty ? _repository.GetTotalCount(searchFilter) : _totalCount;
+                var totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / requestedPageSize));
+                var pageToLoad = Math.Min(Math.Max(1, requestedPage), totalPages);
+                List<BillEntry> items;
+                if (string.IsNullOrEmpty(searchFilter))
+                {
+                    items = _repository.GetPage(pageToLoad, requestedPageSize, sortColumn, sortAscending);
+                }
+                else
+                {
+                    items = _repository.Search(searchFilter, pageToLoad, requestedPageSize, sortColumn, sortAscending);
+                    if (!items.Any() && pageToLoad > 1)
+                    {
+                        pageToLoad = 1;
+                        items = _repository.Search(searchFilter, pageToLoad, requestedPageSize, sortColumn, sortAscending);
+                    }
+                }
+
+                if (!items.Any() && pageToLoad > 1)
+                {
+                    pageToLoad = 1;
+                    items = string.IsNullOrEmpty(searchFilter)
+                        ? _repository.GetPage(pageToLoad, requestedPageSize, sortColumn, sortAscending)
+                        : _repository.Search(searchFilter, pageToLoad, requestedPageSize, sortColumn, sortAscending);
+                }
+
                 return new PageLoadResult
                 {
-                    CurrentPage = requestedPage,
-                    TotalCount = countDirty ? _repository.GetTotalCount(searchFilter) : _totalCount,
+                    CurrentPage = pageToLoad,
+                    TotalCount = totalCount,
                     TotalDue = _repository.GetTotalDue(searchFilter),
-                    Items = string.IsNullOrEmpty(searchFilter)
-                        ? _repository.GetPage(requestedPage, requestedPageSize, sortColumn, sortAscending)
-                        : _repository.Search(searchFilter, requestedPage, requestedPageSize, sortColumn, sortAscending)
+                    Items = items
                 };
             }).ContinueWith(task =>
             {
@@ -358,18 +406,19 @@ namespace Awagaman_ERP.ViewModels
         {
             string[] colors = { "#FFFFFF", "#F0F0F0" };
             int colorIndex = 0;
-            string lastBillNo = null;
+            string lastGroupKey = null;
             foreach (var entry in items ?? Enumerable.Empty<BillEntry>())
             {
-                bool isNewGroup = entry.BillNo != lastBillNo;
+                var currentGroupKey = entry.GroupKey;
+                bool isNewGroup = !string.Equals(currentGroupKey, lastGroupKey, StringComparison.OrdinalIgnoreCase);
                 if (isNewGroup)
                 {
-                    lastBillNo = entry.BillNo;
+                    lastGroupKey = currentGroupKey;
                     colorIndex = (colorIndex + 1) % colors.Length;
                 }
 
                 entry.GroupColor = colors[colorIndex];
-                entry.BillNoDisplay = isNewGroup ? entry.BillNo : string.Empty;
+                entry.BillNoDisplay = isNewGroup ? entry.BillNoLedgerDisplay : string.Empty;
             }
         }
 

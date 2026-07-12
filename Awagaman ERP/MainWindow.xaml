@@ -865,6 +865,7 @@
                                 <TextBlock Text="Search &amp; Filter" FontSize="12" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,16,0" />
                                 <TextBox x:Name="BillSearchBox" TextChanged="BillSearchBox_TextChanged" Width="200" Height="26" BorderBrush="{StaticResource BorderLight}" FontSize="12" Padding="4,2" Margin="0,0,16,0" />
                                 <Button Content="↻" Background="{StaticResource ThemeGreen}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="BillRefresh_Click" ToolTip="Clear Filters" />
+                                <Button Content="🗑" Background="#E53935" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="BillDeleteSelected_Click" ToolTip="Delete Selected" />
                                 <Button Content="📂" Background="#1565C0" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="ImportBill_Click" ToolTip="Import Bills from CSV" />
                                 <Button Content="?" Background="#374151" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenImportGuide_Click" ToolTip="Import column names" />
                                 <Button Content="Rs." Background="#00897B" Foreground="White" BorderThickness="0" Width="34" Height="26" Margin="4,0" Cursor="Hand" Click="OpenReceiveBillAmount_Click" ToolTip="Receive Bill Amount" />
@@ -878,6 +879,13 @@
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock x:Name="BillRecordCountText" Text="Loading..." FontSize="12" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button x:Name="BillFirstPageButton" Content="First" Width="52" Height="24" Margin="0,0,6,0" Padding="8,0" Click="BillFirstPage_Click" />
+                                <Button x:Name="BillPrevPageButton" Content="Previous" Width="72" Height="24" Margin="0,0,6,0" Padding="8,0" Click="BillPrevPage_Click" />
+                                <TextBlock x:Name="BillPageInfoText" Text="{Binding PageInfo}" FontSize="12" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <Button x:Name="BillNextPageButton" Content="Next" Width="60" Height="24" Margin="0,0,6,0" Padding="8,0" Click="BillNextPage_Click" />
+                                <Button x:Name="BillLastPageButton" Content="Last" Width="52" Height="24" Padding="8,0" Click="BillLastPage_Click" />
                             </StackPanel>
                         </Grid>
                         <Grid Grid.Row="3">
@@ -1017,8 +1025,14 @@
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
                             <Grid Grid.Row="0" Margin="0,0,0,16">
-                                <TextBlock Text="Vehicle Ledger" FontSize="20" FontWeight="Bold" Foreground="#333" VerticalAlignment="Center" />
-                                <TextBox x:Name="VehicleSearchBox" TextChanged="VehicleSearchBox_TextChanged" Width="220" Height="26" FontSize="12" Padding="4,2" BorderBrush="#CCC" HorizontalAlignment="Right" />
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Vehicle Ledger" FontSize="20" FontWeight="Bold" Foreground="#333" VerticalAlignment="Center" />
+                                <Button Grid.Column="1" Content="🗑 Delete" Height="26" Margin="0,0,8,0" Padding="10,0" Background="#DC2626" Foreground="White" BorderThickness="0" Cursor="Hand" Click="VehicleDeleteSelected_Click" HorizontalAlignment="Right" />
+                                <TextBox Grid.Column="2" x:Name="VehicleSearchBox" TextChanged="VehicleSearchBox_TextChanged" Width="220" Height="26" FontSize="12" Padding="4,2" BorderBrush="#CCC" HorizontalAlignment="Right" />
                             </Grid>
                             <DataGrid x:Name="VehicleGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
                                       Background="White" BorderThickness="1" BorderBrush="#DDD" RowHeight="30"
@@ -1530,7 +1544,7 @@
 
                                                 <DataTemplate>
 
-                                                    <StackPanel VerticalAlignment="Center">
+                                                    <Grid VerticalAlignment="Center">
 
                                                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
 
@@ -1572,33 +1586,36 @@
 
                                                         </StackPanel>
 
+                                                        <Popup PlacementTarget="{Binding ElementName=ExpandToggle}"
+                                                               Placement="Bottom"
+                                                               AllowsTransparency="True"
+                                                               StaysOpen="False"
+                                                               IsOpen="{Binding IsChecked, ElementName=ExpandToggle, Mode=TwoWay}">
+                                                            <Border Background="White"
+                                                                    BorderBrush="#CBD5E1"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="6"
+                                                                    Padding="8"
+                                                                    MinWidth="110"
+                                                                    MaxWidth="180">
+                                                                <Border.Effect>
+                                                                    <DropShadowEffect BlurRadius="10"
+                                                                                      ShadowDepth="2"
+                                                                                      Opacity="0.25"
+                                                                                      Color="#000000" />
+                                                                </Border.Effect>
+                                                                <ScrollViewer MaxHeight="180"
+                                                                              VerticalScrollBarVisibility="Auto"
+                                                                              HorizontalScrollBarVisibility="Disabled">
+                                                                    <TextBlock Text="{Binding LRExtraText}"
+                                                                               Foreground="#444444"
+                                                                               FontSize="11"
+                                                                               TextWrapping="Wrap" />
+                                                                </ScrollViewer>
+                                                            </Border>
+                                                        </Popup>
 
-
-                                                        <TextBlock Text="{Binding LRExtraText}" Foreground="#444444" FontSize="11" HorizontalAlignment="Center" Margin="0,4,0,0">
-
-                                                            <TextBlock.Style>
-
-                                                                <Style TargetType="TextBlock">
-
-                                                                    <Setter Property="Visibility" Value="Collapsed" />
-
-                                                                    <Style.Triggers>
-
-                                                                        <DataTrigger Binding="{Binding IsChecked, ElementName=ExpandToggle}" Value="True">
-
-                                                                            <Setter Property="Visibility" Value="Visible" />
-
-                                                                        </DataTrigger>
-
-                                                                    </Style.Triggers>
-
-                                                                </Style>
-
-                                                            </TextBlock.Style>
-
-                                                        </TextBlock>
-
-                                                    </StackPanel>
+                                                    </Grid>
 
                                                 </DataTemplate>
 
@@ -2182,6 +2199,7 @@
                                 </ComboBox>
                                 <Button Content="↻" Background="{StaticResource ThemeGreen}" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="TrackingRefresh_Click" ToolTip="Clear Filters" />
                                 <Button Content="✎" Background="#FF9800" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="OpenTrackingEntryForm_Click" ToolTip="Edit Selected" />
+                                <Button Content="🗑" Background="#E53935" Foreground="White" BorderThickness="0" Width="26" Height="26" Margin="4,0" Cursor="Hand" Click="TrackingDeleteSelected_Click" ToolTip="Delete Selected" />
                             </StackPanel>
                         </Border>
 

@@ -157,6 +157,9 @@ namespace Awagaman_ERP
         private LREntry _lrEditBeforeSnapshot;
         private int _lrEditEntryId = -1;
         private bool _suppressLrHistory;
+        private BillEntry _billEditBeforeSnapshot;
+        private int _billEditEntryId = -1;
+        private int _busyCursorDepth;
         private sealed class CbsAccountUndoAction
         {
             public CBSAccountEntry Account;
@@ -184,6 +187,7 @@ namespace Awagaman_ERP
         {
             LogException("StartupTrace", new Exception("MainWindow ctor begin"));
             InitializeComponent();
+            AddHandler(UIElement.PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(MainWindow_PreviewMouseLeftButtonDown), true);
             _dashboardRefreshTimer.Tick += DashboardRefreshTimer_Tick;
             if (DashboardPendingDispatchGrid != null) DashboardPendingDispatchGrid.ItemsSource = _dashboardPendingDispatchEntries;
             if (DashboardInTransitGrid != null) DashboardInTransitGrid.ItemsSource = _dashboardInTransitEntries;
@@ -490,6 +494,11 @@ namespace Awagaman_ERP
 
         private void RefreshDashboard()
         {
+            if (!IsDashboardVisible())
+            {
+                return;
+            }
+
             var refreshVersion = Interlocked.Increment(ref _dashboardRefreshVersion);
             Task.Run(() =>
             {
@@ -514,9 +523,6 @@ namespace Awagaman_ERP
                         }
                     }
 
-                    var challans = SafeLoad(() => _challanRepo.GetAll());
-                    var bills = SafeLoad(() => _billRepo.GetAll());
-                    var cbsEntries = SafeLoad(() => _cbsRepo.GetAll());
                     var trackingEntries = LoadTrackingEntriesForDashboard();
                     long dueChallans = 0;
                     decimal totalDue = 0m;
@@ -542,6 +548,10 @@ namespace Awagaman_ERP
 
                     if (!dashboardSummaryApplied)
                     {
+                        var challans = SafeLoad(() => _challanRepo.GetAll());
+                        var bills = SafeLoad(() => _billRepo.GetAll());
+                        var cbsEntries = SafeLoad(() => _cbsRepo.GetAll());
+
                         foreach (var ch in challans)
                         {
                             var due = ch.LorryHire - ch.LessTDS + ch.Detention + ch.Hamali - ch.Deduction - ch.AdvanceAmount - ch.BalancePaidNEFT - ch.BalancePaidCash;
@@ -588,7 +598,9 @@ namespace Awagaman_ERP
 
         private List<TrackingEntry> LoadTrackingEntriesForDashboard()
         {
-            var trackingEntries = SafeLoad(() => _trackingRepo.GetAll()) ?? new List<TrackingEntry>();
+            var trackingEntries = (TrackingVM?.Entries?.Count > 0
+                ? TrackingVM.Entries.ToList()
+                : (SafeLoad(() => _trackingRepo.GetAll()) ?? new List<TrackingEntry>()));
 
             try
             {
@@ -617,6 +629,11 @@ namespace Awagaman_ERP
                 return;
             }
 
+            if (!IsDashboardVisible())
+            {
+                return;
+            }
+
             _dashboardRefreshTimer.Stop();
             _dashboardRefreshTimer.Start();
         }
@@ -625,6 +642,11 @@ namespace Awagaman_ERP
         {
             _dashboardRefreshTimer.Stop();
             RefreshDashboard();
+        }
+
+        private bool IsDashboardVisible()
+        {
+            return DashboardView != null && DashboardView.Visibility == Visibility.Visible;
         }
 
         private void ApplyDashboardSummary(DashboardSummary summary)
@@ -892,6 +914,47 @@ namespace Awagaman_ERP
             {
                 return false;
             }
+        }
+
+        private void MainWindow_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            try
+            {
+                if (IsClickInsideEditingCell(e.OriginalSource as DependencyObject))
+                {
+                    return;
+                }
+
+                TryCommitOpenGridEdits();
+            }
+            catch (Exception ex)
+            {
+                LogException(nameof(MainWindow_PreviewMouseLeftButtonDown), ex);
+            }
+        }
+
+        private void TryCommitOpenGridEdits()
+        {
+            TryCommitGridEdits(LedgerGrid);
+            TryCommitGridEdits(LRLedgerGrid);
+            TryCommitGridEdits(BillLedgerGrid);
+            TryCommitGridEdits(CBSGrid);
+        }
+
+        private static bool IsClickInsideEditingCell(DependencyObject source)
+        {
+            var current = source;
+            while (current != null)
+            {
+                if (current is DataGridCell cell)
+                {
+                    return cell.IsEditing;
+                }
+
+                current = VisualTreeHelper.GetParent(current);
+            }
+
+            return false;
         }
 
         private static string GetColumnBindingPath(DataGridColumn col)
@@ -1879,10 +1942,109 @@ namespace Awagaman_ERP
             RefreshDashboard();
         }
 
+        private void BillDeleteSelected_Click(object sender, RoutedEventArgs e)
+        {
+            if (BillLedgerGrid == null) return;
+            var selected = BillLedgerGrid.SelectedItems.Cast<BillEntry>().ToList();
+            if (selected.Count == 0)
+            {
+                MessageBox.Show("Select Bill entries to delete.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (MessageBox.Show($"Delete {selected.Count} Bill entr{(selected.Count == 1 ? "y" : "ies")}?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            try
+            {
+                var commentRepo = new CommentRepository();
+                var affectedBillNos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var affectedLrNos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var item in selected)
+                {
+                    var billNo = (item.BillNo ?? string.Empty).Trim();
+                    if (billNo.Length > 0) affectedBillNos.Add(billNo);
+                    foreach (var lrNo in SplitLrNumbers(item.LRNo))
+                    {
+                        affectedLrNos.Add(lrNo);
+                    }
+
+                    foreach (var comment in commentRepo.GetBillByBillId(item.Id))
+                    {
+                        try { commentRepo.DeleteBill(comment.Id); } catch { }
+                    }
+
+                    try { _billRepo.Delete(item); } catch { }
+                }
+
+                var remainingBillsByNo = affectedBillNos.ToDictionary(x => x, x => _billRepo.GetByBillNo(x), StringComparer.OrdinalIgnoreCase);
+                var survivingLrToBillNo = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in remainingBillsByNo)
+                {
+                    foreach (var row in kv.Value)
+                    {
+                        foreach (var lrNo in SplitLrNumbers(row.LRNo))
+                        {
+                            if (!survivingLrToBillNo.ContainsKey(lrNo))
+                            {
+                                survivingLrToBillNo[lrNo] = kv.Key;
+                            }
+                        }
+                    }
+                }
+
+                foreach (var billNo in affectedBillNos.Where(x => remainingBillsByNo[x].Count == 0))
+                {
+                    foreach (var receipt in _billReceiptRepo.GetByBillNo(billNo))
+                    {
+                        try { _billReceiptRepo.Delete(receipt); } catch { }
+                    }
+                }
+
+                foreach (var lr in _lrRepo.GetByLRNumbers(affectedLrNos))
+                {
+                    var currentLrNo = (lr.LRNo ?? string.Empty).Trim();
+                    if (currentLrNo.Length == 0) continue;
+                    if (!survivingLrToBillNo.TryGetValue(currentLrNo, out var survivingBillNo))
+                    {
+                        lr.BillNo = null;
+                        lr.BillDate = null;
+                        lr.BILL = 0m;
+                        _lrRepo.Upsert(lr);
+                        continue;
+                    }
+
+                    var currentBillNo = (lr.BillNo ?? string.Empty).Trim();
+                    if (!string.Equals(currentBillNo, survivingBillNo, StringComparison.OrdinalIgnoreCase))
+                    {
+                        lr.BillNo = survivingBillNo;
+                        lr.BillDate = remainingBillsByNo[survivingBillNo].FirstOrDefault()?.BillDate;
+                        lr.BILL = remainingBillsByNo[survivingBillNo].FirstOrDefault()?.Total ?? 0m;
+                        _lrRepo.Upsert(lr);
+                    }
+                }
+
+                BillVM?.RefreshAfterDelete();
+                BillUpdatePageUI();
+                LRVM?.RefreshAfterDelete();
+                LRUpdatePageUI();
+                RefreshDashboard();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Bill delete failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void OpenBillLedger_Click(object sender, RoutedEventArgs e)
         {
             try
             {
+                using (EnterBusyCursor())
+                {
                 HideUtilityViews();
                 DashboardView.Visibility = Visibility.Collapsed;
                 DeliveryChallanView.Visibility = Visibility.Collapsed;
@@ -1905,6 +2067,11 @@ namespace Awagaman_ERP
 
                 BillLedgerView.DataContext = BillVM;
                 BillLedgerView.Visibility = Visibility.Visible;
+                if (BillSearchBox != null)
+                {
+                    var visibleSearch = (BillSearchBox.Text ?? string.Empty).Trim().ToLower();
+                    BillVM.SetSearchFilter(visibleSearch);
+                }
                 LoadBillColumnSettings();
                 if (!string.IsNullOrWhiteSpace(BillVM?.GetSortColumn()))
                     ApplyBillSort(BillVM.GetSortColumn(), BillVM.IsCurrentSortAscending);
@@ -1914,18 +2081,43 @@ namespace Awagaman_ERP
                     if (!BillVM.HasLoadedPage && BillRecordCountText != null)
                         BillRecordCountText.Text = "Loading bills...";
 
+                    BeginBusyCursor();
                     BillVM.EnsurePageLoadedAsync(
-                        () => BillUpdatePageUI(),
+                        () =>
+                        {
+                            if (BillVM.TotalCount > 0 && BillVM.PagedEntries.Count == 0)
+                            {
+                                _billHeaderFilters.Clear();
+                                if (BillSearchBox != null && !string.IsNullOrWhiteSpace(BillSearchBox.Text))
+                                {
+                                    BillSearchBox.Text = string.Empty;
+                                }
+                                BillVM.SetSearchFilter(string.Empty);
+                                BillVM.EnsurePageLoaded();
+                            }
+
+                            BillUpdatePageUI();
+                            EndBusyCursor();
+                        },
                         ex =>
                         {
                             AppLogger.LogException(nameof(OpenBillLedger_Click), ex);
                             if (BillRecordCountText != null) BillRecordCountText.Text = "Unable to load bills";
+                            EndBusyCursor();
                         });
                     return;
                 }
 
                 BillVM.EnsurePageLoaded();
+                if (BillVM.TotalCount > 0 && BillVM.PagedEntries.Count == 0)
+                {
+                    _billHeaderFilters.Clear();
+                    if (BillSearchBox != null) BillSearchBox.Text = string.Empty;
+                    BillVM.SetSearchFilter(string.Empty);
+                    BillVM.EnsurePageLoaded();
+                }
                 BillUpdatePageUI();
+                }
             }
             catch (Exception ex) { MessageBox.Show("Error: " + ex.Message, "Bill Ledger Error", MessageBoxButton.OK, MessageBoxImage.Error); }
         }
@@ -2189,6 +2381,8 @@ namespace Awagaman_ERP
 
         private void OpenPartyLedgerTab_Click(object sender, RoutedEventArgs e)
         {
+            using (EnterBusyCursor())
+            {
             if (!EnsureAdminAccess("Party Ledger")) return;
             HideUtilityViews();
             DashboardView.Visibility = Visibility.Collapsed;
@@ -2210,6 +2404,7 @@ namespace Awagaman_ERP
             TabCBSLedger.Style = (Style)FindResource("TabButtonStyle");
             if (PageTitle != null) PageTitle.Text = "Party Ledger";
             RefreshPartyGrid();
+            }
         }
 
         private void OpenPartyLedger_Click(object sender, RoutedEventArgs e)
@@ -2544,6 +2739,8 @@ namespace Awagaman_ERP
 
         private void OpenVehicleLedgerTab_Click(object sender, RoutedEventArgs e)
         {
+            using (EnterBusyCursor())
+            {
             if (!EnsureAdminAccess("Vehicle Ledger")) return;
             HideUtilityViews();
             DashboardView.Visibility = Visibility.Collapsed;
@@ -2566,6 +2763,7 @@ namespace Awagaman_ERP
             TabCBSLedger.Style = (Style)FindResource("TabButtonStyle");
             if (PageTitle != null) PageTitle.Text = "Vehicle Ledger";
             RefreshVehicleGrid();
+            }
         }
 
         private void RefreshVehicleGrid()
@@ -2608,6 +2806,8 @@ namespace Awagaman_ERP
 
         private async void OpenCBSLedger_Click(object sender, RoutedEventArgs e)
         {
+            using (EnterBusyCursor())
+            {
             HideUtilityViews();
             DashboardView.Visibility = Visibility.Collapsed;
             DeliveryChallanView.Visibility = Visibility.Collapsed;
@@ -2630,6 +2830,7 @@ namespace Awagaman_ERP
 
             if (PageTitle != null) PageTitle.Text = "Cash Bank Statement";
             await LoadCBSLedgerAsync();
+            }
         }
 
         private async Task LoadCBSLedgerAsync()
@@ -3128,6 +3329,36 @@ namespace Awagaman_ERP
                 ReapplyCBSViewState();
             }
             catch (Exception ex) { LogException(nameof(SyncAllChallanBillingFromLR), ex); }
+        }
+
+        private void VehicleDeleteSelected_Click(object sender, RoutedEventArgs e)
+        {
+            if (VehicleGrid == null) return;
+            var selected = VehicleGrid.SelectedItems.Cast<VehicleEntry>().ToList();
+            if (selected.Count == 0)
+            {
+                MessageBox.Show("Select Vehicle entries to delete.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (MessageBox.Show($"Delete {selected.Count} Vehicle entr{(selected.Count == 1 ? "y" : "ies")}?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            try
+            {
+                var repo = new VehicleRepository();
+                foreach (var row in selected)
+                {
+                    try { repo.Delete(row); } catch { }
+                }
+                RefreshVehicleGrid();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Vehicle delete failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void CBSSearchBox_GotFocus(object sender, RoutedEventArgs e)
@@ -3706,6 +3937,60 @@ namespace Awagaman_ERP
             catch (Exception ex)
             {
                 LogException(nameof(DeferUi), ex);
+            }
+        }
+
+        private IDisposable EnterBusyCursor()
+        {
+            return new BusyCursorScope(this);
+        }
+
+        private void BeginBusyCursor()
+        {
+            try
+            {
+                if (Interlocked.Increment(ref _busyCursorDepth) == 1)
+                {
+                    Mouse.OverrideCursor = Cursors.Wait;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogException(nameof(BeginBusyCursor), ex);
+            }
+        }
+
+        private void EndBusyCursor()
+        {
+            try
+            {
+                var next = Interlocked.Decrement(ref _busyCursorDepth);
+                if (next <= 0)
+                {
+                    Interlocked.Exchange(ref _busyCursorDepth, 0);
+                    Mouse.OverrideCursor = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogException(nameof(EndBusyCursor), ex);
+            }
+        }
+
+        private sealed class BusyCursorScope : IDisposable
+        {
+            private MainWindow _owner;
+
+            public BusyCursorScope(MainWindow owner)
+            {
+                _owner = owner;
+                _owner?.BeginBusyCursor();
+            }
+
+            public void Dispose()
+            {
+                var owner = Interlocked.Exchange(ref _owner, null);
+                owner?.EndBusyCursor();
             }
         }
 
@@ -5738,18 +6023,27 @@ namespace Awagaman_ERP
 
         private List<PendingBillOption> LoadPendingBillOptions(string partyFilter = "", string billNoFilter = "")
         {
-            var lrByNo = _lrRepo.GetAll()
-                .Where(x => !string.IsNullOrWhiteSpace(x.LRNo))
-                .GroupBy(x => (x.LRNo ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            var billRows = _billRepo.SearchAdvancedAll(billNoFilter, partyFilter, dueOnly: true, sortColumn: "billno", sortAscending: false);
+            Dictionary<string, LREntry> lrByNo = null;
+            if (billRows.Any(x => string.IsNullOrWhiteSpace((x.Party ?? string.Empty).Trim())))
+            {
+                lrByNo = _lrRepo.GetAll()
+                    .Where(x => !string.IsNullOrWhiteSpace(x.LRNo))
+                    .GroupBy(x => (x.LRNo ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            }
 
-            return _billRepo.SearchAdvancedAll(billNoFilter, partyFilter, dueOnly: true, sortColumn: "billno", sortAscending: false)
+            return billRows
                 .Where(b => !string.IsNullOrWhiteSpace(b.BillNo))
                 .GroupBy(b => (b.BillNo ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
                 .Select(g =>
                 {
                     var first = g.FirstOrDefault();
-                    lrByNo.TryGetValue((first?.LRNo ?? string.Empty).Trim(), out var lr);
+                    LREntry lr = null;
+                    if (lrByNo != null)
+                    {
+                        lrByNo.TryGetValue((first?.LRNo ?? string.Empty).Trim(), out lr);
+                    }
                     return new PendingBillOption
                     {
                         BillNo = g.Key,
@@ -5784,8 +6078,7 @@ namespace Awagaman_ERP
                 var preselectedParty = (preselectedBill?.Party ?? string.Empty).Trim();
                 if (string.IsNullOrWhiteSpace(preselectedParty) && !string.IsNullOrWhiteSpace(preselectedBillNo))
                 {
-                    preselectedParty = _billRepo.GetAll()
-                        .Where(x => string.Equals((x.BillNo ?? string.Empty).Trim(), preselectedBillNo, StringComparison.OrdinalIgnoreCase))
+                    preselectedParty = _billRepo.GetByBillNo(preselectedBillNo)
                         .Select(x => (x.Party ?? string.Empty).Trim())
                         .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty;
                 }
@@ -8476,10 +8769,7 @@ namespace Awagaman_ERP
             billNo = (billNo ?? string.Empty).Trim();
             if (billNo.Length == 0) return;
 
-            var rows = _billRepo.GetAll()
-                .Where(x => string.Equals((x.BillNo ?? string.Empty).Trim(), billNo, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(x => x.Id)
-                .ToList();
+            var rows = _billRepo.GetByBillNo(billNo);
             if (rows.Count == 0) return;
 
             var billTotal = rows.Sum(x => x.Total);
@@ -8514,10 +8804,7 @@ namespace Awagaman_ERP
             billNo = (billNo ?? string.Empty).Trim();
             if (billNo.Length == 0) return;
 
-            var rows = _billRepo.GetAll()
-                .Where(x => string.Equals((x.BillNo ?? string.Empty).Trim(), billNo, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(x => x.Id)
-                .ToList();
+            var rows = _billRepo.GetByBillNo(billNo);
             if (rows.Count == 0) return;
 
             var receipts = _billReceiptRepo.GetByBillNo(billNo)
@@ -8648,6 +8935,11 @@ namespace Awagaman_ERP
         {
             if (BillVM == null) return;
             if (BillRecordCountText != null) BillRecordCountText.Text = $"Records: {BillVM.FilteredEntriesCount}";
+            if (BillPrevPageButton != null) BillPrevPageButton.IsEnabled = BillVM.CanGoPrevious;
+            if (BillNextPageButton != null) BillNextPageButton.IsEnabled = BillVM.CanGoNext;
+            if (BillFirstPageButton != null) BillFirstPageButton.IsEnabled = BillVM.CanGoFirst;
+            if (BillLastPageButton != null) BillLastPageButton.IsEnabled = BillVM.CanGoLast;
+            if (BillPageInfoText != null) BillPageInfoText.Text = BillVM.PageInfo;
             if (_billHeaderFilters.Count > 0) ApplyBillHeaderFilter();
         }
 
@@ -8764,7 +9056,7 @@ namespace Awagaman_ERP
             {
                 var cv = System.Windows.Data.CollectionViewSource.GetDefaultView(BillLedgerGrid.ItemsSource);
                 if (cv != null && cv.CanGroup && cv.GroupDescriptions.Count == 0)
-                    cv.GroupDescriptions.Add(new System.Windows.Data.PropertyGroupDescription("BillNo"));
+                    cv.GroupDescriptions.Add(new System.Windows.Data.PropertyGroupDescription("GroupKey"));
             }
             catch { }
         }
@@ -9076,6 +9368,7 @@ namespace Awagaman_ERP
             if (e.EditAction != DataGridEditAction.Commit) return;
             var entry = e.Row.Item as BillEntry;
             if (entry == null || entry.Id <= 0) return;
+            var bindingPath = GetColumnBindingPath(e.Column) ?? string.Empty;
             try
             {
                 if (e.EditingElement is TextBox tb) { tb.GetBindingExpression(TextBox.TextProperty)?.UpdateSource(); }
@@ -9086,19 +9379,46 @@ namespace Awagaman_ERP
                 return;
             }
 
+            var beforeSnapshot = _billEditBeforeSnapshot;
+            var beforeEntryId = _billEditEntryId;
+            _billEditBeforeSnapshot = null;
+            _billEditEntryId = -1;
+
+            if (beforeSnapshot != null &&
+                beforeEntryId == entry.Id &&
+                AreBillSnapshotsEqual(beforeSnapshot, entry))
+            {
+                return;
+            }
+
             RunAfterEditCommit(() =>
             {
                 new BillRepository().Upsert(entry);
-                SyncBillToLinkedLRs(entry);
-                LRVM?.RefreshAfterDelete();
-                LRUpdatePageUI();
-                BillUpdatePageUI();
+
+                if (string.Equals(bindingPath, "BillNo", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(bindingPath, "BillDate", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(bindingPath, "Party", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(bindingPath, "Freight", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(bindingPath, "Detention", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(bindingPath, "HML", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(bindingPath, "OTHR", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(bindingPath, "StCharge", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(bindingPath, "RCVD", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(bindingPath, "TDS", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(bindingPath, "DED", StringComparison.OrdinalIgnoreCase))
+                {
+                    SyncBillToLinkedLRs(entry);
+                }
             }, nameof(BillLedgerGrid_CellEditEnding));
         }
 
         private void BillLedgerGrid_BeginningEdit(object sender, DataGridBeginningEditEventArgs e)
         {
             if (e?.Column == null) return;
+
+            var entry = e.Row?.Item as BillEntry;
+            _billEditBeforeSnapshot = entry != null ? CloneBillEntry(entry) : null;
+            _billEditEntryId = entry?.Id ?? -1;
 
             var bindingPath = GetColumnBindingPath(e.Column) ?? string.Empty;
             var headerName = NormalizeHeaderForSort((e.Column.Header ?? string.Empty).ToString());
@@ -9109,6 +9429,8 @@ namespace Awagaman_ERP
 
             if (!locked) return;
 
+            _billEditBeforeSnapshot = null;
+            _billEditEntryId = -1;
             e.Cancel = true;
             MessageBox.Show(
                 "This field is auto-filled from LR Ledger.\nPlease edit the related LR entry to update it.",
@@ -9120,6 +9442,8 @@ namespace Awagaman_ERP
         private void SyncBillToLinkedLRs(BillEntry bill)
         {
             if (bill == null) return;
+            using (EnterBusyCursor())
+            {
             var lrNos = (bill.LRNo ?? string.Empty)
                 .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(s => s.Trim())
@@ -9127,10 +9451,7 @@ namespace Awagaman_ERP
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             if (lrNos.Count == 0) return;
-            var linked = _lrRepo.GetAll()
-                .Where(x => lrNos.Any(n => string.Equals((x.LRNo ?? string.Empty).Trim(), n, StringComparison.OrdinalIgnoreCase)))
-                .OrderBy(x => x.Id)
-                .ToList();
+            var linked = _lrRepo.GetByLRNumbers(lrNos);
             if (linked.Count == 0) return;
 
             var currentFreight = linked.Sum(x => x.TotalFreight);
@@ -9200,6 +9521,23 @@ namespace Awagaman_ERP
                     }
                 }
 
+                bool changed =
+                    row.TotalFreight != newFreight ||
+                    row.Hamali != newHamali ||
+                    row.Detention != newDetention ||
+                    row.Others != newOthers ||
+                    row.StCharge != newStCharge ||
+                    row.NEFT != newNeft ||
+                    row.CASH != newCash ||
+                    row.TDS != newTds ||
+                    row.Ded != newDed ||
+                    !string.Equals(row.BillNo, bill.BillNo, StringComparison.Ordinal) ||
+                    row.BillDate != bill.BillDate ||
+                    row.BILL != bill.Total ||
+                    !string.Equals(row.BillParty, bill.Party, StringComparison.Ordinal);
+
+                if (!changed) continue;
+
                 row.TotalFreight = newFreight;
                 row.Hamali = newHamali;
                 row.Detention = newDetention;
@@ -9214,6 +9552,7 @@ namespace Awagaman_ERP
                 row.BILL = bill.Total;
                 row.BillParty = bill.Party;
                 _lrRepo.Upsert(row);
+            }
             }
         }
 
@@ -9310,13 +9649,12 @@ namespace Awagaman_ERP
                     colMap[key].Add(i);
                 }
                 var repo = new BillRepository();
-                var lrRepo = new LRRepository();
-                var lrByNo = lrRepo.GetAll()
-                    .Where(x => !string.IsNullOrWhiteSpace(x?.LRNo))
-                    .GroupBy(x => (x.LRNo ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.Id).First(), StringComparer.OrdinalIgnoreCase);
+                string currentBillNo = null;
+                DateTime? currentBillDate = null;
+                string currentParty = null;
+                BillEntry currentBillGroupLastEntry = null;
 
-                int imported = 0, errors = 0, lrUpdated = 0;
+                int imported = 0, errors = 0;
                 int totalRows = records.Count - 1;
                 var progress = ImportProgressBar;
                 var status = ImportStatusText;
@@ -9334,52 +9672,110 @@ namespace Awagaman_ERP
                             {
                                 continue;
                             }
+
+                            var rawBillNo = GetCol(parts, colMap, "BillNo", 0) ?? GetCol(parts, colMap, "BILLNO") ?? GetCol(parts, colMap, "BILL NO");
+                            var rawBillDate = GetCol(parts, colMap, "BillDate", 0) ?? GetCol(parts, colMap, "BILLDATE") ?? GetCol(parts, colMap, "BILL DATE");
+                            var rawParty = GetCol(parts, colMap, "Party", 0) ?? GetCol(parts, colMap, "PARTY");
+                            var rawLRNo = GetCol(parts, colMap, "LRNo", 0) ?? GetCol(parts, colMap, "LRNO") ?? GetCol(parts, colMap, "LR") ?? GetCol(parts, colMap, "LR NO");
+                            var rawLRDate = GetCol(parts, colMap, "LRDate", 0) ?? GetCol(parts, colMap, "LRDATE") ?? GetCol(parts, colMap, "LR DATE");
+                            var rawFrom = GetCol(parts, colMap, "From", 0) ?? GetCol(parts, colMap, "FROM");
+                            var rawTo = GetCol(parts, colMap, "To", 0) ?? GetCol(parts, colMap, "TO");
+                            var rawVehicleType = GetCol(parts, colMap, "VehicleType", 0) ?? GetCol(parts, colMap, "VEHICLETYPE") ?? GetCol(parts, colMap, "Vehicle Type");
+                            var rawFreight = GetCol(parts, colMap, "Freight", 0) ?? GetCol(parts, colMap, "FREIGHT");
+                            var rawDetention = GetCol(parts, colMap, "Detention", 0) ?? GetCol(parts, colMap, "DETENTION");
+                            var rawHml = GetCol(parts, colMap, "HML", 0) ?? GetCol(parts, colMap, "HML");
+                            var rawOthr = GetCol(parts, colMap, "OTHR", 0) ?? GetCol(parts, colMap, "OTHR") ?? GetCol(parts, colMap, "Other");
+                            var rawStCharge = GetCol(parts, colMap, "StCharge", 0) ?? GetCol(parts, colMap, "St Charge") ?? GetCol(parts, colMap, "St. Charge");
+                            var rawTotal = GetCol(parts, colMap, "Total", 0) ?? GetCol(parts, colMap, "TOTAL");
+                            var rawRcvd = GetCol(parts, colMap, "RCVD", 0) ?? GetCol(parts, colMap, "RCVD");
+                            var rawTds = GetCol(parts, colMap, "TDS", 0) ?? GetCol(parts, colMap, "TDS");
+                            var rawDed = GetCol(parts, colMap, "DED", 0) ?? GetCol(parts, colMap, "DED");
+                            var rawMop = GetCol(parts, colMap, "MOP", 0) ?? GetCol(parts, colMap, "MOP");
+                            var rawMr = GetCol(parts, colMap, "MR", 0) ?? GetCol(parts, colMap, "MR");
+                            var rawRemarks = GetCol(parts, colMap, "Remarks", 0) ?? GetCol(parts, colMap, "REMARKS");
+                            var rawDate = GetCol(parts, colMap, "Date", 0) ?? GetCol(parts, colMap, "DATE");
+
+                            var normalizedBillNo = NormalizeImportedNumberText(rawBillNo);
+                            var normalizedParty = string.IsNullOrWhiteSpace(rawParty) ? currentParty : rawParty.Trim();
+                            var parsedBillDate = ParseImportedDateNullable(rawBillDate);
+
+                            if (!string.IsNullOrWhiteSpace(normalizedBillNo))
+                            {
+                                currentBillNo = normalizedBillNo;
+                                currentBillDate = parsedBillDate;
+                                currentParty = normalizedParty;
+                            }
+
+                            var effectiveBillNo = !string.IsNullOrWhiteSpace(normalizedBillNo) ? normalizedBillNo : currentBillNo;
+                            var effectiveBillDate = parsedBillDate ?? currentBillDate;
+                            var effectiveParty = !string.IsNullOrWhiteSpace(normalizedParty) ? normalizedParty : currentParty;
+
+                            var freight = ParseDecimal(rawFreight);
+                            var detention = ParseDecimal(rawDetention);
+                            var hml = ParseDecimal(rawHml);
+                            var othr = ParseDecimal(rawOthr);
+                            var stCharge = ParseDecimal(rawStCharge);
+                            var totalFromCsv = ParseDecimal(rawTotal);
+                            var rcvd = ParseDecimal(rawRcvd);
+                            var tds = ParseDecimal(rawTds);
+                            var ded = ParseDecimal(rawDed);
+                            var normalizedLRNo = NormalizeImportedPlaceholder(rawLRNo);
+                            var normalizedMop = NormalizeImportedNumberText(rawMop);
+                            var normalizedMr = NormalizeImportedNumberText(rawMr);
+
+                            bool hasFreightColumns = freight != 0m || detention != 0m || hml != 0m || othr != 0m || stCharge != 0m || totalFromCsv != 0m;
+                            bool hasReceiptColumns = rcvd != 0m || tds != 0m || ded != 0m || !string.IsNullOrWhiteSpace(normalizedMop) || !string.IsNullOrWhiteSpace(normalizedMr) || !string.IsNullOrWhiteSpace(rawDate);
+                            bool isAdjustmentOnlyRow = string.IsNullOrWhiteSpace(normalizedLRNo) && !hasFreightColumns && hasReceiptColumns;
+
+                            if (isAdjustmentOnlyRow && currentBillGroupLastEntry != null)
+                            {
+                                currentBillGroupLastEntry.RCVD += rcvd;
+                                currentBillGroupLastEntry.TDS += tds;
+                                currentBillGroupLastEntry.DED += ded;
+                                if (!string.IsNullOrWhiteSpace(normalizedMop)) currentBillGroupLastEntry.MOP = normalizedMop;
+                                if (!string.IsNullOrWhiteSpace(normalizedMr)) currentBillGroupLastEntry.MR = normalizedMr;
+                                var parsedReceivedDate = ParseImportedDateNullable(rawDate);
+                                if (parsedReceivedDate.HasValue) currentBillGroupLastEntry.Date = parsedReceivedDate.Value;
+                                repo.Upsert(currentBillGroupLastEntry);
+                                continue;
+                            }
+
                             var entry = new BillEntry
                             {
                                 Sr = i,
-                                BillNo = GetCol(parts, colMap, "BillNo", 0) ?? GetCol(parts, colMap, "BILLNO") ?? GetCol(parts, colMap, "BILL NO"),
-                                BillDate = ParseDate(GetCol(parts, colMap, "BillDate", 0) ?? GetCol(parts, colMap, "BILLDATE") ?? GetCol(parts, colMap, "BILL DATE")),
-                                Party = GetCol(parts, colMap, "Party", 0) ?? GetCol(parts, colMap, "PARTY"),
-                                LRNo = GetCol(parts, colMap, "LRNo", 0) ?? GetCol(parts, colMap, "LRNO") ?? GetCol(parts, colMap, "LR") ?? GetCol(parts, colMap, "LR NO"),
-                                LRDate = ParseNullableDateCSV(GetCol(parts, colMap, "LRDate", 0) ?? GetCol(parts, colMap, "LRDATE") ?? GetCol(parts, colMap, "LR DATE")),
-                                From = GetCol(parts, colMap, "From", 0) ?? GetCol(parts, colMap, "FROM"),
-                                To = GetCol(parts, colMap, "To", 0) ?? GetCol(parts, colMap, "TO"),
-                                VehicleType = GetCol(parts, colMap, "VehicleType", 0) ?? GetCol(parts, colMap, "VEHICLETYPE") ?? GetCol(parts, colMap, "Vehicle Type"),
-                                Freight = ParseDecimal(GetCol(parts, colMap, "Freight", 0) ?? GetCol(parts, colMap, "FREIGHT")),
-                                Detention = ParseDecimal(GetCol(parts, colMap, "Detention", 0) ?? GetCol(parts, colMap, "DETENTION")),
-                                HML = ParseDecimal(GetCol(parts, colMap, "HML", 0) ?? GetCol(parts, colMap, "HML")),
-                                OTHR = ParseDecimal(GetCol(parts, colMap, "OTHR", 0) ?? GetCol(parts, colMap, "OTHR") ?? GetCol(parts, colMap, "Other")),
-                                StCharge = ParseDecimal(GetCol(parts, colMap, "StCharge", 0) ?? GetCol(parts, colMap, "St Charge") ?? GetCol(parts, colMap, "St. Charge")),
-                                RCVD = ParseDecimal(GetCol(parts, colMap, "RCVD", 0) ?? GetCol(parts, colMap, "RCVD")),
-                                TDS = ParseDecimal(GetCol(parts, colMap, "TDS", 0) ?? GetCol(parts, colMap, "TDS")),
-                                DED = ParseDecimal(GetCol(parts, colMap, "DED", 0) ?? GetCol(parts, colMap, "DED")),
-                                MOP = GetCol(parts, colMap, "MOP", 0) ?? GetCol(parts, colMap, "MOP"),
-                                MR = GetCol(parts, colMap, "MR", 0) ?? GetCol(parts, colMap, "MR"),
-                                Remarks = GetCol(parts, colMap, "Remarks", 0) ?? GetCol(parts, colMap, "REMARKS"),
-                                Date = ParseDate(GetCol(parts, colMap, "Date", 0) ?? GetCol(parts, colMap, "DATE")),
+                                BillNo = effectiveBillNo,
+                                BillDate = effectiveBillDate ?? DateTime.Today,
+                                Party = effectiveParty,
+                                LRNo = normalizedLRNo,
+                                LRDate = ParseImportedDateNullable(rawLRDate),
+                                From = rawFrom,
+                                To = rawTo,
+                                VehicleType = rawVehicleType,
+                                Freight = freight,
+                                Detention = detention,
+                                HML = hml,
+                                OTHR = othr,
+                                StCharge = stCharge,
+                                RCVD = rcvd,
+                                TDS = tds,
+                                DED = ded,
+                                MOP = normalizedMop,
+                                MR = normalizedMr,
+                                Remarks = rawRemarks,
+                                Date = ParseImportedDateNullable(rawDate) ?? (effectiveBillDate ?? DateTime.Today),
                             };
 
-                            var totalFromCsv = ParseDecimal(GetCol(parts, colMap, "Total", 0) ?? GetCol(parts, colMap, "TOTAL"));
                             if (entry.StCharge == 0m && totalFromCsv > 0m)
                             {
                                 var computedStCharge = totalFromCsv - entry.Freight - entry.Detention - entry.HML - entry.OTHR;
-                                if (computedStCharge > 0m)
+                                if (computedStCharge != 0m)
                                 {
                                     entry.StCharge = computedStCharge;
                                 }
                             }
 
-                            if (entry.Date == DateTime.Today)
-                            {
-                                var rawDate = GetCol(parts, colMap, "Date", 0) ?? GetCol(parts, colMap, "DATE");
-                                if (string.IsNullOrWhiteSpace(rawDate))
-                                {
-                                    entry.Date = entry.BillDate;
-                                }
-                            }
-
                             repo.Upsert(entry);
-                            SyncImportedBillToMatchingLR(entry, totalFromCsv, lrByNo, lrRepo, ref lrUpdated);
+                            currentBillGroupLastEntry = entry;
                             imported++;
                         }
                         catch (Exception ex) { AppLogger.LogException(nameof(ImportBill_Click), ex); errors++; }
@@ -9395,7 +9791,7 @@ namespace Awagaman_ERP
                 LRVM?.RefreshAfterDelete();
                 BillUpdatePageUI();
                 LRUpdatePageUI();
-                MessageBox.Show($"Import complete.\nImported: {imported}\nLR Updated: {lrUpdated}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+                MessageBox.Show($"Import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
             }
             catch (Exception ex) { AppLogger.LogException(nameof(ImportBill_Click), ex); MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); }
         }
@@ -9409,6 +9805,11 @@ namespace Awagaman_ERP
 
             var key = (billEntry.LRNo ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(key) || !lrByNo.TryGetValue(key, out var lrEntry) || lrEntry == null)
+            {
+                return;
+            }
+
+            if (lrEntry.PreserveImportedBilling)
             {
                 return;
             }
@@ -9442,6 +9843,75 @@ namespace Awagaman_ERP
 
             lrRepo.Upsert(lrEntry);
             lrUpdated++;
+        }
+
+        private static string NormalizeImportedNumberText(string value)
+        {
+            var raw = (value ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return string.Empty;
+            }
+
+            var digitsOnly = raw.All(char.IsDigit);
+            if (!digitsOnly)
+            {
+                return raw;
+            }
+
+            var trimmed = raw.TrimStart('0');
+            return string.IsNullOrEmpty(trimmed) ? "0" : trimmed;
+        }
+
+        private static string NormalizeImportedPlaceholder(string value)
+        {
+            var raw = (value ?? string.Empty).Trim();
+            if (raw == "---" || raw == "--" || raw == "-")
+            {
+                return string.Empty;
+            }
+
+            return raw;
+        }
+
+        private static DateTime? ParseImportedDateNullable(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            var raw = value.Trim();
+            var formats = new[]
+            {
+                "dd.MM.yy", "d.M.yy", "dd.MM.yyyy", "d.M.yyyy",
+                "dd-MM-yy", "d-M-yy", "dd-MM-yyyy", "d-M-yyyy",
+                "dd/MM/yy", "d/M/yy", "dd/MM/yyyy", "d/M/yyyy",
+                "yyyy-MM-dd", "yyyy/MM/dd"
+            };
+
+            if (DateTime.TryParseExact(raw, formats, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var exact))
+            {
+                return exact;
+            }
+
+            var dayFirstCulture = new System.Globalization.CultureInfo("en-GB");
+            if (DateTime.TryParse(raw, dayFirstCulture, System.Globalization.DateTimeStyles.None, out var dayFirst))
+            {
+                return dayFirst;
+            }
+
+            if (DateTime.TryParse(raw, out var parsed))
+            {
+                return parsed;
+            }
+
+            if (int.TryParse(raw, out int serial) && serial > 1)
+            {
+                return new DateTime(1900, 1, 1).AddDays(serial - 2);
+            }
+
+            return null;
         }
 
         private void OpenImportGuide_Click(object sender, RoutedEventArgs e)
@@ -10077,9 +10547,9 @@ namespace Awagaman_ERP
         private void TrackingSearchBox_TextChanged(object sender, TextChangedEventArgs e) { DebounceSearch(TrackingSearchBox); }
         private void ApplyChallanSearch(string filter) { if (VM == null) return; VM.SetSearchFilter(filter); UpdatePageUI(); }
         private void ApplyLRSearch(string filter) { if (LRVM == null) return; LRVM.SetSearchFilter(filter); LRUpdatePageUI(); ApplyLRHeaderFilter(); }
-        private void ApplyTrackingSearch(string filter) { if (TrackingVM == null || TrackingLedgerGrid == null) return; var cv = CollectionViewSource.GetDefaultView(TrackingLedgerGrid.ItemsSource); if (cv == null) return; if (string.IsNullOrEmpty(filter)) cv.Filter = null; else cv.Filter = (obj) => { if (obj is TrackingEntry te) { if (te.ChallanNo?.ToLower().Contains(filter) == true || te.VehicleNo?.ToLower().Contains(filter) == true || te.From?.ToLower().Contains(filter) == true || te.To?.ToLower().Contains(filter) == true || te.DriverMobile?.ToLower().Contains(filter) == true || te.Status?.ToLower().Contains(filter) == true) return true; } return false; }; }
+        private void ApplyTrackingSearch(string filter) { if (TrackingVM == null || TrackingLedgerGrid == null) return; var cv = CollectionViewSource.GetDefaultView(TrackingLedgerGrid.ItemsSource); if (cv == null) return; if (string.IsNullOrEmpty(filter)) cv.Filter = null; else cv.Filter = (obj) => { if (obj is TrackingEntry te) { if (te.ChallanNo?.ToLower().Contains(filter) == true || te.VehicleNo?.ToLower().Contains(filter) == true || te.From?.ToLower().Contains(filter) == true || te.To?.ToLower().Contains(filter) == true || te.DriverMobile?.ToLower().Contains(filter) == true || te.DispatchTime?.ToLower().Contains(filter) == true || te.DeliveredTime?.ToLower().Contains(filter) == true || te.LatestReport?.ToLower().Contains(filter) == true || te.Status?.ToLower().Contains(filter) == true) return true; } return false; }; }
         private void StatusFilterCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) { ApplyTrackingFilter(); }
-        private void ApplyTrackingFilter() { if (TrackingVM == null || TrackingLedgerGrid == null) return; var cv = CollectionViewSource.GetDefaultView(TrackingLedgerGrid.ItemsSource); if (cv == null) return; string search = TrackingSearchBox.Text?.ToLower().Trim() ?? ""; string status = (StatusFilterCombo?.SelectedItem as ComboBoxItem)?.Content?.ToString(); bool filterByStatus = !string.IsNullOrEmpty(status) && status != "All Status"; bool filterBySearch = !string.IsNullOrEmpty(search); if (!filterByStatus && !filterBySearch) { cv.Filter = null; TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count; return; } cv.Filter = (obj) => { if (obj is TrackingEntry te) { if (filterByStatus && te.Status != status) return false; if (filterBySearch && (te.ChallanNo?.ToLower().Contains(search) == true || te.VehicleNo?.ToLower().Contains(search) == true || te.From?.ToLower().Contains(search) == true || te.To?.ToLower().Contains(search) == true || te.DriverMobile?.ToLower().Contains(search) == true || te.Status?.ToLower().Contains(search) == true)) return true; return !filterBySearch; } return false; }; }
+        private void ApplyTrackingFilter() { if (TrackingVM == null || TrackingLedgerGrid == null) return; var cv = CollectionViewSource.GetDefaultView(TrackingLedgerGrid.ItemsSource); if (cv == null) return; string search = TrackingSearchBox.Text?.ToLower().Trim() ?? ""; string status = (StatusFilterCombo?.SelectedItem as ComboBoxItem)?.Content?.ToString(); bool filterByStatus = !string.IsNullOrEmpty(status) && status != "All Status"; bool filterBySearch = !string.IsNullOrEmpty(search); if (!filterByStatus && !filterBySearch) { cv.Filter = null; TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count; return; } cv.Filter = (obj) => { if (obj is TrackingEntry te) { if (filterByStatus && te.Status != status) return false; if (filterBySearch && (te.ChallanNo?.ToLower().Contains(search) == true || te.VehicleNo?.ToLower().Contains(search) == true || te.From?.ToLower().Contains(search) == true || te.To?.ToLower().Contains(search) == true || te.DriverMobile?.ToLower().Contains(search) == true || te.DispatchTime?.ToLower().Contains(search) == true || te.DeliveredTime?.ToLower().Contains(search) == true || te.LatestReport?.ToLower().Contains(search) == true || te.Status?.ToLower().Contains(search) == true)) return true; return !filterBySearch; } return false; }; }
         private void RestoreSortIndicator() { if (VM == null || LedgerGrid == null) return; string colName = VM.GetSortColumn(); if (string.IsNullOrEmpty(colName)) return; foreach (var c in LedgerGrid.Columns) { string prop = (c as DataGridTextColumn)?.Binding is System.Windows.Data.Binding b ? b.Path?.Path : (c as DataGridTemplateColumn)?.SortMemberPath; if (string.IsNullOrEmpty(prop)) continue; string header = (c.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", ""); if (prop.Equals(colName, StringComparison.OrdinalIgnoreCase)) { c.SortDirection = VM.IsCurrentSortAscending ? System.ComponentModel.ListSortDirection.Ascending : System.ComponentModel.ListSortDirection.Descending; c.Header = header + (VM.IsCurrentSortAscending ? " ^" : " v"); } else { c.Header = header; c.SortDirection = null; } } }
         private void UpdatePageUI()
         {
@@ -10910,6 +11380,7 @@ namespace Awagaman_ERP
 
         private void RunAfterEditCommit(Action action, string context)
         {
+            BeginBusyCursor();
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 try
@@ -10919,6 +11390,10 @@ namespace Awagaman_ERP
                 catch (Exception ex)
                 {
                     LogException(context, ex);
+                }
+                finally
+                {
+                    EndBusyCursor();
                 }
             }), System.Windows.Threading.DispatcherPriority.Background);
         }
@@ -11121,6 +11596,66 @@ namespace Awagaman_ERP
                    a.HasComments == b.HasComments;
         }
 
+        private static BillEntry CloneBillEntry(BillEntry source)
+        {
+            if (source == null) return null;
+            return new BillEntry
+            {
+                Id = source.Id,
+                Sr = source.Sr,
+                BillNo = source.BillNo,
+                BillDate = source.BillDate,
+                Party = source.Party,
+                LRNo = source.LRNo,
+                LRDate = source.LRDate,
+                From = source.From,
+                To = source.To,
+                VehicleType = source.VehicleType,
+                Freight = source.Freight,
+                Detention = source.Detention,
+                HML = source.HML,
+                OTHR = source.OTHR,
+                StCharge = source.StCharge,
+                RCVD = source.RCVD,
+                TDS = source.TDS,
+                DED = source.DED,
+                MOP = source.MOP,
+                MR = source.MR,
+                Remarks = source.Remarks,
+                Date = source.Date,
+                HasComments = source.HasComments
+            };
+        }
+
+        private static bool AreBillSnapshotsEqual(BillEntry a, BillEntry b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            if (a == null || b == null) return false;
+
+            return a.Id == b.Id &&
+                   a.Sr == b.Sr &&
+                   string.Equals(a.BillNo, b.BillNo, StringComparison.Ordinal) &&
+                   a.BillDate == b.BillDate &&
+                   string.Equals(a.Party, b.Party, StringComparison.Ordinal) &&
+                   string.Equals(a.LRNo, b.LRNo, StringComparison.Ordinal) &&
+                   a.LRDate == b.LRDate &&
+                   string.Equals(a.From, b.From, StringComparison.Ordinal) &&
+                   string.Equals(a.To, b.To, StringComparison.Ordinal) &&
+                   string.Equals(a.VehicleType, b.VehicleType, StringComparison.Ordinal) &&
+                   a.Freight == b.Freight &&
+                   a.Detention == b.Detention &&
+                   a.HML == b.HML &&
+                   a.OTHR == b.OTHR &&
+                   a.StCharge == b.StCharge &&
+                   a.RCVD == b.RCVD &&
+                   a.TDS == b.TDS &&
+                   a.DED == b.DED &&
+                   string.Equals(a.MOP, b.MOP, StringComparison.Ordinal) &&
+                   string.Equals(a.MR, b.MR, StringComparison.Ordinal) &&
+                   string.Equals(a.Remarks, b.Remarks, StringComparison.Ordinal) &&
+                   a.Date == b.Date;
+        }
+
         private bool UndoLREdit()
         {
             if (_lrUndoStack.Count == 0) return false;
@@ -11166,6 +11701,13 @@ namespace Awagaman_ERP
             _challanEditBeforeSnapshot = null;
             _challanEditEntryId = -1;
 
+            if (beforeSnapshot != null &&
+                beforeEntryId == entry.Id &&
+                AreChallanSnapshotsEqual(beforeSnapshot, entry))
+            {
+                return;
+            }
+
             RunAfterEditCommit(() =>
             {
                 VM?.GetRepository().Upsert(entry);
@@ -11200,6 +11742,7 @@ namespace Awagaman_ERP
             if (e.EditAction != DataGridEditAction.Commit) return;
             var entry = e.Row.Item as LREntry;
             if (entry == null || entry.Id <= 0) return;
+            var bindingPath = GetColumnBindingPath(e.Column) ?? string.Empty;
 
             try
             {
@@ -11216,6 +11759,13 @@ namespace Awagaman_ERP
             _lrEditBeforeSnapshot = null;
             _lrEditEntryId = -1;
 
+            if (beforeSnapshot != null &&
+                beforeEntryId == entry.Id &&
+                AreLRSnapshotsEqual(beforeSnapshot, entry))
+            {
+                return;
+            }
+
             RunAfterEditCommit(() =>
             {
                 // Keep GST values normalized in uppercase.
@@ -11225,8 +11775,34 @@ namespace Awagaman_ERP
                 if (LRVM != null)
                 {
                     new LRRepository().Upsert(entry);
-                    SyncLinkedBillsFromLREntry(entry);
-                    SyncChallanBillingForLr(entry);
+
+                    if (string.Equals(bindingPath, "LRNo", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "BillNo", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "BillDate", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "BillParty", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "TotalFreight", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "Hamali", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "Detention", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "Others", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "StCharge", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "NEFT", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "CASH", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "TDS", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "Ded", StringComparison.OrdinalIgnoreCase))
+                    {
+                        SyncLinkedBillsFromLREntry(entry);
+                    }
+
+                    if (string.Equals(bindingPath, "LRNo", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "CHNo", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "TotalFreight", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "Hamali", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "Detention", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "Others", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(bindingPath, "StCharge", StringComparison.OrdinalIgnoreCase))
+                    {
+                        SyncChallanBillingForLr(entry);
+                    }
                 }
 
                 if (!_suppressLrHistory &&
@@ -11777,33 +12353,50 @@ namespace Awagaman_ERP
         }
         private void SyncLinkedBillsFromLREntry(LREntry entry)
         {
-            if (entry == null || string.IsNullOrWhiteSpace(entry.LRNo)) return;
-            var bills = _billRepo.GetAll();
+            if (entry == null || string.IsNullOrWhiteSpace(entry.LRNo) || string.IsNullOrWhiteSpace(entry.BillNo)) return;
+            var bills = _billRepo.GetByBillNo(entry.BillNo);
+            var exactEntryLrNo = (entry.LRNo ?? string.Empty).Trim();
             foreach (var bill in bills.Where(b =>
                          string.Equals((b.BillNo ?? string.Empty).Trim(), (entry.BillNo ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase) ||
-                         SplitLrNumbers(b.LRNo).Any(lr => string.Equals(lr, entry.LRNo, StringComparison.OrdinalIgnoreCase))))
+                         SplitLrNumbers(b.LRNo).Any(lr => string.Equals(lr, exactEntryLrNo, StringComparison.OrdinalIgnoreCase))))
             {
                 var lrNos = SplitLrNumbers(bill.LRNo).ToList();
-                if (lrNos.Count == 0 || !lrNos.Contains(entry.LRNo, StringComparer.OrdinalIgnoreCase)) continue;
+                if (lrNos.Count == 0 || !lrNos.Contains(exactEntryLrNo, StringComparer.OrdinalIgnoreCase)) continue;
 
-                var matched = _lrRepo.GetAll()
-                    .Where(lr => lrNos.Any(n => string.Equals((lr.LRNo ?? string.Empty).Trim(), n, StringComparison.OrdinalIgnoreCase)))
-                    .ToList();
+                var matched = _lrRepo.GetByLRNumbers(lrNos);
                 if (matched.Count == 0) continue;
 
-                bill.Freight = matched.Sum(x => x.TotalFreight);
-                bill.HML = matched.Sum(x => x.Hamali);
-                bill.Detention = matched.Sum(x => x.Detention);
-                bill.OTHR = matched.Sum(x => x.Others);
-                bill.StCharge = matched.Sum(x => x.StCharge);
-                bill.RCVD = matched.Sum(x => x.NEFT + x.CASH);
-                bill.TDS = matched.Sum(x => x.TDS);
-                bill.DED = matched.Sum(x => x.Ded);
+                var newFreight = matched.Sum(x => x.TotalFreight);
+                var newHml = matched.Sum(x => x.Hamali);
+                var newDetention = matched.Sum(x => x.Detention);
+                var newOthr = matched.Sum(x => x.Others);
+                var newStCharge = matched.Sum(x => x.StCharge);
+                var newRcvd = matched.Sum(x => x.NEFT + x.CASH);
+                var newTds = matched.Sum(x => x.TDS);
+                var newDed = matched.Sum(x => x.Ded);
+
+                if (bill.Freight == newFreight &&
+                    bill.HML == newHml &&
+                    bill.Detention == newDetention &&
+                    bill.OTHR == newOthr &&
+                    bill.StCharge == newStCharge &&
+                    bill.RCVD == newRcvd &&
+                    bill.TDS == newTds &&
+                    bill.DED == newDed)
+                {
+                    continue;
+                }
+
+                bill.Freight = newFreight;
+                bill.HML = newHml;
+                bill.Detention = newDetention;
+                bill.OTHR = newOthr;
+                bill.StCharge = newStCharge;
+                bill.RCVD = newRcvd;
+                bill.TDS = newTds;
+                bill.DED = newDed;
                 _billRepo.Upsert(bill);
             }
-
-            BillVM?.RefreshAfterDelete();
-            BillUpdatePageUI();
         }
 
         private void SyncAllChallanBillingFromLR(bool force = false)
@@ -11828,6 +12421,11 @@ namespace Awagaman_ERP
 
                 foreach (var ch in challans)
                 {
+                    if (ch.PreserveImportedBilling)
+                    {
+                        continue;
+                    }
+
                     var lrSet = new HashSet<string>(SplitLrNumbers(ch.LRNumber), StringComparer.OrdinalIgnoreCase);
                     if (!string.IsNullOrWhiteSpace(ch.ChallanNumber) && lrByChNo.TryGetValue((ch.ChallanNumber ?? string.Empty).Trim(), out var listFromChNo))
                     {
@@ -11840,6 +12438,11 @@ namespace Awagaman_ERP
                         if (lrByNo.TryGetValue(lrNo, out var total)) billAmount += total;
                     }
                     var margin = billAmount != 0m ? (billAmount - (ch.LHS + ch.Detention + ch.Hamali)) : 0m;
+                    if (ch.BillAmount == billAmount && ch.Margin == margin)
+                    {
+                        continue;
+                    }
+
                     ch.BillAmount = billAmount;
                     ch.Margin = margin;
                     challanRepo.Upsert(ch);
@@ -11866,11 +12469,29 @@ namespace Awagaman_ERP
         private void SyncSingleChallanBillingFromLR(ChallanEntry challan)
         {
             if (challan == null) return;
+            if (challan.PreserveImportedBilling) return;
+            using (EnterBusyCursor())
+            {
 
             try
             {
                 var challanRepo = GetActiveChallanRepository();
-                var lrRows = _lrRepo.GetAll();
+                var lrRows = new List<LREntry>();
+                if (!string.IsNullOrWhiteSpace(challan.LRNumber))
+                {
+                    lrRows.AddRange(_lrRepo.GetByLRNumbers(SplitLrNumbers(challan.LRNumber)));
+                }
+                if (!string.IsNullOrWhiteSpace(challan.ChallanNumber))
+                {
+                    foreach (var lr in _lrRepo.GetByChallanNumbers(new[] { challan.ChallanNumber }))
+                    {
+                        if (!lrRows.Any(x => x.Id == lr.Id))
+                        {
+                            lrRows.Add(lr);
+                        }
+                    }
+                }
+
                 var lrByNo = lrRows
                     .Where(x => !string.IsNullOrWhiteSpace(x.LRNo))
                     .ToDictionary(x => (x.LRNo ?? string.Empty).Trim(),
@@ -11897,6 +12518,11 @@ namespace Awagaman_ERP
                 }
 
                 var margin = billAmount != 0m ? (billAmount - (challan.LHS + challan.Detention + challan.Hamali)) : 0m;
+                if (challan.BillAmount == billAmount && challan.Margin == margin)
+                {
+                    return;
+                }
+
                 challan.BillAmount = billAmount;
                 challan.Margin = margin;
                 challanRepo.Upsert(challan);
@@ -11909,11 +12535,14 @@ namespace Awagaman_ERP
                 }
             }
             catch { }
+            }
         }
 
         private void SyncChallanBillingForLr(LREntry lrEntry)
         {
             if (lrEntry == null) return;
+            using (EnterBusyCursor())
+            {
 
             try
             {
@@ -11922,8 +12551,7 @@ namespace Awagaman_ERP
                 var chNo = (lrEntry.CHNo ?? string.Empty).Trim();
                 if (!string.IsNullOrWhiteSpace(chNo))
                 {
-                    challan = challanRepo.GetAll()
-                        .FirstOrDefault(x => string.Equals((x.ChallanNumber ?? string.Empty).Trim(), chNo, StringComparison.OrdinalIgnoreCase));
+                    challan = challanRepo.FindByChallanNumber(chNo);
                 }
 
                 if (challan == null && !string.IsNullOrWhiteSpace(lrEntry.LRNo))
@@ -11941,6 +12569,7 @@ namespace Awagaman_ERP
             catch (Exception ex)
             {
                 LogException(nameof(SyncChallanBillingForLr), ex);
+            }
             }
         }
 
@@ -12462,7 +13091,7 @@ namespace Awagaman_ERP
             e.Handled = true;
         }
 
-        private void OpenDashboard_Click(object sender, RoutedEventArgs e) { HideUtilityViews(); SetActiveSidebarButton(SidebarLedgersButton); DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Collapsed; DashboardView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; TabDashboard.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabChallan.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); if (PageTitle != null) PageTitle.Text = "Dashboard"; RefreshDashboard(); }
+        private void OpenDashboard_Click(object sender, RoutedEventArgs e) { using (EnterBusyCursor()) { HideUtilityViews(); SetActiveSidebarButton(SidebarLedgersButton); DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Collapsed; DashboardView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; TabDashboard.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabChallan.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabTrackingLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); if (PageTitle != null) PageTitle.Text = "Dashboard"; RefreshDashboard(); } }
         private void Refresh_Click(object sender, RoutedEventArgs e) { if (SearchBox != null) SearchBox.Text = string.Empty; if (ChallanFilterBox != null) ChallanFilterBox.Text = string.Empty; if (LRFilterBox != null) LRFilterBox.Text = string.Empty; if (FromFilterBox != null) FromFilterBox.Text = string.Empty; if (ToFilterBox != null) ToFilterBox.Text = string.Empty; _challanHeaderFilters.Clear(); _onlyDueFilterEnabled = false; if (OnlyDueButton != null) OnlyDueButton.Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#455A64")); ApplyChallanDueFilter(); if (LedgerGrid != null) LedgerGrid.UnselectAllCells(); }
         private void OnlyDueButton_Click(object sender, RoutedEventArgs e)
         {
@@ -12600,6 +13229,12 @@ namespace Awagaman_ERP
                 return;
             }
 
+            if (BillLedgerView != null && BillLedgerView.Visibility == Visibility.Visible)
+            {
+                ResetBillDataOnly();
+                return;
+            }
+
             var first = MessageBox.Show(
                 "This will permanently delete all data from Challan, LR, Tracking, Bill, CBS, Vehicle, Party and comments.\n\nDo you want to continue?",
                 "Reset All Data",
@@ -12692,8 +13327,51 @@ namespace Awagaman_ERP
                 MessageBox.Show("LR reset failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
+
+        private void ResetBillDataOnly()
+        {
+            var first = MessageBox.Show(
+                "This will permanently delete Bill ledger data only.\n\nBill receipts and bill comments will also be deleted.\n\nChallan, Purchase, LR, Tracking, CBS, Vehicle and Party data will remain unchanged.\n\nDo you want to continue?",
+                "Reset Bill Ledger",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (first != MessageBoxResult.Yes) return;
+
+            var second = MessageBox.Show(
+                "Final confirmation:\n\nDelete all Bill ledger rows now?",
+                "Confirm Bill Delete",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Stop);
+            if (second != MessageBoxResult.Yes) return;
+
+            try
+            {
+                if (BackendSettings.UseRemoteApi)
+                {
+                    RemoteApiClient.PostNoContent("api/bills/reset-all");
+                }
+                else
+                {
+                    foreach (var entry in _billReceiptRepo.GetAll()) _billReceiptRepo.Delete(entry);
+                    foreach (var entry in _billRepo.GetAll()) _billRepo.Delete(entry);
+                    new CommentRepository().DeleteAllBillComments();
+                }
+
+                BillVM?.RefreshAfterDelete();
+                BillUpdatePageUI();
+                RefreshDashboard();
+
+                MessageBox.Show("Bill ledger data has been deleted.", "Bill Reset Completed", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Bill reset failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
         private void OpenLRLedger_Click(object sender, RoutedEventArgs e)
         {
+            using (EnterBusyCursor())
+            {
             HideUtilityViews();
             DashboardView.Visibility = Visibility.Collapsed;
             DeliveryChallanView.Visibility = Visibility.Collapsed;
@@ -12731,6 +13409,7 @@ namespace Awagaman_ERP
             EnforceLRLockedColumnsReadOnly();
             LRUpdatePageUI();
             ApplyLRHeaderFilter();
+            }
         }
         private void EnforceLRLockedColumnsReadOnly()
         {
@@ -12762,6 +13441,8 @@ namespace Awagaman_ERP
         }
         private void ShowPurchaseLedger(Button activeTab, string pageTitle)
         {
+            using (EnterBusyCursor())
+            {
             _isChallanLedgerMode = ReferenceEquals(activeTab, TabChallan);
             HideUtilityViews();
             DashboardView.Visibility = Visibility.Collapsed;
@@ -12800,12 +13481,18 @@ namespace Awagaman_ERP
                 if (!VM.HasLoadedPage && RecordCountText != null)
                     RecordCountText.Text = "Loading challans...";
 
+                BeginBusyCursor();
                 VM.EnsurePageLoadedAsync(
-                    () => UpdatePageUI(),
+                    () =>
+                    {
+                        UpdatePageUI();
+                        EndBusyCursor();
+                    },
                     ex =>
                     {
                         AppLogger.LogException(nameof(OpenDeliveryChallans_Click), ex);
                         if (RecordCountText != null) RecordCountText.Text = "Unable to load challans";
+                        EndBusyCursor();
                     });
                 return;
             }
@@ -12813,6 +13500,7 @@ namespace Awagaman_ERP
             VM.EnsurePageLoaded();
             SyncAllChallanBillingFromLR();
             UpdatePageUI();
+            }
         }
 
         private void ApplyPurchaseChallanMode()
@@ -12867,7 +13555,40 @@ namespace Awagaman_ERP
         {
             ShowPurchaseLedger(TabChallan, "Chllan List");
         }
-        private void OpenTrackingLedger_Click(object sender, RoutedEventArgs e) { HideUtilityViews(); DashboardView.Visibility = Visibility.Collapsed; DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; if (TrackingLedgerView.DataContext == null) TrackingLedgerView.DataContext = TrackingVM; if (TrackingLedgerGrid != null) TrackingLedgerGrid.ItemsSource = TrackingVM.Entries; if (TrackingVM != null && TrackingVM.Entries.Count == 0) TrackingVM.LoadData(); TabTrackingLedger.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDashboard.Style = (Style)FindResource("TabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabChallan.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count; RefreshTrackingReminderFromCurrentEntries(); if (PageTitle != null) PageTitle.Text = "Tracking Ledger"; }
+        private void OpenTrackingLedger_Click(object sender, RoutedEventArgs e) { using (EnterBusyCursor()) { HideUtilityViews(); DashboardView.Visibility = Visibility.Collapsed; DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; if (TrackingLedgerView.DataContext == null) TrackingLedgerView.DataContext = TrackingVM; if (TrackingLedgerGrid != null) TrackingLedgerGrid.ItemsSource = TrackingVM.Entries; if (TrackingVM != null && TrackingVM.Entries.Count == 0) TrackingVM.LoadData(); TabTrackingLedger.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDashboard.Style = (Style)FindResource("TabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabChallan.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count; RefreshTrackingReminderFromCurrentEntries(); if (PageTitle != null) PageTitle.Text = "Tracking Ledger"; } }
+        private void TrackingDeleteSelected_Click(object sender, RoutedEventArgs e)
+        {
+            if (TrackingLedgerGrid == null) return;
+            var selected = TrackingLedgerGrid.SelectedItems.Cast<TrackingEntry>().ToList();
+            if (selected.Count == 0)
+            {
+                MessageBox.Show("Select Tracking entries to delete.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (MessageBox.Show($"Delete {selected.Count} Tracking entr{(selected.Count == 1 ? "y" : "ies")}?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (var row in selected)
+                {
+                    try { _trackingRepo.Delete(row); } catch { }
+                }
+
+                TrackingVM.LoadData();
+                RefreshTrackingReminderFromCurrentEntries();
+                RefreshDashboardTrackingTablesFromCurrentEntries();
+                if (TrackingLedgerGrid != null) TrackingLedgerGrid.Items.Refresh();
+                QueueDashboardRefresh();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Tracking delete failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
         private void OpenTrackingEntryForm_Click(object sender, RoutedEventArgs e) { var entry = TrackingLedgerGrid?.SelectedItem as TrackingEntry; if (entry == null) { MessageBox.Show("Select a tracking entry to edit.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Information); return; } OpenTrackingEditor(entry); }
         private async void AppVersionText_MouseLeftButtonUp(object sender, MouseButtonEventArgs e) { await App.CheckForUpdatesOnDemandAsync(); }
         private void TrackingGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e) { OpenTrackingEntryForm_Click(sender, e); }
@@ -12930,7 +13651,7 @@ namespace Awagaman_ERP
             ApplyLRHeaderFilterIndicators();
             LRRefreshFilteredSummary();
         }
-        private void ImportLR_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select LR Import File" }; if (dialog.ShowDialog() != true) return; try { var records = ReadCsvRecords(dialog.FileName); if (records.Count < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = records[0]; var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new LRRepository(); int imported = 0, errors = 0; int totalRows = records.Count - 1; var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = totalRows; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; var importProgress = BeginImportProgress("Importing LR", totalRows); try { for (int i = 1; i < records.Count; i++) { try { var parts = records[i]; var entry = new LREntry(); entry.LRNo = GetFirstCol(parts, colMap, "LRNo", "LRNO", "LR"); entry.Date = ParseDate(GetFirstCol(parts, colMap, "Date", "DATE")); entry.ConsignorName = GetFirstCol(parts, colMap, "ConsignorName", "Consignor"); entry.ConsignorAddress = GetFirstCol(parts, colMap, "ConsignorAddress", "ConsignorAddr", "Consignor Address"); entry.ConsignorGST = GetFirstCol(parts, colMap, "ConsignorGST", "Consignor GST"); entry.ConsigneeName = GetFirstCol(parts, colMap, "ConsigneeName", "Consignee"); entry.ConsigneeAddress = GetFirstCol(parts, colMap, "ConsigneeAddress", "ConsigneeAddr", "Consignee Address"); entry.ConsigneeGST = GetFirstCol(parts, colMap, "ConsigneeGST", "Consignee GST"); entry.From = GetFirstCol(parts, colMap, "From", "FROM"); entry.To = GetFirstCol(parts, colMap, "To", "TO"); entry.VehicleNo = GetFirstCol(parts, colMap, "VehicleNo", "Vehicle", "Vehicle No."); entry.VehicleType = GetFirstCol(parts, colMap, "VehicleType", "Type"); entry.SizeL = ParseDecimal(GetFirstCol(parts, colMap, "L", "SizeL")); entry.SizeW = ParseDecimal(GetFirstCol(parts, colMap, "W", "SizeW")); entry.SizeH = ParseDecimal(GetFirstCol(parts, colMap, "H", "SizeH")); entry.ActualWeight = ParseDecimal(GetFirstCol(parts, colMap, "ActualWeight", "Actual Weight", "WEIGHT")); entry.ChargedWeight = ParseDecimal(GetFirstCol(parts, colMap, "ChargedWeight", "Charged Weight", "WEIGHT")); int.TryParse(GetFirstCol(parts, colMap, "PKG"), out int pkg); entry.PKG = pkg; entry.PkgType = GetFirstCol(parts, colMap, "PkgType", "PackageType", "Pkg Type"); entry.Description = GetFirstCol(parts, colMap, "Description", "DESCRIPTION", "Desc"); entry.Invoice = GetFirstCol(parts, colMap, "Invoice"); entry.Value = GetFirstCol(parts, colMap, "Value"); entry.CHNo = GetFirstCol(parts, colMap, "CHNo", "CHNO", "ChallanNo", "CH No.", "CH No"); entry.TotalFreight = ParseDecimal(GetFirstCol(parts, colMap, "TotalFreight", "Freight", "TF")); entry.Hamali = ParseDecimal(GetFirstCol(parts, colMap, "Hamali")); entry.Detention = ParseDecimal(GetFirstCol(parts, colMap, "Detention")); entry.Others = ParseDecimal(GetFirstCol(parts, colMap, "Others", "Other", "OTHR")); entry.StCharge = ParseDecimal(GetFirstCol(parts, colMap, "StCharge", "St. Charge", "StChargeAmount")); entry.NEFT = ParseDecimal(GetFirstCol(parts, colMap, "NEFT")); entry.CASH = ParseDecimal(GetFirstCol(parts, colMap, "CASH")); entry.TDS = ParseDecimal(GetFirstCol(parts, colMap, "TDS")); entry.Ded = ParseDecimal(GetFirstCol(parts, colMap, "Ded", "DED")); entry.BillNo = GetFirstCol(parts, colMap, "BillNo", "BILLNO", "Bill No."); entry.BillDate = ParseNullableDate(GetFirstCol(parts, colMap, "BillDate", "Bill Date")); entry.BILL = ParseDecimal(GetFirstCol(parts, colMap, "BILL")); entry.BillParty = GetFirstCol(parts, colMap, "BillParty", "Bill Party"); entry.Broker = GetFirstCol(parts, colMap, "Broker", "Broker "); entry.FrtType = GetFirstCol(parts, colMap, "FrtType", "Frt Type"); entry.PayType = GetFirstCol(parts, colMap, "PayType", "ToPayToBeBilled", "To Pay/To Be Billed"); entry.Comm = ParseDecimal(GetFirstCol(parts, colMap, "Comm", "comm")); entry.Paid = GetFirstCol(parts, colMap, "Paid"); repo.Upsert(entry); imported++; } catch (Exception ex) { AppLogger.LogException(nameof(ImportLR_Click), ex); errors++; } int processed = i; if (progress != null) progress.Value = processed; if (status != null) status.Text = $"Importing {processed}/{totalRows}"; UpdateImportProgress(importProgress, processed, totalRows, imported, errors); } } finally { importProgress.Dispose(); } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) { status.Text = string.Empty; status.Visibility = Visibility.Collapsed; } LRVM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); LRUpdatePageUI(); MessageBox.Show($"Import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
+        private void ImportLR_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select LR Import File" }; if (dialog.ShowDialog() != true) return; try { var records = ReadCsvRecords(dialog.FileName); if (records.Count < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = records[0]; var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new LRRepository(); int imported = 0, errors = 0; int totalRows = records.Count - 1; var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = totalRows; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; var importProgress = BeginImportProgress("Importing LR", totalRows); try { for (int i = 1; i < records.Count; i++) { try { var parts = records[i]; var entry = new LREntry(); entry.LRNo = GetFirstCol(parts, colMap, "LRNo", "LRNO", "LR"); entry.Date = ParseDate(GetFirstCol(parts, colMap, "Date", "DATE")); entry.ConsignorName = GetFirstCol(parts, colMap, "ConsignorName", "Consignor"); entry.ConsignorAddress = GetFirstCol(parts, colMap, "ConsignorAddress", "ConsignorAddr", "Consignor Address"); entry.ConsignorGST = GetFirstCol(parts, colMap, "ConsignorGST", "Consignor GST"); entry.ConsigneeName = GetFirstCol(parts, colMap, "ConsigneeName", "Consignee"); entry.ConsigneeAddress = GetFirstCol(parts, colMap, "ConsigneeAddress", "ConsigneeAddr", "Consignee Address"); entry.ConsigneeGST = GetFirstCol(parts, colMap, "ConsigneeGST", "Consignee GST"); entry.From = GetFirstCol(parts, colMap, "From", "FROM"); entry.To = GetFirstCol(parts, colMap, "To", "TO"); entry.VehicleNo = GetFirstCol(parts, colMap, "VehicleNo", "Vehicle", "Vehicle No."); entry.VehicleType = GetFirstCol(parts, colMap, "VehicleType", "Type"); entry.SizeL = ParseDecimal(GetFirstCol(parts, colMap, "L", "SizeL")); entry.SizeW = ParseDecimal(GetFirstCol(parts, colMap, "W", "SizeW")); entry.SizeH = ParseDecimal(GetFirstCol(parts, colMap, "H", "SizeH")); entry.ActualWeight = ParseDecimal(GetFirstCol(parts, colMap, "ActualWeight", "Actual Weight", "WEIGHT")); entry.ChargedWeight = ParseDecimal(GetFirstCol(parts, colMap, "ChargedWeight", "Charged Weight", "WEIGHT")); int.TryParse(GetFirstCol(parts, colMap, "PKG"), out int pkg); entry.PKG = pkg; entry.PkgType = GetFirstCol(parts, colMap, "PkgType", "PackageType", "Pkg Type"); entry.Description = GetFirstCol(parts, colMap, "Description", "DESCRIPTION", "Desc"); entry.Invoice = GetFirstCol(parts, colMap, "Invoice"); entry.Value = GetFirstCol(parts, colMap, "Value"); entry.CHNo = GetFirstCol(parts, colMap, "CHNo", "CHNO", "ChallanNo", "CH No.", "CH No"); entry.TotalFreight = ParseDecimal(GetFirstCol(parts, colMap, "TotalFreight", "Freight")); entry.Hamali = ParseDecimal(GetFirstCol(parts, colMap, "Hamali")); entry.Detention = ParseDecimal(GetFirstCol(parts, colMap, "Detention")); entry.Others = ParseDecimal(GetFirstCol(parts, colMap, "Others", "Other", "OTHR")); entry.StCharge = ParseDecimal(GetFirstCol(parts, colMap, "StCharge", "St. Charge", "StChargeAmount")); entry.NEFT = ParseDecimal(GetFirstCol(parts, colMap, "NEFT")); entry.CASH = ParseDecimal(GetFirstCol(parts, colMap, "CASH")); entry.TDS = ParseDecimal(GetFirstCol(parts, colMap, "TDS")); entry.Ded = ParseDecimal(GetFirstCol(parts, colMap, "Ded", "DED")); entry.BillNo = GetFirstCol(parts, colMap, "BillNo", "BILLNO", "Bill No."); entry.BillDate = ParseNullableDate(GetFirstCol(parts, colMap, "BillDate", "Bill Date")); entry.BILL = ParseDecimal(GetFirstCol(parts, colMap, "BILL")); entry.ChallanLorryHire = ParseDecimal(GetFirstCol(parts, colMap, "LorryHire", "Lorry Hire", "TF")); entry.BillParty = GetFirstCol(parts, colMap, "BillParty", "Bill Party"); entry.Broker = GetFirstCol(parts, colMap, "Broker", "Broker "); entry.FrtType = GetFirstCol(parts, colMap, "FrtType", "Frt Type"); entry.PayType = GetFirstCol(parts, colMap, "PayType", "ToPayToBeBilled", "To Pay/To Be Billed"); entry.Comm = ParseDecimal(GetFirstCol(parts, colMap, "Comm", "comm")); entry.Paid = GetFirstCol(parts, colMap, "Paid"); entry.PreserveImportedBilling = true; repo.Upsert(entry); imported++; } catch (Exception ex) { AppLogger.LogException(nameof(ImportLR_Click), ex); errors++; } int processed = i; if (progress != null) progress.Value = processed; if (status != null) status.Text = $"Importing {processed}/{totalRows}"; UpdateImportProgress(importProgress, processed, totalRows, imported, errors); } } finally { importProgress.Dispose(); } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) { status.Text = string.Empty; status.Visibility = Visibility.Collapsed; } LRVM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); LRUpdatePageUI(); MessageBox.Show($"Import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
         private void ShowLRColumnsMenu_Click(object sender, RoutedEventArgs e) { if (!(sender is System.Windows.Controls.Button button)) return; _lrColumnsMenu = BuildLRColumnsMenu(); _lrColumnsMenu.PlacementTarget = button; _lrColumnsMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom; _lrColumnsMenu.IsOpen = true; }
         private static string LRSettingsPath => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Awagaman ERP", "lr_column_settings.json");
         private void SaveLRColumnSettings() { try { var lines = new List<string>(); lines.Add($"_SortColumn:{LRVM?.GetSortColumn() ?? ""}"); lines.Add($"_SortAscending:{LRVM?.IsCurrentSortAscending}"); foreach (var col in LRLedgerGrid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", "").Trim(); if (!string.IsNullOrEmpty(h)) lines.Add(col.Visibility == Visibility.Visible ? $"1:{h}:{(int)col.Width.DisplayValue}" : $"0:{h}:{(int)col.Width.DisplayValue}"); } var dir = System.IO.Path.GetDirectoryName(LRSettingsPath); if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir); System.IO.File.WriteAllText(LRSettingsPath, string.Join("\n", lines)); } catch { } }
@@ -12976,7 +13697,7 @@ namespace Awagaman_ERP
             }
             catch { }
         }
-        private void ImportChallan_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select Challan Import File" }; if (dialog.ShowDialog() != true) return; if (dialog.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) || dialog.FileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase)) { MessageBox.Show("Please export your Excel file as CSV first.", "Format Not Supported", MessageBoxButton.OK, MessageBoxImage.Information); return; } try { var records = ReadCsvRecords(dialog.FileName); if (records.Count < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = records[0]; var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new ChallanRepository { LedgerMode = _isChallanLedgerMode ? "Challan" : "Purchase" }; int imported = 0, errors = 0; int maxSr = repo.GetMaxSr(); int totalRows = records.Count - 1; var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = totalRows; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; var importProgress = BeginImportProgress("Importing Challans", totalRows); try { for (int i = 1; i < records.Count; i++) { try { var parts = records[i]; var importedChallanNo = GetFirstCol(parts, colMap, "ChallanNumber", "ChallanNo", "CHALLANNO", "CHNo", "CHNO", "ChNo", "CH", "Challan", "CNo", "CNNo", "C/NNo", "BiltyNo", "BuiltyNo"); if (string.IsNullOrWhiteSpace(importedChallanNo)) throw new InvalidOperationException("Missing Challan No / Challan Number value in import row."); var primaryLr = GetCol(parts, colMap, "LRNumber") ?? GetCol(parts, colMap, "LRNo") ?? GetCol(parts, colMap, "LRNO"); var extraLrs = GetFirstCol(parts, colMap, "MultiLRs", "MultiLR", "MultiLrs", "MultiLRNo", "MultiLRNos", "MultipleLRs", "MultipleLR", "ExtraLRs"); var advanceNeft = ParseDecimal(GetCol(parts, colMap, "AdvanceNEFT")); var advanceCash = ParseDecimal(GetCol(parts, colMap, "AdvanceCash")); var explicitAdvance = ParseDecimal(GetCol(parts, colMap, "AdvanceAmount") ?? GetCol(parts, colMap, "Advance")); var balancePaidNeft = ParseDecimal(GetCol(parts, colMap, "BalancePaidNEFT")); var balancePaidCash = ParseDecimal(GetCol(parts, colMap, "BalancePaidCash")); var importedBalance = ParseNullableDecimal(GetCol(parts, colMap, "Bal") ?? GetCol(parts, colMap, "Balance")); var importedDue = ParseNullableDecimal(GetCol(parts, colMap, "DUE") ?? GetCol(parts, colMap, "Due")); var entry = new ChallanEntry { Sr = ++maxSr, ChallanNumber = importedChallanNo, Date = ParseDate(GetCol(parts, colMap, "Date") ?? GetCol(parts, colMap, "DATE")), LRNumber = MergeImportedLrNumbers(primaryLr, extraLrs), BrokerName = GetCol(parts, colMap, "BrokerName") ?? GetCol(parts, colMap, "Broker"), From = GetCol(parts, colMap, "From") ?? GetCol(parts, colMap, "FROM"), To = GetCol(parts, colMap, "To") ?? GetCol(parts, colMap, "TO"), VehicleNumber = GetCol(parts, colMap, "VehicleNumber") ?? GetCol(parts, colMap, "VehicleNo") ?? GetCol(parts, colMap, "VEHICLENO"), VehicleType = GetCol(parts, colMap, "VehicleType") ?? GetCol(parts, colMap, "Type"), DriverName = GetCol(parts, colMap, "DriverName") ?? GetCol(parts, colMap, "Driver"), DriverMobile = GetCol(parts, colMap, "DriverMobile") ?? GetCol(parts, colMap, "DriverMobile"), EngineNo = GetCol(parts, colMap, "EngineNo"), LicenceNo = GetCol(parts, colMap, "LicenceNo"), PolicyNo = GetCol(parts, colMap, "PolicyNo"), ChassisNo = GetCol(parts, colMap, "ChassisNo"), OwnerName = GetCol(parts, colMap, "OwnerName") ?? GetCol(parts, colMap, "Owner"), PAN = GetCol(parts, colMap, "PAN"), LorryHire = ParseDecimal(GetCol(parts, colMap, "LorryHire") ?? GetCol(parts, colMap, "TF") ?? GetCol(parts, colMap, "LHS")), Other = ParseDecimal(GetCol(parts, colMap, "Other") ?? GetCol(parts, colMap, "OtherAmount")), LessTDS = ParseDecimal(GetCol(parts, colMap, "LessTDS")), AdvanceAmount = explicitAdvance > 0m ? explicitAdvance : advanceNeft + advanceCash, AdvanceNEFT = advanceNeft, AdvanceCash = advanceCash, AdvanceDate = ParseNullableDate(GetCol(parts, colMap, "AdvanceDate")), Detention = ParseDecimal(GetCol(parts, colMap, "Detention") ?? GetCol(parts, colMap, "DETN")), Hamali = ParseDecimal(GetCol(parts, colMap, "Hamali") ?? GetCol(parts, colMap, "HML")), Deduction = ParseDecimal(GetCol(parts, colMap, "Deduction")), BalancePaidNEFT = balancePaidNeft, BalancePaidCash = balancePaidCash, BalancePaidDate = ParseNullableDate(GetCol(parts, colMap, "BalancePaidDate")), PaidTo = GetCol(parts, colMap, "PaidTo"), Remarks = GetCol(parts, colMap, "Remarks"), BillAmount = ParseDecimal(GetCol(parts, colMap, "BillAmount") ?? GetCol(parts, colMap, "BILLAMT") ?? GetCol(parts, colMap, "BILL AMT")), Margin = ParseDecimal(GetCol(parts, colMap, "Margin")), ImportedBalance = importedBalance, ImportedDue = importedDue }; entry.SuppressCalculations = true; entry.RecalculateBalance(); repo.Upsert(entry); imported++; } catch (Exception ex) { AppLogger.LogException(nameof(ImportChallan_Click), ex); errors++; } int processed = i; if (progress != null) progress.Value = processed; if (status != null) status.Text = $"Importing {processed}/{totalRows}"; UpdateImportProgress(importProgress, processed, totalRows, imported, errors); } } finally { importProgress.Dispose(); } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) { status.Text = string.Empty; status.Visibility = Visibility.Collapsed; } VM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); UpdatePageUI(); RefreshDashboard(); MessageBox.Show($"{(_isChallanLedgerMode ? "Challan" : "Purchase")} import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
+        private void ImportChallan_Click(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select Challan Import File" }; if (dialog.ShowDialog() != true) return; if (dialog.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) || dialog.FileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase)) { MessageBox.Show("Please export your Excel file as CSV first.", "Format Not Supported", MessageBoxButton.OK, MessageBoxImage.Information); return; } try { var records = ReadCsvRecords(dialog.FileName); if (records.Count < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = records[0]; var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new ChallanRepository { LedgerMode = _isChallanLedgerMode ? "Challan" : "Purchase" }; int imported = 0, errors = 0; int maxSr = repo.GetMaxSr(); int totalRows = records.Count - 1; var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = totalRows; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; var importProgress = BeginImportProgress("Importing Challans", totalRows); try { for (int i = 1; i < records.Count; i++) { try { var parts = records[i]; var importedChallanNo = GetFirstCol(parts, colMap, "ChallanNumber", "ChallanNo", "CHALLANNO", "CHNo", "CHNO", "ChNo", "CH", "Challan", "CNo", "CNNo", "C/NNo", "BiltyNo", "BuiltyNo"); if (string.IsNullOrWhiteSpace(importedChallanNo)) throw new InvalidOperationException("Missing Challan No / Challan Number value in import row."); var primaryLr = GetCol(parts, colMap, "LRNumber") ?? GetCol(parts, colMap, "LRNo") ?? GetCol(parts, colMap, "LRNO"); var extraLrs = GetFirstCol(parts, colMap, "MultiLRs", "MultiLR", "MultiLrs", "MultiLRNo", "MultiLRNos", "MultipleLRs", "MultipleLR", "ExtraLRs"); var advanceNeft = ParseDecimal(GetCol(parts, colMap, "AdvanceNEFT")); var advanceCash = ParseDecimal(GetCol(parts, colMap, "AdvanceCash")); var explicitAdvance = ParseDecimal(GetCol(parts, colMap, "AdvanceAmount") ?? GetCol(parts, colMap, "Advance")); var balancePaidNeft = ParseDecimal(GetCol(parts, colMap, "BalancePaidNEFT")); var balancePaidCash = ParseDecimal(GetCol(parts, colMap, "BalancePaidCash")); var importedBalance = ParseNullableDecimal(GetCol(parts, colMap, "Bal") ?? GetCol(parts, colMap, "Balance")); var importedDue = ParseNullableDecimal(GetCol(parts, colMap, "DUE") ?? GetCol(parts, colMap, "Due")); var entry = new ChallanEntry { Sr = ++maxSr, ChallanNumber = importedChallanNo, Date = ParseDate(GetCol(parts, colMap, "Date") ?? GetCol(parts, colMap, "DATE")), LRNumber = MergeImportedLrNumbers(primaryLr, extraLrs), BrokerName = GetCol(parts, colMap, "BrokerName") ?? GetCol(parts, colMap, "Broker"), From = GetCol(parts, colMap, "From") ?? GetCol(parts, colMap, "FROM"), To = GetCol(parts, colMap, "To") ?? GetCol(parts, colMap, "TO"), VehicleNumber = GetCol(parts, colMap, "VehicleNumber") ?? GetCol(parts, colMap, "VehicleNo") ?? GetCol(parts, colMap, "VEHICLENO"), VehicleType = GetCol(parts, colMap, "VehicleType") ?? GetCol(parts, colMap, "Type"), DriverName = GetCol(parts, colMap, "DriverName") ?? GetCol(parts, colMap, "Driver"), DriverMobile = GetCol(parts, colMap, "DriverMobile") ?? GetCol(parts, colMap, "DriverMobile"), EngineNo = GetCol(parts, colMap, "EngineNo"), LicenceNo = GetCol(parts, colMap, "LicenceNo"), PolicyNo = GetCol(parts, colMap, "PolicyNo"), ChassisNo = GetCol(parts, colMap, "ChassisNo"), OwnerName = GetCol(parts, colMap, "OwnerName") ?? GetCol(parts, colMap, "Owner"), PAN = GetCol(parts, colMap, "PAN"), LorryHire = ParseDecimal(GetCol(parts, colMap, "LorryHire") ?? GetCol(parts, colMap, "TF") ?? GetCol(parts, colMap, "LHS")), Other = ParseDecimal(GetCol(parts, colMap, "Other") ?? GetCol(parts, colMap, "OtherAmount")), LessTDS = ParseDecimal(GetCol(parts, colMap, "LessTDS")), AdvanceAmount = explicitAdvance > 0m ? explicitAdvance : advanceNeft + advanceCash, AdvanceNEFT = advanceNeft, AdvanceCash = advanceCash, AdvanceDate = ParseNullableDate(GetCol(parts, colMap, "AdvanceDate")), Detention = ParseDecimal(GetCol(parts, colMap, "Detention") ?? GetCol(parts, colMap, "DETN")), Hamali = ParseDecimal(GetCol(parts, colMap, "Hamali") ?? GetCol(parts, colMap, "HML")), Deduction = ParseDecimal(GetCol(parts, colMap, "Deduction")), BalancePaidNEFT = balancePaidNeft, BalancePaidCash = balancePaidCash, BalancePaidDate = ParseNullableDate(GetCol(parts, colMap, "BalancePaidDate")), PaidTo = GetCol(parts, colMap, "PaidTo"), Remarks = GetCol(parts, colMap, "Remarks"), BillAmount = ParseDecimal(GetCol(parts, colMap, "BillAmount") ?? GetCol(parts, colMap, "BILLAMT") ?? GetCol(parts, colMap, "BILL AMT")), Margin = ParseDecimal(GetCol(parts, colMap, "Margin")), ImportedBalance = importedBalance, ImportedDue = importedDue, PreserveImportedBilling = true }; entry.SuppressCalculations = true; entry.RecalculateBalance(); repo.Upsert(entry); imported++; } catch (Exception ex) { AppLogger.LogException(nameof(ImportChallan_Click), ex); errors++; } int processed = i; if (progress != null) progress.Value = processed; if (status != null) status.Text = $"Importing {processed}/{totalRows}"; UpdateImportProgress(importProgress, processed, totalRows, imported, errors); } } finally { importProgress.Dispose(); } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) { status.Text = string.Empty; status.Visibility = Visibility.Collapsed; } VM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); UpdatePageUI(); RefreshDashboard(); MessageBox.Show($"{(_isChallanLedgerMode ? "Challan" : "Purchase")} import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
         private void EditSelected_Click(object sender, RoutedEventArgs e)
         {
             var item = LedgerGrid.SelectedItem as ChallanEntry;
@@ -13150,6 +13871,8 @@ namespace Awagaman_ERP
         private void SyncLinkedLREntriesFromChallan(ChallanEntry challan)
         {
             if (challan == null) return;
+            using (EnterBusyCursor())
+            {
             var challanNo = (challan.ChallanNumber ?? string.Empty).Trim();
             var lrTokens = SplitLrNumbers(challan.LRNumber).ToList();
             if (string.IsNullOrWhiteSpace(challanNo) && lrTokens.Count == 0) return;
@@ -13192,6 +13915,7 @@ namespace Awagaman_ERP
                 }
             }
             catch { }
+            }
         }
 
         private void BackfillAllLinkedLREntriesFromChallans()

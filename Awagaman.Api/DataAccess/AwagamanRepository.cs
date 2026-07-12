@@ -85,6 +85,19 @@ public sealed class AwagamanRepository
         await tx.CommitAsync();
     }
 
+    public async Task ResetBillDataAsync()
+    {
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+
+        await conn.ExecuteAsync("DELETE FROM bill_comments;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM bill_receipts;", transaction: tx);
+        await conn.ExecuteAsync("DELETE FROM bills;", transaction: tx);
+
+        await tx.CommitAsync();
+    }
+
     public async Task<DashboardSummary> GetDashboardSummaryAsync()
     {
         const string sql = @"
@@ -189,6 +202,24 @@ SELECT
     private static string ChallanSequenceSql() =>
         "COALESCE(NULLIF(regexp_replace(split_part(COALESCE(challan_number, ''), '/', 1), '[^0-9]', '', 'g'), '')::int, 0)";
 
+    private static string BillFinancialYearSql() =>
+        @"CASE
+            WHEN EXTRACT(MONTH FROM bill_date) >= 4 THEN EXTRACT(YEAR FROM bill_date)::int
+            ELSE EXTRACT(YEAR FROM bill_date)::int - 1
+        END";
+
+    private static string BillSequenceSql() =>
+        @"CASE
+            WHEN POSITION('/' IN COALESCE(bill_no, '')) > 0 THEN
+                CASE
+                    WHEN COALESCE(NULLIF(regexp_replace(split_part(COALESCE(bill_no, ''), '/', 2), '[^0-9]', '', 'g'), ''), '0')::int > 0
+                         OR trim(split_part(COALESCE(bill_no, ''), '/', 2)) = '0'
+                        THEN COALESCE(NULLIF(regexp_replace(split_part(COALESCE(bill_no, ''), '/', 2), '[^0-9]', '', 'g'), ''), '0')::int
+                    ELSE COALESCE(NULLIF(regexp_replace(split_part(COALESCE(bill_no, ''), '/', 1), '[^0-9]', '', 'g'), ''), '0')::int
+                END
+            ELSE COALESCE(NULLIF(regexp_replace(COALESCE(bill_no, ''), '[^0-9]', '', 'g'), ''), '0')::int
+        END";
+
     private static string BuildChallanOrderBy(string? sortColumn, bool ascending)
     {
         var dir = SortDirection(ascending);
@@ -273,7 +304,7 @@ SELECT
         var dir = SortDirection(ascending);
         return (sortColumn ?? string.Empty).Trim().ToLowerInvariant() switch
         {
-            "billno" => $"bill_no {dir}, sr {dir}, id {dir}",
+            "billno" => $"{BillFinancialYearSql()} {dir}, {BillSequenceSql()} {dir}, bill_no {dir}, sr {dir}, id {dir}",
             "billdate" => $"bill_date {dir} NULLS LAST, sr {dir}, id {dir}",
             "party" => $"party {dir}, sr {dir}, id {dir}",
             "lrno" => $"lr_no {dir}, sr {dir}, id {dir}",
@@ -766,7 +797,7 @@ WHERE CASE
             advance_date AS AdvanceDate, detention AS Detention, hamali AS Hamali, other_amount AS Other, deduction AS Deduction,
             balance_paid_neft AS BalancePaidNEFT, balance_paid_cash AS BalancePaidCash, balance_paid_date AS BalancePaidDate,
             paid_to AS PaidTo, remarks AS Remarks, bill_amount AS BillAmount, margin AS Margin,
-            imported_balance AS ImportedBalance, imported_due AS ImportedDue
+            imported_balance AS ImportedBalance, imported_due AS ImportedDue, preserve_imported_billing AS PreserveImportedBilling
             FROM " + GetChallanTableName(challanLedgerMode);
     }
 
@@ -807,8 +838,10 @@ WHERE CASE
         {
             whereParts.Add(@"(
                 challan_number ILIKE @search OR lr_number ILIKE @search OR vehicle_number ILIKE @search OR
-                vehicle_type ILIKE @search OR driver_name ILIKE @search OR broker_name ILIKE @search OR
-                from_location ILIKE @search OR to_location ILIKE @search OR owner_name ILIKE @search)");
+                vehicle_type ILIKE @search OR driver_name ILIKE @search OR driver_mobile ILIKE @search OR broker_name ILIKE @search OR
+                from_location ILIKE @search OR to_location ILIKE @search OR owner_name ILIKE @search OR
+                engine_no ILIKE @search OR licence_no ILIKE @search OR policy_no ILIKE @search OR chassis_no ILIKE @search OR
+                pan ILIKE @search OR paid_to ILIKE @search OR remarks ILIKE @search)");
             parameters.Add("search", $"%{q}%");
         }
 
@@ -847,8 +880,10 @@ WHERE CASE
         {
             whereParts.Add(@"(
                 challan_number ILIKE @search OR lr_number ILIKE @search OR vehicle_number ILIKE @search OR
-                vehicle_type ILIKE @search OR driver_name ILIKE @search OR broker_name ILIKE @search OR
-                from_location ILIKE @search OR to_location ILIKE @search OR owner_name ILIKE @search)");
+                vehicle_type ILIKE @search OR driver_name ILIKE @search OR driver_mobile ILIKE @search OR broker_name ILIKE @search OR
+                from_location ILIKE @search OR to_location ILIKE @search OR owner_name ILIKE @search OR
+                engine_no ILIKE @search OR licence_no ILIKE @search OR policy_no ILIKE @search OR chassis_no ILIKE @search OR
+                pan ILIKE @search OR paid_to ILIKE @search OR remarks ILIKE @search)");
             parameters.Add("search", $"%{q}%");
         }
 
@@ -893,26 +928,26 @@ WHERE CASE
                         driver_name, driver_mobile, engine_no, licence_no, policy_no, chassis_no, owner_name, pan,
                         lorry_hire, less_tds, advance_amount, advance_neft, advance_cash, advance_date, detention, hamali,
                         other_amount, deduction, balance_paid_neft, balance_paid_cash, balance_paid_date, paid_to, remarks, bill_amount, margin,
-                        imported_balance, imported_due)
+                        imported_balance, imported_due, preserve_imported_billing)
                     VALUES (
                         @SourcePurchaseId, @Sr, @ChallanNumber, @Date, @LRNumber, @BrokerName, @From, @To, @VehicleNumber, @VehicleType,
                         @DriverName, @DriverMobile, @EngineNo, @LicenceNo, @PolicyNo, @ChassisNo, @OwnerName, @PAN,
                         @LorryHire, @LessTDS, @AdvanceAmount, @AdvanceNEFT, @AdvanceCash, @AdvanceDate, @Detention, @Hamali,
                         @Other, @Deduction, @BalancePaidNEFT, @BalancePaidCash, @BalancePaidDate, @PaidTo, @Remarks, @BillAmount, @Margin,
-                        @ImportedBalance, @ImportedDue)
+                        @ImportedBalance, @ImportedDue, @PreserveImportedBilling)
                     RETURNING id;"
                 : $@"INSERT INTO {tableName} (
                         sr, challan_number, date, lr_number, broker_name, from_location, to_location, vehicle_number, vehicle_type,
                         driver_name, driver_mobile, engine_no, licence_no, policy_no, chassis_no, owner_name, pan,
                         lorry_hire, less_tds, advance_amount, advance_neft, advance_cash, advance_date, detention, hamali,
                         other_amount, deduction, balance_paid_neft, balance_paid_cash, balance_paid_date, paid_to, remarks, bill_amount, margin,
-                        imported_balance, imported_due)
+                        imported_balance, imported_due, preserve_imported_billing)
                     VALUES (
                         @Sr, @ChallanNumber, @Date, @LRNumber, @BrokerName, @From, @To, @VehicleNumber, @VehicleType,
                         @DriverName, @DriverMobile, @EngineNo, @LicenceNo, @PolicyNo, @ChassisNo, @OwnerName, @PAN,
                         @LorryHire, @LessTDS, @AdvanceAmount, @AdvanceNEFT, @AdvanceCash, @AdvanceDate, @Detention, @Hamali,
                         @Other, @Deduction, @BalancePaidNEFT, @BalancePaidCash, @BalancePaidDate, @PaidTo, @Remarks, @BillAmount, @Margin,
-                        @ImportedBalance, @ImportedDue)
+                        @ImportedBalance, @ImportedDue, @PreserveImportedBilling)
                     RETURNING id;"
             : challanLedgerMode
                 ? $@"UPDATE {tableName} SET
@@ -924,7 +959,7 @@ WHERE CASE
                         advance_date = @AdvanceDate, detention = @Detention, hamali = @Hamali, other_amount = @Other, deduction = @Deduction,
                         balance_paid_neft = @BalancePaidNEFT, balance_paid_cash = @BalancePaidCash, balance_paid_date = @BalancePaidDate,
                         paid_to = @PaidTo, remarks = @Remarks, bill_amount = @BillAmount, margin = @Margin,
-                        imported_balance = @ImportedBalance, imported_due = @ImportedDue
+                        imported_balance = @ImportedBalance, imported_due = @ImportedDue, preserve_imported_billing = @PreserveImportedBilling
                     WHERE id = @Id;
                    SELECT @Id;"
                 : $@"UPDATE {tableName} SET
@@ -936,7 +971,7 @@ WHERE CASE
                         advance_date = @AdvanceDate, detention = @Detention, hamali = @Hamali, other_amount = @Other, deduction = @Deduction,
                         balance_paid_neft = @BalancePaidNEFT, balance_paid_cash = @BalancePaidCash, balance_paid_date = @BalancePaidDate,
                         paid_to = @PaidTo, remarks = @Remarks, bill_amount = @BillAmount, margin = @Margin,
-                        imported_balance = @ImportedBalance, imported_due = @ImportedDue
+                        imported_balance = @ImportedBalance, imported_due = @ImportedDue, preserve_imported_billing = @PreserveImportedBilling
                     WHERE id = @Id;
                    SELECT @Id;";
         var id = await ExecuteScalarIntAsync(sql, entry);
@@ -1059,7 +1094,8 @@ WHERE source_purchase_id = @SourcePurchaseId
             BillAmount = existingMirror?.BillAmount ?? purchaseEntry.BillAmount,
             Margin = existingMirror?.Margin ?? purchaseEntry.Margin,
             ImportedBalance = existingMirror?.ImportedBalance ?? purchaseEntry.ImportedBalance,
-            ImportedDue = existingMirror?.ImportedDue ?? purchaseEntry.ImportedDue
+            ImportedDue = existingMirror?.ImportedDue ?? purchaseEntry.ImportedDue,
+            PreserveImportedBilling = existingMirror?.PreserveImportedBilling ?? purchaseEntry.PreserveImportedBilling
         };
     }
 
@@ -1072,7 +1108,9 @@ WHERE source_purchase_id = @SourcePurchaseId
             pkg AS PKG, pkg_type AS PkgType, description AS Description, invoice AS Invoice, value AS Value, chno AS CHNo,
             total_freight AS TotalFreight, hamali AS Hamali, detention AS Detention, others AS Others, st_charge AS StCharge,
             neft AS NEFT, cash AS CASH, tds AS TDS, ded AS Ded, bill_no AS BillNo, bill_date AS BillDate, bill AS BILL,
-            bill_party AS BillParty, broker AS Broker, frt_type AS FrtType, pay_type AS PayType, comm AS Comm, paid AS Paid
+            challan_lorry_hire AS ChallanLorryHire,
+            bill_party AS BillParty, broker AS Broker, frt_type AS FrtType, pay_type AS PayType, comm AS Comm, paid AS Paid,
+            preserve_imported_billing AS PreserveImportedBilling
             FROM lr_entries ORDER BY sr, id;");
 
     public async Task<PagedResult<LREntry>> GetLREntriesPageAsync(int page, int pageSize, string? search, string? sortColumn, bool sortAscending)
@@ -1087,8 +1125,13 @@ WHERE source_purchase_id = @SourcePurchaseId
         var q = (search ?? string.Empty).Trim();
         if (!string.IsNullOrWhiteSpace(q))
         {
-            where = @"WHERE lrno ILIKE @search OR consignor_name ILIKE @search OR consignee_name ILIKE @search OR
-                vehicle_no ILIKE @search OR bill_no ILIKE @search OR chno ILIKE @search";
+            where = @"WHERE lrno ILIKE @search OR consignor_name ILIKE @search OR consignor_address ILIKE @search OR consignor_gst ILIKE @search OR
+                consignee_name ILIKE @search OR consignee_address ILIKE @search OR consignee_gst ILIKE @search OR
+                from_location ILIKE @search OR to_location ILIKE @search OR
+                vehicle_no ILIKE @search OR vehicle_type ILIKE @search OR
+                pkg_type ILIKE @search OR description ILIKE @search OR invoice ILIKE @search OR value ILIKE @search OR
+                bill_no ILIKE @search OR bill_party ILIKE @search OR broker ILIKE @search OR frt_type ILIKE @search OR pay_type ILIKE @search OR paid ILIKE @search OR
+                chno ILIKE @search";
             parameters.Add("search", $"%{q}%");
         }
 
@@ -1101,7 +1144,9 @@ WHERE source_purchase_id = @SourcePurchaseId
             pkg AS PKG, pkg_type AS PkgType, description AS Description, invoice AS Invoice, value AS Value, chno AS CHNo,
             total_freight AS TotalFreight, hamali AS Hamali, detention AS Detention, others AS Others, st_charge AS StCharge,
             neft AS NEFT, cash AS CASH, tds AS TDS, ded AS Ded, bill_no AS BillNo, bill_date AS BillDate, bill AS BILL,
-            bill_party AS BillParty, broker AS Broker, frt_type AS FrtType, pay_type AS PayType, comm AS Comm, paid AS Paid
+            challan_lorry_hire AS ChallanLorryHire,
+            bill_party AS BillParty, broker AS Broker, frt_type AS FrtType, pay_type AS PayType, comm AS Comm, paid AS Paid,
+            preserve_imported_billing AS PreserveImportedBilling
             FROM lr_entries";
 
         await using var conn = _factory.Create();
@@ -1118,8 +1163,13 @@ WHERE source_purchase_id = @SourcePurchaseId
         var q = (search ?? string.Empty).Trim();
         if (!string.IsNullOrWhiteSpace(q))
         {
-            where = @"WHERE lrno ILIKE @search OR consignor_name ILIKE @search OR consignee_name ILIKE @search OR
-                vehicle_no ILIKE @search OR bill_no ILIKE @search OR chno ILIKE @search";
+            where = @"WHERE lrno ILIKE @search OR consignor_name ILIKE @search OR consignor_address ILIKE @search OR consignor_gst ILIKE @search OR
+                consignee_name ILIKE @search OR consignee_address ILIKE @search OR consignee_gst ILIKE @search OR
+                from_location ILIKE @search OR to_location ILIKE @search OR
+                vehicle_no ILIKE @search OR vehicle_type ILIKE @search OR
+                pkg_type ILIKE @search OR description ILIKE @search OR invoice ILIKE @search OR value ILIKE @search OR
+                bill_no ILIKE @search OR bill_party ILIKE @search OR broker ILIKE @search OR frt_type ILIKE @search OR pay_type ILIKE @search OR paid ILIKE @search OR
+                chno ILIKE @search";
             parameters.Add("search", $"%{q}%");
         }
 
@@ -1140,7 +1190,9 @@ WHERE source_purchase_id = @SourcePurchaseId
             pkg AS PKG, pkg_type AS PkgType, description AS Description, invoice AS Invoice, value AS Value, chno AS CHNo,
             total_freight AS TotalFreight, hamali AS Hamali, detention AS Detention, others AS Others, st_charge AS StCharge,
             neft AS NEFT, cash AS CASH, tds AS TDS, ded AS Ded, bill_no AS BillNo, bill_date AS BillDate, bill AS BILL,
-            bill_party AS BillParty, broker AS Broker, frt_type AS FrtType, pay_type AS PayType, comm AS Comm, paid AS Paid
+            challan_lorry_hire AS ChallanLorryHire,
+            bill_party AS BillParty, broker AS Broker, frt_type AS FrtType, pay_type AS PayType, comm AS Comm, paid AS Paid,
+            preserve_imported_billing AS PreserveImportedBilling
             FROM lr_entries WHERE id = @id;", new { id });
 
     public async Task<int> UpsertLREntryAsync(LREntry entry)
@@ -1150,12 +1202,12 @@ WHERE source_purchase_id = @SourcePurchaseId
                     sr, lrno, date, consignor_name, consignor_address, consignor_gst, consignee_name, consignee_address, consignee_gst,
                     from_location, to_location, vehicle_no, vehicle_type, weight, size_l, size_w, size_h, actual_weight, charged_weight,
                     pkg, pkg_type, description, invoice, value, chno, total_freight, hamali, detention, others, st_charge, neft, cash,
-                    tds, ded, bill_no, bill_date, bill, bill_party, broker, frt_type, pay_type, comm, paid)
+                    tds, ded, bill_no, bill_date, bill, challan_lorry_hire, bill_party, broker, frt_type, pay_type, comm, paid, preserve_imported_billing)
                 VALUES (
                     @Sr, @LRNo, @Date, @ConsignorName, @ConsignorAddress, @ConsignorGST, @ConsigneeName, @ConsigneeAddress, @ConsigneeGST,
                     @From, @To, @VehicleNo, @VehicleType, @Weight, @SizeL, @SizeW, @SizeH, @ActualWeight, @ChargedWeight,
                     @PKG, @PkgType, @Description, @Invoice, @Value, @CHNo, @TotalFreight, @Hamali, @Detention, @Others, @StCharge, @NEFT, @CASH,
-                    @TDS, @Ded, @BillNo, @BillDate, @BILL, @BillParty, @Broker, @FrtType, @PayType, @Comm, @Paid)
+                    @TDS, @Ded, @BillNo, @BillDate, @BILL, @ChallanLorryHire, @BillParty, @Broker, @FrtType, @PayType, @Comm, @Paid, @PreserveImportedBilling)
                 RETURNING id;"
             : @"UPDATE lr_entries SET
                     sr = @Sr, lrno = @LRNo, date = @Date, consignor_name = @ConsignorName, consignor_address = @ConsignorAddress, consignor_gst = @ConsignorGST,
@@ -1165,7 +1217,9 @@ WHERE source_purchase_id = @SourcePurchaseId
                     pkg = @PKG, pkg_type = @PkgType, description = @Description, invoice = @Invoice, value = @Value, chno = @CHNo,
                     total_freight = @TotalFreight, hamali = @Hamali, detention = @Detention, others = @Others, st_charge = @StCharge,
                     neft = @NEFT, cash = @CASH, tds = @TDS, ded = @Ded, bill_no = @BillNo, bill_date = @BillDate, bill = @BILL,
-                    bill_party = @BillParty, broker = @Broker, frt_type = @FrtType, pay_type = @PayType, comm = @Comm, paid = @Paid
+                    challan_lorry_hire = @ChallanLorryHire,
+                    bill_party = @BillParty, broker = @Broker, frt_type = @FrtType, pay_type = @PayType, comm = @Comm, paid = @Paid,
+                    preserve_imported_billing = @PreserveImportedBilling
                 WHERE id = @Id;
                SELECT @Id;";
         return await ExecuteScalarIntAsync(sql, entry);
@@ -1196,7 +1250,8 @@ WHERE source_purchase_id = @SourcePurchaseId
         {
             whereParts.Add(@"(
                 bill_no ILIKE @search OR party ILIKE @search OR lr_no ILIKE @search OR
-                from_loc ILIKE @search OR to_loc ILIKE @search OR mr ILIKE @search OR remarks ILIKE @search)");
+                from_loc ILIKE @search OR to_loc ILIKE @search OR vehicle_type ILIKE @search OR
+                mop ILIKE @search OR mr ILIKE @search OR remarks ILIKE @search)");
             parameters.Add("search", $"%{q}%");
         }
 
@@ -1231,7 +1286,8 @@ WHERE source_purchase_id = @SourcePurchaseId
         {
             whereParts.Add(@"(
                 bill_no ILIKE @search OR party ILIKE @search OR lr_no ILIKE @search OR
-                from_loc ILIKE @search OR to_loc ILIKE @search OR mr ILIKE @search OR remarks ILIKE @search)");
+                from_loc ILIKE @search OR to_loc ILIKE @search OR vehicle_type ILIKE @search OR
+                mop ILIKE @search OR mr ILIKE @search OR remarks ILIKE @search)");
             parameters.Add("search", $"%{q}%");
         }
 
@@ -1515,11 +1571,24 @@ ORDER BY date DESC, sr, id;", new { challanNumbers = keys });
     public Task<int> DeleteCashBankStatementAsync(int id) =>
         ExecuteAsync("DELETE FROM cash_bank_statements WHERE id = @id;", new { id });
 
-    public Task<IEnumerable<BillReceiptEntry>> GetBillReceiptsAsync() =>
-        QueryAsync<BillReceiptEntry>(@"SELECT
-            id, bill_no AS BillNo, party AS Party, bill_total AS BillTotal, bill_date AS BillDate, receipt_date AS ReceiptDate,
-            rcvd AS RCVD, tds AS TDS, ded AS DED, mop AS MOP, mr AS MR, remarks AS Remarks, due_after AS DueAfter, created_at AS CreatedAt
-            FROM bill_receipts ORDER BY receipt_date DESC, id DESC;");
+    public Task<IEnumerable<BillReceiptEntry>> GetBillReceiptsAsync(string? billNo = null)
+    {
+        var key = (billNo ?? string.Empty).Trim();
+        if (key.Length == 0)
+        {
+            return QueryAsync<BillReceiptEntry>(@"SELECT
+                id, bill_no AS BillNo, party AS Party, bill_total AS BillTotal, bill_date AS BillDate, receipt_date AS ReceiptDate,
+                rcvd AS RCVD, tds AS TDS, ded AS DED, mop AS MOP, mr AS MR, remarks AS Remarks, due_after AS DueAfter, created_at AS CreatedAt
+                FROM bill_receipts ORDER BY receipt_date DESC, id DESC;");
+        }
+
+        return QueryAsync<BillReceiptEntry>(@"SELECT
+                id, bill_no AS BillNo, party AS Party, bill_total AS BillTotal, bill_date AS BillDate, receipt_date AS ReceiptDate,
+                rcvd AS RCVD, tds AS TDS, ded AS DED, mop AS MOP, mr AS MR, remarks AS Remarks, due_after AS DueAfter, created_at AS CreatedAt
+                FROM bill_receipts
+                WHERE trim(COALESCE(bill_no, '')) = @billNo
+                ORDER BY receipt_date DESC, id DESC;", new { billNo = key });
+    }
 
     public async Task<int> UpsertBillReceiptAsync(BillReceiptEntry entry)
     {

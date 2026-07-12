@@ -279,9 +279,25 @@ namespace Awagaman_ERP.ViewModels
             return rows.Where(entry =>
                 ContainsText(entry?.LRNo, filter) ||
                 ContainsText(entry?.ConsignorName, filter) ||
+                ContainsText(entry?.ConsignorAddress, filter) ||
+                ContainsText(entry?.ConsignorGST, filter) ||
                 ContainsText(entry?.ConsigneeName, filter) ||
+                ContainsText(entry?.ConsigneeAddress, filter) ||
+                ContainsText(entry?.ConsigneeGST, filter) ||
+                ContainsText(entry?.From, filter) ||
+                ContainsText(entry?.To, filter) ||
                 ContainsText(entry?.VehicleNo, filter) ||
+                ContainsText(entry?.VehicleType, filter) ||
+                ContainsText(entry?.PkgType, filter) ||
+                ContainsText(entry?.Description, filter) ||
+                ContainsText(entry?.Invoice, filter) ||
+                ContainsText(entry?.Value, filter) ||
                 ContainsText(entry?.BillNo, filter) ||
+                ContainsText(entry?.BillParty, filter) ||
+                ContainsText(entry?.Broker, filter) ||
+                ContainsText(entry?.FrtType, filter) ||
+                ContainsText(entry?.PayType, filter) ||
+                ContainsText(entry?.Paid, filter) ||
                 ContainsText(entry?.CHNo, filter))
                 .ToList();
         }
@@ -333,6 +349,8 @@ namespace Awagaman_ERP.ViewModels
                 {
                     continue;
                 }
+
+                if (entry.PreserveImportedBilling) continue;
 
                 entry.ChallanLorryHire = ResolveChallanLorryHire(entry);
             }

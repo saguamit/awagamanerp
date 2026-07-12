@@ -569,6 +569,19 @@ bills.MapPost("/", async (HttpContext context, BillEntry entry, AwagamanReposito
         return Results.Problem(ex.ToString(), statusCode: 500);
     }
 });
+bills.MapPost("/reset-all", async (HttpContext context, AwagamanRepository repo) =>
+{
+    try
+    {
+        await repo.ResetBillDataAsync();
+        await WriteAuditAsync(context, repo, "Bill Ledger", "Reset", null, "Reset bill ledger data.");
+        return Results.NoContent();
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
 bills.MapPut("/{id:int}", async (HttpContext context, int id, BillEntry entry, AwagamanRepository repo) =>
 {
     try
@@ -655,7 +668,7 @@ cbsEntries.MapDelete("/{id:int}", async (HttpContext context, int id, AwagamanRe
 });
 
 var receipts = app.MapGroup("/api/bill-receipts");
-receipts.MapGet("/", async (AwagamanRepository repo) => Results.Ok(await repo.GetBillReceiptsAsync()));
+receipts.MapGet("/", async (string? billNo, AwagamanRepository repo) => Results.Ok(await repo.GetBillReceiptsAsync(billNo)));
 receipts.MapPost("/", async (HttpContext context, BillReceiptEntry entry, AwagamanRepository repo) =>
 {
     var id = await repo.UpsertBillReceiptAsync(entry);

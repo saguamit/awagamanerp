@@ -117,7 +117,8 @@ namespace Awagaman_ERP.Data
                             PaidTo = reader["PaidTo"] as string,
                             Remarks = reader["Remarks"] as string,
                             BillAmount = GetDecimal(reader["BillAmount"]),
-                            Margin = GetDecimal(reader["Margin"])
+                            Margin = GetDecimal(reader["Margin"]),
+                            PreserveImportedBilling = GetBoolean(reader, "PreserveImportedBilling")
                         };
 
                         entry.RecalculateBalance();
@@ -185,7 +186,8 @@ namespace Awagaman_ERP.Data
                             PaidTo = reader["PaidTo"] as string,
                             Remarks = reader["Remarks"] as string,
                             BillAmount = GetDecimal(reader["BillAmount"]),
-                            Margin = GetDecimal(reader["Margin"])
+                            Margin = GetDecimal(reader["Margin"]),
+                            PreserveImportedBilling = GetBoolean(reader, "PreserveImportedBilling")
                         });
                     }
                 }
@@ -209,8 +211,11 @@ namespace Awagaman_ERP.Data
                 var orderBy = BuildOrderBy(sortColumn, sortAscending, useLhsDerived);
                 command.CommandText = $@"SELECT * FROM {ActiveTableName} WHERE 
                     ChallanNumber LIKE @filter OR LRNumber LIKE @filter OR VehicleNumber LIKE @filter 
-                    OR VehicleType LIKE @filter OR DriverName LIKE @filter OR BrokerName LIKE @filter 
-                    OR FromLocation LIKE @filter OR ToLocation LIKE @filter OR OwnerName LIKE @filter 
+                    OR VehicleType LIKE @filter OR DriverName LIKE @filter OR DriverMobile LIKE @filter
+                    OR BrokerName LIKE @filter OR FromLocation LIKE @filter OR ToLocation LIKE @filter 
+                    OR OwnerName LIKE @filter OR EngineNo LIKE @filter OR LicenceNo LIKE @filter
+                    OR PolicyNo LIKE @filter OR ChassisNo LIKE @filter OR PAN LIKE @filter
+                    OR PaidTo LIKE @filter OR Remarks LIKE @filter
                     ORDER BY {orderBy} LIMIT @limit OFFSET @offset;";
                 command.Parameters.AddWithValue("@filter", $"%{searchFilter}%");
                 command.Parameters.AddWithValue("@limit", pageSize);
@@ -256,7 +261,8 @@ namespace Awagaman_ERP.Data
                             PaidTo = reader["PaidTo"] as string,
                             Remarks = reader["Remarks"] as string,
                             BillAmount = GetDecimal(reader["BillAmount"]),
-                            Margin = GetDecimal(reader["Margin"])
+                            Margin = GetDecimal(reader["Margin"]),
+                            PreserveImportedBilling = GetBoolean(reader, "PreserveImportedBilling")
                         });
                     }
                 }
@@ -344,8 +350,11 @@ namespace Awagaman_ERP.Data
                 {
                     command.CommandText = $@"SELECT COUNT(*) FROM {ActiveTableName} WHERE 
                         ChallanNumber LIKE @filter OR LRNumber LIKE @filter OR VehicleNumber LIKE @filter 
-                        OR VehicleType LIKE @filter OR DriverName LIKE @filter OR BrokerName LIKE @filter 
-                        OR FromLocation LIKE @filter OR ToLocation LIKE @filter OR OwnerName LIKE @filter;";
+                        OR VehicleType LIKE @filter OR DriverName LIKE @filter OR DriverMobile LIKE @filter
+                        OR BrokerName LIKE @filter OR FromLocation LIKE @filter OR ToLocation LIKE @filter 
+                        OR OwnerName LIKE @filter OR EngineNo LIKE @filter OR LicenceNo LIKE @filter
+                        OR PolicyNo LIKE @filter OR ChassisNo LIKE @filter OR PAN LIKE @filter
+                        OR PaidTo LIKE @filter OR Remarks LIKE @filter;";
                     command.Parameters.AddWithValue("@filter", $"%{searchFilter}%");
                 }
                 connection.Open();
@@ -406,12 +415,16 @@ namespace Awagaman_ERP.Data
                     command.CommandText = useLhsDerived
                         ? $@"SELECT COALESCE(SUM(((LorryHire + OtherAmount) - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM {ActiveTableName} WHERE 
                         ChallanNumber LIKE @filter OR LRNumber LIKE @filter OR VehicleNumber LIKE @filter 
-                        OR VehicleType LIKE @filter OR DriverName LIKE @filter OR BrokerName LIKE @filter 
-                        OR FromLocation LIKE @filter OR ToLocation LIKE @filter OR OwnerName LIKE @filter;"
+                        OR VehicleType LIKE @filter OR DriverName LIKE @filter OR DriverMobile LIKE @filter OR BrokerName LIKE @filter 
+                        OR FromLocation LIKE @filter OR ToLocation LIKE @filter OR OwnerName LIKE @filter
+                        OR EngineNo LIKE @filter OR LicenceNo LIKE @filter OR PolicyNo LIKE @filter OR ChassisNo LIKE @filter
+                        OR PAN LIKE @filter OR PaidTo LIKE @filter OR Remarks LIKE @filter;"
                         : $@"SELECT COALESCE(SUM((LorryHire - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM {ActiveTableName} WHERE 
                         ChallanNumber LIKE @filter OR LRNumber LIKE @filter OR VehicleNumber LIKE @filter 
-                        OR VehicleType LIKE @filter OR DriverName LIKE @filter OR BrokerName LIKE @filter 
-                        OR FromLocation LIKE @filter OR ToLocation LIKE @filter OR OwnerName LIKE @filter;";
+                        OR VehicleType LIKE @filter OR DriverName LIKE @filter OR DriverMobile LIKE @filter OR BrokerName LIKE @filter 
+                        OR FromLocation LIKE @filter OR ToLocation LIKE @filter OR OwnerName LIKE @filter
+                        OR EngineNo LIKE @filter OR LicenceNo LIKE @filter OR PolicyNo LIKE @filter OR ChassisNo LIKE @filter
+                        OR PAN LIKE @filter OR PaidTo LIKE @filter OR Remarks LIKE @filter;";
                     command.Parameters.AddWithValue("@filter", $"%{searchFilter}%");
                 }
                 connection.Open();
@@ -650,13 +663,13 @@ INSERT INTO {tableName} (
     DriverName, DriverMobile, EngineNo, LicenceNo, PolicyNo, ChassisNo, OwnerName, PAN,
     LorryHire, LessTDS, AdvanceAmount, AdvanceNEFT, AdvanceCash, AdvanceDate,
     Detention, Hamali, OtherAmount, Deduction, BalancePaidNEFT, BalancePaidCash, BalancePaidDate,
-    PaidTo, Remarks, BillAmount, Margin
+    PaidTo, Remarks, BillAmount, Margin, PreserveImportedBilling
 ) VALUES (
     @SourcePurchaseId, @Sr, @ChallanNumber, @Date, @LRNumber, @BrokerName, @FromLocation, @ToLocation, @VehicleNumber, @VehicleType,
     @DriverName, @DriverMobile, @EngineNo, @LicenceNo, @PolicyNo, @ChassisNo, @OwnerName, @PAN,
     @LorryHire, @LessTDS, @AdvanceAmount, @AdvanceNEFT, @AdvanceCash, @AdvanceDate,
     @Detention, @Hamali, @OtherAmount, @Deduction, @BalancePaidNEFT, @BalancePaidCash, @BalancePaidDate,
-    @PaidTo, @Remarks, @BillAmount, @Margin
+    @PaidTo, @Remarks, @BillAmount, @Margin, @PreserveImportedBilling
 );
 SELECT last_insert_rowid();"
                     : $@"
@@ -665,13 +678,13 @@ INSERT INTO {tableName} (
     DriverName, DriverMobile, EngineNo, LicenceNo, PolicyNo, ChassisNo, OwnerName, PAN,
     LorryHire, LessTDS, AdvanceAmount, AdvanceNEFT, AdvanceCash, AdvanceDate,
     Detention, Hamali, OtherAmount, Deduction, BalancePaidNEFT, BalancePaidCash, BalancePaidDate,
-    PaidTo, Remarks, BillAmount, Margin
+    PaidTo, Remarks, BillAmount, Margin, PreserveImportedBilling
 ) VALUES (
     @Sr, @ChallanNumber, @Date, @LRNumber, @BrokerName, @FromLocation, @ToLocation, @VehicleNumber, @VehicleType,
     @DriverName, @DriverMobile, @EngineNo, @LicenceNo, @PolicyNo, @ChassisNo, @OwnerName, @PAN,
     @LorryHire, @LessTDS, @AdvanceAmount, @AdvanceNEFT, @AdvanceCash, @AdvanceDate,
     @Detention, @Hamali, @OtherAmount, @Deduction, @BalancePaidNEFT, @BalancePaidCash, @BalancePaidDate,
-    @PaidTo, @Remarks, @BillAmount, @Margin
+    @PaidTo, @Remarks, @BillAmount, @Margin, @PreserveImportedBilling
 );
 SELECT last_insert_rowid();";
 
@@ -717,7 +730,8 @@ UPDATE {tableName} SET
     PaidTo = @PaidTo,
     Remarks = @Remarks,
     BillAmount = @BillAmount,
-    Margin = @Margin
+    Margin = @Margin,
+    PreserveImportedBilling = @PreserveImportedBilling
 WHERE Id = @Id;"
                     : $@"
 UPDATE {tableName} SET
@@ -754,7 +768,8 @@ UPDATE {tableName} SET
     PaidTo = @PaidTo,
     Remarks = @Remarks,
     BillAmount = @BillAmount,
-    Margin = @Margin
+    Margin = @Margin,
+    PreserveImportedBilling = @PreserveImportedBilling
 WHERE Id = @Id;";
 
                 AddParameters(command, entry, includeSourcePurchaseId);
@@ -835,6 +850,7 @@ LIMIT 1;";
                 mirror.Remarks = purchaseEntry.Remarks;
                 mirror.BillAmount = purchaseEntry.BillAmount;
                 mirror.Margin = purchaseEntry.Margin;
+                mirror.PreserveImportedBilling = purchaseEntry.PreserveImportedBilling;
             }
 
             mirror.RecalculateBalance();
@@ -964,10 +980,18 @@ WHERE SourcePurchaseId = @SourcePurchaseId
                  Contains(e.VehicleNumber, searchFilter) ||
                  Contains(e.VehicleType, searchFilter) ||
                  Contains(e.DriverName, searchFilter) ||
+                 Contains(e.DriverMobile, searchFilter) ||
                  Contains(e.BrokerName, searchFilter) ||
                  Contains(e.From, searchFilter) ||
                  Contains(e.To, searchFilter) ||
-                 Contains(e.OwnerName, searchFilter)) &&
+                 Contains(e.OwnerName, searchFilter) ||
+                 Contains(e.EngineNo, searchFilter) ||
+                 Contains(e.LicenceNo, searchFilter) ||
+                 Contains(e.PolicyNo, searchFilter) ||
+                 Contains(e.ChassisNo, searchFilter) ||
+                 Contains(e.PAN, searchFilter) ||
+                 Contains(e.PaidTo, searchFilter) ||
+                 Contains(e.Remarks, searchFilter)) &&
                 (string.IsNullOrWhiteSpace(challanNo) || Contains(e.ChallanNumber, challanNo)) &&
                 (string.IsNullOrWhiteSpace(lrNo) || Contains(e.LRNumber, lrNo)) &&
                 (string.IsNullOrWhiteSpace(from) || Contains(e.From, from)) &&
@@ -1119,6 +1143,7 @@ WHERE SourcePurchaseId = @SourcePurchaseId
             command.Parameters.AddWithValue("@Remarks", (object)entry.Remarks ?? DBNull.Value);
             command.Parameters.AddWithValue("@BillAmount", entry.BillAmount);
             command.Parameters.AddWithValue("@Margin", entry.Margin);
+            command.Parameters.AddWithValue("@PreserveImportedBilling", entry.PreserveImportedBilling ? 1 : 0);
         }
 
         private static ChallanEntry MapReader(System.Data.SQLite.SQLiteDataReader reader)
@@ -1160,10 +1185,28 @@ WHERE SourcePurchaseId = @SourcePurchaseId
                 Remarks = reader["Remarks"] as string,
                 BillAmount = GetDecimal(reader["BillAmount"]),
                 Margin = GetDecimal(reader["Margin"]),
+                PreserveImportedBilling = HasColumn(reader, "PreserveImportedBilling") && GetBoolean(reader, "PreserveImportedBilling"),
                 SourcePurchaseId = HasColumn(reader, "SourcePurchaseId") && reader["SourcePurchaseId"] != DBNull.Value
                     ? Convert.ToInt32(reader["SourcePurchaseId"])
                     : (int?)null
             };
+        }
+
+        private static bool GetBoolean(IDataRecord reader, string columnName)
+        {
+            var ordinal = reader.GetOrdinal(columnName);
+            if (reader.IsDBNull(ordinal))
+            {
+                return false;
+            }
+
+            var value = reader.GetValue(ordinal);
+            if (value is bool boolValue)
+            {
+                return boolValue;
+            }
+
+            return Convert.ToInt32(value) != 0;
         }
 
         private static bool HasColumn(IDataRecord reader, string columnName)

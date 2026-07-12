@@ -205,6 +205,20 @@ namespace Awagaman_ERP.Data
             }
         }
 
+        public void DeleteAllBillComments()
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return;
+            }
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand("DELETE FROM BillComments;", c))
+            {
+                c.Open();
+                cmd.ExecuteNonQuery();
+            }
+        }
+
         public HashSet<int> GetBillIdsWithComments()
         {
             if (BackendSettings.UseRemoteApi)

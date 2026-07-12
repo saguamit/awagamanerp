@@ -5,21 +5,40 @@ using System.Reflection;
 using System.Net.Http;
 using System.Net;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
+using System.Threading;
 using System.Windows;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using System.Runtime.InteropServices;
+using Forms = System.Windows.Forms;
+using Drawing = System.Drawing;
 using Awagaman_ERP.Data;
 
 namespace Awagaman_ERP
 {
     public partial class App : Application
     {
+        private const string SingleInstanceMutexName = "AwagamanERP.SingleInstance";
         private static Process _localApiProcess;
+        private static Mutex _singleInstanceMutex;
+        private static bool _ownsSingleInstanceMutex;
+        private Forms.NotifyIcon _trayIcon;
+        private bool _allowRealShutdown;
+        private bool _trayHintShown;
+        private WindowState _restoreWindowState = WindowState.Maximized;
 
         protected override void OnStartup(StartupEventArgs e)
         {
             AppLogger.LogMessage("Startup", "OnStartup begin");
+            if (!AcquireSingleInstance())
+            {
+                AppLogger.LogMessage("Startup", "Another instance is already running");
+                Shutdown();
+                return;
+            }
+
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             base.OnStartup(e);
             AppLogger.LogMessage("Startup", "Base OnStartup complete");
@@ -58,8 +77,11 @@ namespace Awagaman_ERP
             {
                 AppLogger.LogMessage("Startup", "Creating MainWindow");
                 MainWindow = new MainWindow();
-                ShutdownMode = ShutdownMode.OnMainWindowClose;
+                ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                InitializeTrayIcon();
+                AttachMainWindowHooks(MainWindow);
                 MainWindow.Show();
+                RestoreMainWindow();
                 AppLogger.LogMessage("Startup", "MainWindow shown");
             }
             catch (Exception ex)
@@ -76,8 +98,272 @@ namespace Awagaman_ERP
 
         protected override void OnExit(ExitEventArgs e)
         {
+            DisposeTrayIcon();
             TryStopLocalApiServer();
+            ReleaseSingleInstance();
             base.OnExit(e);
+        }
+
+        internal void RequestExit()
+        {
+            _allowRealShutdown = true;
+            try
+            {
+                if (MainWindow != null)
+                {
+                    MainWindow.Close();
+                }
+                else
+                {
+                    Shutdown();
+                }
+            }
+            catch
+            {
+                Shutdown();
+            }
+        }
+
+        private static bool AcquireSingleInstance()
+        {
+            try
+            {
+                _singleInstanceMutex = new Mutex(true, SingleInstanceMutexName, out _ownsSingleInstanceMutex);
+                if (_ownsSingleInstanceMutex)
+                {
+                    return true;
+                }
+
+                BringExistingInstanceToFront();
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private static void ReleaseSingleInstance()
+        {
+            try
+            {
+                if (_ownsSingleInstanceMutex && _singleInstanceMutex != null)
+                {
+                    _singleInstanceMutex.ReleaseMutex();
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                try
+                {
+                    _singleInstanceMutex?.Dispose();
+                }
+                catch
+                {
+                }
+
+                _singleInstanceMutex = null;
+                _ownsSingleInstanceMutex = false;
+            }
+        }
+
+        private static void BringExistingInstanceToFront()
+        {
+            try
+            {
+                var current = Process.GetCurrentProcess();
+                var existing = Process.GetProcessesByName(current.ProcessName)
+                    .FirstOrDefault(process => process.Id != current.Id);
+
+                if (existing == null)
+                {
+                    return;
+                }
+
+                existing.Refresh();
+                var handle = existing.MainWindowHandle;
+                if (handle == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                NativeMethods.ShowWindowAsync(handle, NativeMethods.SW_RESTORE);
+                NativeMethods.ShowWindowAsync(handle, NativeMethods.SW_SHOW);
+                NativeMethods.SetForegroundWindow(handle);
+            }
+            catch
+            {
+            }
+        }
+
+        private void InitializeTrayIcon()
+        {
+            try
+            {
+                if (_trayIcon != null)
+                {
+                    return;
+                }
+
+                var icon = LoadTrayIcon();
+                if (icon == null)
+                {
+                    return;
+                }
+
+                var menu = new Forms.ContextMenuStrip();
+                menu.Items.Add("Open", null, (_, __) => RestoreMainWindow());
+                menu.Items.Add("Exit", null, (_, __) => RequestExit());
+
+                _trayIcon = new Forms.NotifyIcon
+                {
+                    Icon = icon,
+                    Text = "Awagaman ERP",
+                    Visible = true,
+                    ContextMenuStrip = menu
+                };
+
+                _trayIcon.DoubleClick += (_, __) => RestoreMainWindow();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogException("InitializeTrayIcon", ex);
+            }
+        }
+
+        private Drawing.Icon LoadTrayIcon()
+        {
+            try
+            {
+                var iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logo.ico");
+                if (!File.Exists(iconPath))
+                {
+                    iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Awagaman ERP.exe");
+                }
+
+                if (!File.Exists(iconPath))
+                {
+                    return null;
+                }
+
+                return new Drawing.Icon(iconPath);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void DisposeTrayIcon()
+        {
+            try
+            {
+                if (_trayIcon == null)
+                {
+                    return;
+                }
+
+                _trayIcon.Visible = false;
+                _trayIcon.Dispose();
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _trayIcon = null;
+            }
+        }
+
+        private void AttachMainWindowHooks(Window window)
+        {
+            if (window == null)
+            {
+                return;
+            }
+
+            window.Closing += MainWindow_Closing;
+            window.StateChanged += MainWindow_StateChanged;
+        }
+
+        private void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            if (_allowRealShutdown)
+            {
+                return;
+            }
+
+            e.Cancel = true;
+            HideMainWindowToTray();
+        }
+
+        private void MainWindow_StateChanged(object sender, EventArgs e)
+        {
+            var window = sender as Window;
+            if (window == null || window.WindowState != WindowState.Minimized)
+            {
+                return;
+            }
+
+            HideMainWindowToTray();
+        }
+
+        private void HideMainWindowToTray()
+        {
+            try
+            {
+                if (MainWindow == null)
+                {
+                    return;
+                }
+
+                if (MainWindow.WindowState != WindowState.Minimized)
+                {
+                    _restoreWindowState = MainWindow.WindowState;
+                }
+
+                MainWindow.ShowInTaskbar = false;
+                MainWindow.Hide();
+                if (_trayIcon != null && !_trayHintShown)
+                {
+                    _trayIcon.ShowBalloonTip(2000, "Awagaman ERP", "App is still running in the tray.", Forms.ToolTipIcon.Info);
+                    _trayHintShown = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogException("HideMainWindowToTray", ex);
+            }
+        }
+
+        private void RestoreMainWindow()
+        {
+            try
+            {
+                if (MainWindow == null)
+                {
+                    return;
+                }
+
+                if (!MainWindow.IsVisible)
+                {
+                    MainWindow.Show();
+                }
+
+                MainWindow.ShowInTaskbar = true;
+                MainWindow.WindowState = _restoreWindowState == WindowState.Minimized
+                    ? WindowState.Normal
+                    : _restoreWindowState;
+                MainWindow.Activate();
+                MainWindow.Focus();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogException("RestoreMainWindow", ex);
+            }
         }
 
         private static void TryRegisterSyncfusionLicense()
@@ -324,6 +610,13 @@ namespace Awagaman_ERP
             {
                 try
                 {
+                    var app = Application.Current as App;
+                    if (app != null)
+                    {
+                        app.RequestExit();
+                        return;
+                    }
+
                     Application.Current?.Shutdown();
                 }
                 catch
@@ -404,6 +697,20 @@ namespace Awagaman_ERP
             Version v;
             if (Version.TryParse(raw, out v)) return v;
             return null;
+        }
+
+        private static class NativeMethods
+        {
+            internal const int SW_RESTORE = 9;
+            internal const int SW_SHOW = 5;
+
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            internal static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            internal static extern bool SetForegroundWindow(IntPtr hWnd);
         }
     }
 }

@@ -40,12 +40,14 @@ public class LREntry
     public string? BillNo { get; set; }
     public DateTime? BillDate { get; set; }
     public decimal BILL { get; set; }
+    public decimal ChallanLorryHire { get; set; }
     public string? BillParty { get; set; }
     public string? Broker { get; set; }
     public string? FrtType { get; set; }
     public string? PayType { get; set; }
     public decimal Comm { get; set; }
     public string? Paid { get; set; }
-    public decimal TotalBill => TotalFreight + Detention + Hamali + Others + StCharge;
+    public bool PreserveImportedBilling { get; set; }
+    public decimal TotalBill => PreserveImportedBilling ? BILL : (TotalFreight + Detention + Hamali + Others + StCharge);
     public decimal Bal => (NEFT + CASH) - TDS + Ded;
 }

@@ -20,8 +20,7 @@ namespace Awagaman_ERP.Data
             {
                 billNo = (billNo ?? string.Empty).Trim();
                 if (billNo.Length == 0) return new List<BillReceiptEntry>();
-                return RemoteApiClient.GetList<BillReceiptEntry>("api/bill-receipts")
-                    .FindAll(x => string.Equals((x.BillNo ?? string.Empty).Trim(), billNo, StringComparison.OrdinalIgnoreCase))
+                return RemoteApiClient.GetList<BillReceiptEntry>($"api/bill-receipts?billNo={RemoteApiClient.UrlEncode(billNo)}")
                     .OrderBy(x => x.ReceiptDate)
                     .ThenBy(x => x.Id)
                     .ToList();

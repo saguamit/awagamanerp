@@ -100,7 +100,8 @@ CREATE TABLE IF NOT EXISTS Challans (
     PaidTo TEXT,
     Remarks TEXT,
     BillAmount REAL NOT NULL,
-    Margin REAL NOT NULL
+    Margin REAL NOT NULL,
+    PreserveImportedBilling INTEGER NOT NULL DEFAULT 0
 );");
 
                     ExecuteNonQuery(connection, @"
@@ -140,15 +141,18 @@ CREATE TABLE IF NOT EXISTS ChallanLedgerEntries (
     PaidTo TEXT,
     Remarks TEXT,
     BillAmount REAL NOT NULL,
-    Margin REAL NOT NULL
+    Margin REAL NOT NULL,
+    PreserveImportedBilling INTEGER NOT NULL DEFAULT 0
 );");
 
                     // Add Balance/Due columns for existing databases only when missing.
                     TryAddColumn(connection, "Challans", "OtherAmount", "REAL NOT NULL DEFAULT 0", "EnsureInitialized.Challans.OtherAmount");
                     TryAddColumn(connection, "Challans", "ImportedBalance", "REAL", "EnsureInitialized.Challans.ImportedBalance");
                     TryAddColumn(connection, "Challans", "ImportedDue", "REAL", "EnsureInitialized.Challans.ImportedDue");
+                    TryAddColumn(connection, "Challans", "PreserveImportedBilling", "INTEGER NOT NULL DEFAULT 0", "EnsureInitialized.Challans.PreserveImportedBilling");
                     TryAddColumn(connection, "ChallanLedgerEntries", "SourcePurchaseId", "INTEGER", "EnsureInitialized.ChallanLedgerEntries.SourcePurchaseId");
                     TryAddColumn(connection, "ChallanLedgerEntries", "OtherAmount", "REAL NOT NULL DEFAULT 0", "EnsureInitialized.ChallanLedgerEntries.OtherAmount");
+                    TryAddColumn(connection, "ChallanLedgerEntries", "PreserveImportedBilling", "INTEGER NOT NULL DEFAULT 0", "EnsureInitialized.ChallanLedgerEntries.PreserveImportedBilling");
 
                     ExecuteNonQuery(connection, @"
 CREATE TABLE IF NOT EXISTS LREntries (
@@ -186,16 +190,18 @@ CREATE TABLE IF NOT EXISTS LREntries (
     NEFT REAL NOT NULL,
     CASH REAL NOT NULL,
     TDS REAL NOT NULL DEFAULT 0,
-    Ded REAL NOT NULL DEFAULT 0,
-    BillNo TEXT,
-    BillDate TEXT NULL,
-    BILL REAL NOT NULL,
-    BillParty TEXT,
-    Broker TEXT,
+      Ded REAL NOT NULL DEFAULT 0,
+      BillNo TEXT,
+      BillDate TEXT NULL,
+      BILL REAL NOT NULL,
+      ChallanLorryHire REAL NOT NULL DEFAULT 0,
+      BillParty TEXT,
+      Broker TEXT,
     FrtType TEXT,
     PayType TEXT,
     Comm REAL NOT NULL,
-    Paid TEXT
+    Paid TEXT,
+    PreserveImportedBilling INTEGER NOT NULL DEFAULT 0
 );");
 
                     ExecuteNonQuery(connection, @"
@@ -217,6 +223,8 @@ CREATE TABLE IF NOT EXISTS TrackingEntries (
 
                     // The CREATE TABLE already includes the current LR columns.
                     // Only add future migration columns here, and only if they are missing.
+                    TryAddColumn(connection, "LREntries", "PreserveImportedBilling", "INTEGER NOT NULL DEFAULT 0", "EnsureInitialized.LREntries.PreserveImportedBilling");
+                    TryAddColumn(connection, "LREntries", "ChallanLorryHire", "REAL NOT NULL DEFAULT 0", "EnsureInitialized.LREntries.ChallanLorryHire");
 
                     ExecuteNonQuery(connection, @"
 CREATE TABLE IF NOT EXISTS ReportingTracks (

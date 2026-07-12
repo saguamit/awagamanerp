@@ -79,6 +79,34 @@ namespace Awagaman_ERP.Data
             return list;
         }
 
+        public List<BillEntry> GetByBillNo(string billNo)
+        {
+            billNo = (billNo ?? string.Empty).Trim();
+            if (billNo.Length == 0) return new List<BillEntry>();
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetRemotePage(1, 500, billNo, "billno", false).Items
+                    .Where(x => string.Equals((x.BillNo ?? string.Empty).Trim(), billNo, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(x => x.Id)
+                    .ToList();
+            }
+
+            var list = new List<BillEntry>();
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand(@"
+SELECT * FROM Bills
+WHERE TRIM(COALESCE(BillNo,'')) = @billNo
+ORDER BY Id ASC;", c))
+            {
+                cmd.Parameters.AddWithValue("@billNo", billNo);
+                c.Open();
+                using (var r = cmd.ExecuteReader())
+                    while (r.Read()) list.Add(MapReader(r));
+            }
+            return list;
+        }
+
         public List<BillEntry> Search(string filter, int pageNumber, int pageSize, string sortColumn = "", bool sortAscending = true)
         {
             if (BackendSettings.UseRemoteApi)
@@ -90,7 +118,10 @@ namespace Awagaman_ERP.Data
             string orderBy = BuildOrderBy(sortColumn, sortAscending);
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand(
-                $"SELECT * FROM Bills WHERE BillNo LIKE @f OR Party LIKE @f OR LRNo LIKE @f OR FromLoc LIKE @f OR ToLoc LIKE @f OR MR LIKE @f OR Remarks LIKE @f ORDER BY {orderBy} LIMIT @lim OFFSET @off;", c))
+                $@"SELECT * FROM Bills
+WHERE BillNo LIKE @f OR Party LIKE @f OR LRNo LIKE @f OR FromLoc LIKE @f OR ToLoc LIKE @f
+   OR VehicleType LIKE @f OR MOP LIKE @f OR MR LIKE @f OR Remarks LIKE @f
+ORDER BY {orderBy} LIMIT @lim OFFSET @off;", c))
             {
                 cmd.Parameters.AddWithValue("@f", $"%{filter}%");
                 cmd.Parameters.AddWithValue("@lim", pageSize);
@@ -118,7 +149,8 @@ namespace Awagaman_ERP.Data
             {
                 if (!string.IsNullOrWhiteSpace(filter))
                 {
-                    conditions.Add("(BillNo LIKE @f OR Party LIKE @f OR LRNo LIKE @f OR FromLoc LIKE @f OR ToLoc LIKE @f OR MR LIKE @f OR Remarks LIKE @f)");
+                    conditions.Add(@"(BillNo LIKE @f OR Party LIKE @f OR LRNo LIKE @f OR FromLoc LIKE @f OR ToLoc LIKE @f
+   OR VehicleType LIKE @f OR MOP LIKE @f OR MR LIKE @f OR Remarks LIKE @f)");
                     cmd.Parameters.AddWithValue("@f", $"%{filter}%");
                 }
                 if (!string.IsNullOrWhiteSpace(party))
@@ -177,7 +209,9 @@ namespace Awagaman_ERP.Data
             using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var cmd = new SQLiteCommand(
                 string.IsNullOrWhiteSpace(filter) ? "SELECT COUNT(*) FROM Bills;"
-                : "SELECT COUNT(*) FROM Bills WHERE BillNo LIKE @f OR Party LIKE @f OR LRNo LIKE @f OR FromLoc LIKE @f OR ToLoc LIKE @f OR MR LIKE @f OR Remarks LIKE @f;", c))
+                : @"SELECT COUNT(*) FROM Bills
+WHERE BillNo LIKE @f OR Party LIKE @f OR LRNo LIKE @f OR FromLoc LIKE @f OR ToLoc LIKE @f
+   OR VehicleType LIKE @f OR MOP LIKE @f OR MR LIKE @f OR Remarks LIKE @f;", c))
             {
                 if (!string.IsNullOrWhiteSpace(filter)) cmd.Parameters.AddWithValue("@f", $"%{filter}%");
                 c.Open();
@@ -315,11 +349,17 @@ namespace Awagaman_ERP.Data
                 case "billno":
                     return $@"
 CASE
-    WHEN INSTR(BillNo, '/') > 0 THEN SUBSTR(BillNo, INSTR(BillNo, '/') + 1)
-    ELSE ''
+    WHEN CAST(STRFTIME('%m', BillDate) AS INTEGER) >= 4 THEN CAST(STRFTIME('%Y', BillDate) AS INTEGER)
+    ELSE CAST(STRFTIME('%Y', BillDate) AS INTEGER) - 1
 END {d},
 CASE
-    WHEN INSTR(BillNo, '/') > 0 THEN CAST(SUBSTR(BillNo, 1, INSTR(BillNo, '/') - 1) AS INTEGER)
+    WHEN INSTR(BillNo, '/') > 0 THEN
+        CASE
+            WHEN CAST(TRIM(SUBSTR(BillNo, INSTR(BillNo, '/') + 1)) AS INTEGER) > 0
+                 OR TRIM(SUBSTR(BillNo, INSTR(BillNo, '/') + 1)) = '0'
+                THEN CAST(TRIM(SUBSTR(BillNo, INSTR(BillNo, '/') + 1)) AS INTEGER)
+            ELSE CAST(TRIM(SUBSTR(BillNo, 1, INSTR(BillNo, '/') - 1)) AS INTEGER)
+        END
     ELSE CAST(BillNo AS INTEGER)
 END {d},
 BillNo {d}, Sr, Id";
@@ -387,6 +427,8 @@ LRNo {d}, Sr, Id";
                     Contains(e.LRNo, filter) ||
                     Contains(e.From, filter) ||
                     Contains(e.To, filter) ||
+                    Contains(e.VehicleType, filter) ||
+                    Contains(e.MOP, filter) ||
                     Contains(e.MR, filter) ||
                     Contains(e.Remarks, filter));
                 if (!string.IsNullOrWhiteSpace(party))

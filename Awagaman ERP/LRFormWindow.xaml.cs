@@ -121,12 +121,14 @@ namespace Awagaman_ERP
                     BillNo = entryToEdit.BillNo,
                     BillDate = entryToEdit.BillDate,
                     BILL = entryToEdit.BILL,
+                    ChallanLorryHire = entryToEdit.ChallanLorryHire,
                     BillParty = entryToEdit.BillParty,
                     Broker = entryToEdit.Broker,
                     FrtType = entryToEdit.FrtType,
                     PayType = entryToEdit.PayType,
                     Comm = entryToEdit.Comm,
-                    Paid = entryToEdit.Paid
+                    Paid = entryToEdit.Paid,
+                    PreserveImportedBilling = entryToEdit.PreserveImportedBilling
                 };
             }
             else
@@ -251,6 +253,11 @@ namespace Awagaman_ERP
         {
             try
             {
+                if (CurrentEntry?.PreserveImportedBilling == true)
+                {
+                    return;
+                }
+
                 var challan = FindChallanByNumber(CurrentEntry?.CHNo);
                 if (challan == null) return;
 
@@ -268,6 +275,12 @@ namespace Awagaman_ERP
 
         private void RefreshChallanLorryHire(bool clearWhenMissing)
         {
+            if (CurrentEntry?.PreserveImportedBilling == true)
+            {
+                ChallanLorryHire = CurrentEntry.ChallanLorryHire;
+                return;
+            }
+
             var challan = FindChallanByNumber(CurrentEntry?.CHNo);
             if (challan != null)
             {

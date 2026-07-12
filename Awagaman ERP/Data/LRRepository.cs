@@ -76,7 +76,15 @@ namespace Awagaman_ERP.Data
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = $"SELECT * FROM LREntries WHERE LRNo LIKE @f OR ConsignorName LIKE @f OR ConsigneeName LIKE @f OR VehicleNo LIKE @f OR BillNo LIKE @f OR CHNo LIKE @f ORDER BY {orderBy} LIMIT @limit OFFSET @offset;";
+                command.CommandText = $@"SELECT * FROM LREntries
+WHERE LRNo LIKE @f OR ConsignorName LIKE @f OR ConsignorAddress LIKE @f OR ConsignorGST LIKE @f
+   OR ConsigneeName LIKE @f OR ConsigneeAddress LIKE @f OR ConsigneeGST LIKE @f
+   OR FromLocation LIKE @f OR ToLocation LIKE @f
+   OR VehicleNo LIKE @f OR VehicleType LIKE @f
+   OR PkgType LIKE @f OR Description LIKE @f OR Invoice LIKE @f OR Value LIKE @f
+   OR BillNo LIKE @f OR BillParty LIKE @f OR Broker LIKE @f OR FrtType LIKE @f OR PayType LIKE @f OR Paid LIKE @f
+   OR CHNo LIKE @f
+ORDER BY {orderBy} LIMIT @limit OFFSET @offset;";
                 command.Parameters.AddWithValue("@f", $"%{searchFilter}%");
                 command.Parameters.AddWithValue("@limit", pageSize);
                 command.Parameters.AddWithValue("@offset", offset);
@@ -102,7 +110,14 @@ namespace Awagaman_ERP.Data
                     command.CommandText = "SELECT COUNT(*) FROM LREntries;";
                 else
                 {
-                    command.CommandText = "SELECT COUNT(*) FROM LREntries WHERE LRNo LIKE @f OR ConsignorName LIKE @f OR ConsigneeName LIKE @f OR VehicleNo LIKE @f OR BillNo LIKE @f OR CHNo LIKE @f;";
+                    command.CommandText = @"SELECT COUNT(*) FROM LREntries
+WHERE LRNo LIKE @f OR ConsignorName LIKE @f OR ConsignorAddress LIKE @f OR ConsignorGST LIKE @f
+   OR ConsigneeName LIKE @f OR ConsigneeAddress LIKE @f OR ConsigneeGST LIKE @f
+   OR FromLocation LIKE @f OR ToLocation LIKE @f
+   OR VehicleNo LIKE @f OR VehicleType LIKE @f
+   OR PkgType LIKE @f OR Description LIKE @f OR Invoice LIKE @f OR Value LIKE @f
+   OR BillNo LIKE @f OR BillParty LIKE @f OR Broker LIKE @f OR FrtType LIKE @f OR PayType LIKE @f OR Paid LIKE @f
+   OR CHNo LIKE @f;";
                     command.Parameters.AddWithValue("@f", $"%{searchFilter}%");
                 }
                 connection.Open();
@@ -142,7 +157,13 @@ namespace Awagaman_ERP.Data
                 else
                 {
                     command.CommandText = @"SELECT COALESCE(SUM(TotalFreight), 0) FROM LREntries
-WHERE LRNo LIKE @f OR ConsignorName LIKE @f OR ConsigneeName LIKE @f OR VehicleNo LIKE @f OR BillNo LIKE @f OR CHNo LIKE @f;";
+WHERE LRNo LIKE @f OR ConsignorName LIKE @f OR ConsignorAddress LIKE @f OR ConsignorGST LIKE @f
+   OR ConsigneeName LIKE @f OR ConsigneeAddress LIKE @f OR ConsigneeGST LIKE @f
+   OR FromLocation LIKE @f OR ToLocation LIKE @f
+   OR VehicleNo LIKE @f OR VehicleType LIKE @f
+   OR PkgType LIKE @f OR Description LIKE @f OR Invoice LIKE @f OR Value LIKE @f
+   OR BillNo LIKE @f OR BillParty LIKE @f OR Broker LIKE @f OR FrtType LIKE @f OR PayType LIKE @f OR Paid LIKE @f
+   OR CHNo LIKE @f;";
                     command.Parameters.AddWithValue("@f", $"%{searchFilter}%");
                 }
 
@@ -183,7 +204,13 @@ WHERE LRNo LIKE @f OR ConsignorName LIKE @f OR ConsigneeName LIKE @f OR VehicleN
                 else
                 {
                     command.CommandText = @"SELECT COALESCE(SUM((NEFT + CASH - TDS + Ded)), 0) FROM LREntries
-WHERE LRNo LIKE @f OR ConsignorName LIKE @f OR ConsigneeName LIKE @f OR VehicleNo LIKE @f OR BillNo LIKE @f OR CHNo LIKE @f;";
+WHERE LRNo LIKE @f OR ConsignorName LIKE @f OR ConsignorAddress LIKE @f OR ConsignorGST LIKE @f
+   OR ConsigneeName LIKE @f OR ConsigneeAddress LIKE @f OR ConsigneeGST LIKE @f
+   OR FromLocation LIKE @f OR ToLocation LIKE @f
+   OR VehicleNo LIKE @f OR VehicleType LIKE @f
+   OR PkgType LIKE @f OR Description LIKE @f OR Invoice LIKE @f OR Value LIKE @f
+   OR BillNo LIKE @f OR BillParty LIKE @f OR Broker LIKE @f OR FrtType LIKE @f OR PayType LIKE @f OR Paid LIKE @f
+   OR CHNo LIKE @f;";
                     command.Parameters.AddWithValue("@f", $"%{searchFilter}%");
                 }
 
@@ -203,6 +230,112 @@ WHERE LRNo LIKE @f OR ConsignorName LIKE @f OR ConsigneeName LIKE @f OR VehicleN
             {
                 connection.Open();
                 return Convert.ToInt32(command.ExecuteScalar());
+            }
+        }
+
+        public List<LREntry> GetByLRNumbers(IEnumerable<string> lrNumbers)
+        {
+            var keys = (lrNumbers ?? Enumerable.Empty<string>())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (keys.Count == 0) return new List<LREntry>();
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                var lookup = new HashSet<string>(keys, StringComparer.OrdinalIgnoreCase);
+                return GetAllRemoteSafe()
+                    .Where(x => x != null && lookup.Contains((x.LRNo ?? string.Empty).Trim()))
+                    .OrderBy(x => x.Id)
+                    .ToList();
+            }
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = connection.CreateCommand())
+            {
+                var paramNames = keys.Select((_, i) => "@lr" + i).ToList();
+                command.CommandText = $"SELECT * FROM LREntries WHERE TRIM(COALESCE(LRNo,'')) IN ({string.Join(",", paramNames)}) ORDER BY Id;";
+                for (var i = 0; i < keys.Count; i++)
+                {
+                    command.Parameters.AddWithValue(paramNames[i], keys[i]);
+                }
+
+                var list = new List<LREntry>();
+                connection.Open();
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read()) list.Add(ReadEntry(reader));
+                }
+                return list;
+            }
+        }
+
+        public List<LREntry> GetByChallanNumbers(IEnumerable<string> challanNumbers)
+        {
+            var keys = (challanNumbers ?? Enumerable.Empty<string>())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (keys.Count == 0) return new List<LREntry>();
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                var lookup = new HashSet<string>(keys, StringComparer.OrdinalIgnoreCase);
+                return GetAllRemoteSafe()
+                    .Where(x => x != null && lookup.Contains((x.CHNo ?? string.Empty).Trim()))
+                    .OrderBy(x => x.Id)
+                    .ToList();
+            }
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = connection.CreateCommand())
+            {
+                var paramNames = keys.Select((_, i) => "@ch" + i).ToList();
+                command.CommandText = $"SELECT * FROM LREntries WHERE TRIM(COALESCE(CHNo,'')) IN ({string.Join(",", paramNames)}) ORDER BY Id;";
+                for (var i = 0; i < keys.Count; i++)
+                {
+                    command.Parameters.AddWithValue(paramNames[i], keys[i]);
+                }
+
+                var list = new List<LREntry>();
+                connection.Open();
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read()) list.Add(ReadEntry(reader));
+                }
+                return list;
+            }
+        }
+
+        public List<LREntry> GetByBillNo(string billNo)
+        {
+            billNo = (billNo ?? string.Empty).Trim();
+            if (billNo.Length == 0) return new List<LREntry>();
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetRemotePage(1, 500, billNo, "billno", false).Items
+                    .Where(x => string.Equals((x.BillNo ?? string.Empty).Trim(), billNo, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(x => x.Id)
+                    .ToList();
+            }
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = new SQLiteCommand(@"
+SELECT * FROM LREntries
+WHERE TRIM(COALESCE(BillNo,'')) = @billNo
+ORDER BY Id;", connection))
+            {
+                command.Parameters.AddWithValue("@billNo", billNo);
+                var list = new List<LREntry>();
+                connection.Open();
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read()) list.Add(ReadEntry(reader));
+                }
+                return list;
             }
         }
 
@@ -247,12 +380,14 @@ WHERE LRNo LIKE @f OR ConsignorName LIKE @f OR ConsigneeName LIKE @f OR VehicleN
                 BillNo = reader["BillNo"] as string,
                 BillDate = ParseNullableDate(reader["BillDate"]),
                 BILL = Convert.ToDecimal(reader["BILL"]),
+                ChallanLorryHire = Convert.ToDecimal(reader["ChallanLorryHire"]),
                 BillParty = reader["BillParty"] as string,
                 Broker = reader["Broker"] as string,
                 FrtType = reader["FrtType"] as string,
                 PayType = reader["PayType"] as string,
                 Comm = Convert.ToDecimal(reader["Comm"]),
-                Paid = reader["Paid"] as string
+                Paid = reader["Paid"] as string,
+                PreserveImportedBilling = GetBoolean(reader, "PreserveImportedBilling")
             };
         }
 
@@ -288,12 +423,12 @@ INSERT INTO LREntries (
     Sr, LRNo, Date, ConsignorName, ConsignorAddress, ConsignorGST,
     ConsigneeName, ConsigneeAddress, ConsigneeGST, FromLocation, ToLocation,
     VehicleNo, VehicleType, Weight, SizeL, SizeW, SizeH, ActualWeight, ChargedWeight, PKG, PkgType, Description, Invoice, Value, CHNo,
-    TotalFreight, Hamali, Detention, Others, StCharge, NEFT, CASH, TDS, Ded, BillNo, BillDate, BILL, BillParty, Broker, FrtType, PayType, Comm, Paid
+    TotalFreight, Hamali, Detention, Others, StCharge, NEFT, CASH, TDS, Ded, BillNo, BillDate, BILL, ChallanLorryHire, BillParty, Broker, FrtType, PayType, Comm, Paid, PreserveImportedBilling
 ) VALUES (
     @Sr, @LRNo, @Date, @ConsignorName, @ConsignorAddress, @ConsignorGST,
     @ConsigneeName, @ConsigneeAddress, @ConsigneeGST, @FromLocation, @ToLocation,
     @VehicleNo, @VehicleType, @Weight, @SizeL, @SizeW, @SizeH, @ActualWeight, @ChargedWeight, @PKG, @PkgType, @Description, @Invoice, @Value, @CHNo,
-    @TotalFreight, @Hamali, @Detention, @Others, @StCharge, @NEFT, @CASH, @TDS, @Ded, @BillNo, @BillDate, @BILL, @BillParty, @Broker, @FrtType, @PayType, @Comm, @Paid
+    @TotalFreight, @Hamali, @Detention, @Others, @StCharge, @NEFT, @CASH, @TDS, @Ded, @BillNo, @BillDate, @BILL, @ChallanLorryHire, @BillParty, @Broker, @FrtType, @PayType, @Comm, @Paid, @PreserveImportedBilling
 );
 SELECT last_insert_rowid();";
                     AddParameters(command, entry);
@@ -340,12 +475,14 @@ UPDATE LREntries SET
     BillNo = @BillNo,
     BillDate = @BillDate,
     BILL = @BILL,
+    ChallanLorryHire = @ChallanLorryHire,
     BillParty = @BillParty,
     Broker = @Broker,
     FrtType = @FrtType,
     PayType = @PayType,
     Comm = @Comm,
-    Paid = @Paid
+    Paid = @Paid,
+    PreserveImportedBilling = @PreserveImportedBilling
 WHERE Id = @Id;";
                     AddParameters(command, entry);
                     command.Parameters.AddWithValue("@Id", entry.Id);
@@ -428,12 +565,38 @@ WHERE Id = @Id;";
             command.Parameters.AddWithValue("@BillNo", (object)entry.BillNo ?? DBNull.Value);
             command.Parameters.AddWithValue("@BillDate", entry.BillDate.HasValue ? (object)entry.BillDate.Value.ToString("o") : DBNull.Value);
             command.Parameters.AddWithValue("@BILL", entry.BILL);
+            command.Parameters.AddWithValue("@ChallanLorryHire", entry.ChallanLorryHire);
             command.Parameters.AddWithValue("@BillParty", (object)entry.BillParty ?? DBNull.Value);
             command.Parameters.AddWithValue("@Broker", (object)entry.Broker ?? DBNull.Value);
             command.Parameters.AddWithValue("@FrtType", (object)entry.FrtType ?? DBNull.Value);
             command.Parameters.AddWithValue("@PayType", (object)entry.PayType ?? DBNull.Value);
             command.Parameters.AddWithValue("@Comm", entry.Comm);
             command.Parameters.AddWithValue("@Paid", (object)entry.Paid ?? DBNull.Value);
+            command.Parameters.AddWithValue("@PreserveImportedBilling", entry.PreserveImportedBilling ? 1 : 0);
+        }
+
+        private static bool GetBoolean(SQLiteDataReader reader, string columnName)
+        {
+            try
+            {
+                var ordinal = reader.GetOrdinal(columnName);
+                if (reader.IsDBNull(ordinal))
+                {
+                    return false;
+                }
+
+                var value = reader.GetValue(ordinal);
+                if (value is bool boolValue)
+                {
+                    return boolValue;
+                }
+
+                return Convert.ToInt32(value) != 0;
+            }
+            catch (IndexOutOfRangeException)
+            {
+                return false;
+            }
         }
 
         private static DateTime ParseDate(object value, DateTime fallback)
@@ -650,9 +813,25 @@ LRNo {dir}, Sr, Id";
 
             return Contains(entry.LRNo, searchFilter) ||
                    Contains(entry.ConsignorName, searchFilter) ||
+                   Contains(entry.ConsignorAddress, searchFilter) ||
+                   Contains(entry.ConsignorGST, searchFilter) ||
                    Contains(entry.ConsigneeName, searchFilter) ||
+                   Contains(entry.ConsigneeAddress, searchFilter) ||
+                   Contains(entry.ConsigneeGST, searchFilter) ||
+                   Contains(entry.From, searchFilter) ||
+                   Contains(entry.To, searchFilter) ||
                    Contains(entry.VehicleNo, searchFilter) ||
+                   Contains(entry.VehicleType, searchFilter) ||
+                   Contains(entry.PkgType, searchFilter) ||
+                   Contains(entry.Description, searchFilter) ||
+                   Contains(entry.Invoice, searchFilter) ||
+                   Contains(entry.Value, searchFilter) ||
                    Contains(entry.BillNo, searchFilter) ||
+                   Contains(entry.BillParty, searchFilter) ||
+                   Contains(entry.Broker, searchFilter) ||
+                   Contains(entry.FrtType, searchFilter) ||
+                   Contains(entry.PayType, searchFilter) ||
+                   Contains(entry.Paid, searchFilter) ||
                    Contains(entry.CHNo, searchFilter);
         }
     }

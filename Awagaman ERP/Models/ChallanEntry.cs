@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Linq;
 using System.Runtime.CompilerServices;
 
 namespace Awagaman_ERP.Models
@@ -45,6 +46,7 @@ namespace Awagaman_ERP.Models
         private decimal _margin;
         private decimal? _importedBalance;
         private decimal? _importedDue;
+        private bool _preserveImportedBilling;
         private int? _sourcePurchaseId;
 
         public int Id { get => _id; set { _id = value; OnPropertyChanged(); } }
@@ -280,6 +282,7 @@ namespace Awagaman_ERP.Models
         public string Remarks { get => _remarks; set { _remarks = value; OnPropertyChanged(); } }
         public decimal BillAmount { get => _billAmount; set { _billAmount = value; OnPropertyChanged(); } }
         public decimal Margin { get => _margin; set { _margin = value; OnPropertyChanged(); } }
+        public bool PreserveImportedBilling { get => _preserveImportedBilling; set { _preserveImportedBilling = value; OnPropertyChanged(); } }
         public int? SourcePurchaseId { get => _sourcePurchaseId; set { _sourcePurchaseId = value; OnPropertyChanged(); } }
 
         [System.Xml.Serialization.XmlIgnore]
@@ -305,9 +308,8 @@ namespace Awagaman_ERP.Models
         {
             get
             {
-                if (string.IsNullOrWhiteSpace(LRNumber)) return "";
-                var parts = LRNumber.Split(new[] { ',', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                return parts.Length > 0 ? parts[0].Trim() : "";
+                var parts = SplitDisplayedLrNumbers(LRNumber);
+                return parts.Length > 0 ? parts[0] : "";
             }
         }
 
@@ -316,8 +318,7 @@ namespace Awagaman_ERP.Models
         {
             get
             {
-                if (string.IsNullOrWhiteSpace(LRNumber)) return "";
-                var parts = LRNumber.Split(new[] { ',', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                var parts = SplitDisplayedLrNumbers(LRNumber);
                 return parts.Length > 1 ? $"(+{parts.Length - 1})" : "";
             }
         }
@@ -327,9 +328,8 @@ namespace Awagaman_ERP.Models
         {
             get
             {
-                if (string.IsNullOrWhiteSpace(LRNumber)) return "";
-                var parts = LRNumber.Split(new[] { ',', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                return string.Join("\n", System.Linq.Enumerable.Select(parts, p => p.Trim()));
+                var parts = SplitDisplayedLrNumbers(LRNumber);
+                return parts.Length == 0 ? "" : string.Join("\n", parts);
             }
         }
 
@@ -338,11 +338,25 @@ namespace Awagaman_ERP.Models
         {
             get
             {
-                if (string.IsNullOrWhiteSpace(LRNumber)) return "";
-                var parts = LRNumber.Split(new[] { ',', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                var parts = SplitDisplayedLrNumbers(LRNumber);
                 if (parts.Length <= 1) return "";
-                return string.Join("\n", System.Linq.Enumerable.Select(System.Linq.Enumerable.Skip(parts, 1), p => p.Trim()));
+                return string.Join("\n", System.Linq.Enumerable.Skip(parts, 1));
             }
+        }
+
+        private static string[] SplitDisplayedLrNumbers(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return Array.Empty<string>();
+            }
+
+            return raw
+                .Split(new[] { ',', ';', '\n', '\r', '\t', ' ' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => (part ?? string.Empty).Trim())
+                .Where(part => !string.IsNullOrWhiteSpace(part))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
         }
 
         public void RecalculateBalance()
@@ -425,6 +439,7 @@ namespace Awagaman_ERP.Models
                 Margin = Margin,
                 ImportedBalance = ImportedBalance,
                 ImportedDue = ImportedDue,
+                PreserveImportedBilling = PreserveImportedBilling,
                 SourcePurchaseId = SourcePurchaseId
             };
             copy.Balance = Balance;

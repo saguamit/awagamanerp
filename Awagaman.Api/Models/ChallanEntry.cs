@@ -39,6 +39,7 @@ public class ChallanEntry
     public decimal Margin { get; set; }
     public decimal? ImportedBalance { get; set; }
     public decimal? ImportedDue { get; set; }
+    public bool PreserveImportedBilling { get; set; }
     public int? SourcePurchaseId { get; set; }
     public decimal LHS => LorryHire + Other;
     public decimal Balance => ImportedBalance ?? (LorryHire - LessTDS - AdvanceAmount);
