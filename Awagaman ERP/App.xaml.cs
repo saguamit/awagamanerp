@@ -12,6 +12,7 @@ using System.Windows;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
+using System.Web.Script.Serialization;
 using Forms = System.Windows.Forms;
 using Drawing = System.Drawing;
 using Awagaman_ERP.Data;
@@ -742,14 +743,20 @@ namespace Awagaman_ERP
         private static async Task<ReleaseInfo> GetLatestReleaseAsync()
         {
             const string apiUrl = "https://api.github.com/repos/saguamit/awagamanerp/releases/latest";
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
             using (var client = new HttpClient())
             {
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("AwagamanERP-Updater");
                 client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
                 var json = await client.GetStringAsync(apiUrl).ConfigureAwait(false);
+                var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+                var payload = serializer.DeserializeObject(json) as Dictionary<string, object>;
+                if (payload == null) return null;
 
-                var tag = MatchValue(json, "\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
-                var version = ParseVersion(tag);
+                object rawTag;
+                if (!payload.TryGetValue("tag_name", out rawTag)) return null;
+
+                var version = ParseVersion(Convert.ToString(rawTag));
                 if (version == null) return null;
 
                 string downloadUrl = null;
@@ -757,34 +764,44 @@ namespace Awagaman_ERP
                 string setupDownloadUrl = null;
                 string setupAssetName = null;
 
-                var assetMatches = Regex.Matches(json, "\"name\"\\s*:\\s*\"([^\"]+)\".*?\"browser_download_url\"\\s*:\\s*\"([^\"]+)\"", RegexOptions.Singleline);
-                foreach (Match assetMatch in assetMatches)
+                object assetsObject;
+                if (payload.TryGetValue("assets", out assetsObject))
                 {
-                    var name = assetMatch.Groups[1].Value;
-                    var url = assetMatch.Groups[2].Value;
-                    if (string.IsNullOrWhiteSpace(name) ||
-                        string.IsNullOrWhiteSpace(url) ||
-                        !(name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)))
+                    var assets = assetsObject as object[];
+                    if (assets != null)
                     {
-                        continue;
-                    }
+                        foreach (var assetObject in assets)
+                        {
+                            var asset = assetObject as Dictionary<string, object>;
+                            if (asset == null) continue;
 
-                    if (name.IndexOf("update", StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        downloadUrl = url;
-                        assetName = name;
-                        break;
-                    }
+                            var name = Convert.ToString(asset.ContainsKey("name") ? asset["name"] : null);
+                            var url = Convert.ToString(asset.ContainsKey("browser_download_url") ? asset["browser_download_url"] : null);
+                            if (string.IsNullOrWhiteSpace(name) ||
+                                string.IsNullOrWhiteSpace(url) ||
+                                !(name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                continue;
+                            }
 
-                    if (name.IndexOf("setup", StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        setupDownloadUrl = url;
-                        setupAssetName = name;
-                    }
-                    else if (string.IsNullOrWhiteSpace(setupDownloadUrl))
-                    {
-                        setupDownloadUrl = url;
-                        setupAssetName = name;
+                            if (name.IndexOf("update", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                downloadUrl = url;
+                                assetName = name;
+                                break;
+                            }
+
+                            if (name.IndexOf("setup", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                setupDownloadUrl = url;
+                                setupAssetName = name;
+                            }
+                            else if (string.IsNullOrWhiteSpace(setupDownloadUrl))
+                            {
+                                setupDownloadUrl = url;
+                                setupAssetName = name;
+                            }
+                        }
                     }
                 }
 
