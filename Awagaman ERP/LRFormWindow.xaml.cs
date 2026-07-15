@@ -22,6 +22,7 @@ namespace Awagaman_ERP
         private string _pendingSuggestionText;
         private ListBox _pendingSuggestionListBox;
         private Popup _pendingSuggestionPopup;
+        private bool _suppressSuggestionQueue;
         public LREntry Result { get; private set; }
         public bool WasSaved { get; private set; }
 
@@ -404,16 +405,19 @@ namespace Awagaman_ERP
 
         private void ConsignorName_TextChanged(object sender, TextChangedEventArgs e)
         {
+            if (_suppressSuggestionQueue) return;
             QueueSuggestions(ConsignorNameBox?.Text, ConsignorSuggestionList, ConsignorPopup);
         }
 
         private void ConsigneeName_TextChanged(object sender, TextChangedEventArgs e)
         {
+            if (_suppressSuggestionQueue) return;
             QueueSuggestions(ConsigneeNameBox?.Text, ConsigneeSuggestionList, ConsigneePopup);
         }
 
         private void BillPartyBox_TextChanged(object sender, TextChangedEventArgs e)
         {
+            if (_suppressSuggestionQueue) return;
             QueueSuggestions(BillPartyBox?.Text, BillPartySuggestionList, BillPartyPopup);
         }
 
@@ -481,9 +485,7 @@ namespace Awagaman_ERP
                 e.Handled = true;
                 if (list.SelectedItem is string name)
                 {
-                    box.Text = name;
-                    popup.IsOpen = false;
-                    AutoFillParty(name, onFill);
+                    ApplySuggestionValue(box, popup, name, onFill);
                 }
             }
             else if (e.Key == Key.Escape)
@@ -547,10 +549,34 @@ namespace Awagaman_ERP
             });
         }
 
+        private void ConsignorSuggestionList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            ApplySuggestionFromMouseClick(ConsignorSuggestionList, ConsignorNameBox, ConsignorPopup, e, val =>
+            {
+                if (CurrentEntry != null)
+                {
+                    CurrentEntry.ConsignorAddress = val.Address;
+                    CurrentEntry.ConsignorGST = val.GSTNo;
+                }
+            });
+        }
+
         private void ConsigneeSuggestionList_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (_ignoreSelection) return;
             ApplySuggestion(ConsigneeSuggestionList, ConsigneeNameBox, ConsigneePopup, val =>
+            {
+                if (CurrentEntry != null)
+                {
+                    CurrentEntry.ConsigneeAddress = val.Address;
+                    CurrentEntry.ConsigneeGST = val.GSTNo;
+                }
+            });
+        }
+
+        private void ConsigneeSuggestionList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            ApplySuggestionFromMouseClick(ConsigneeSuggestionList, ConsigneeNameBox, ConsigneePopup, e, val =>
             {
                 if (CurrentEntry != null)
                 {
@@ -566,13 +592,49 @@ namespace Awagaman_ERP
             ApplySuggestion(BillPartySuggestionList, BillPartyBox, BillPartyPopup, _ => { });
         }
 
+        private void BillPartySuggestionList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            ApplySuggestionFromMouseClick(BillPartySuggestionList, BillPartyBox, BillPartyPopup, e, _ => { });
+        }
+
         private void ApplySuggestion(ListBox listBox, TextBox textBox, Popup popup, Action<PartyEntry> onFill)
         {
             if (listBox.SelectedItem is string name)
             {
+                ApplySuggestionValue(textBox, popup, name, onFill);
+            }
+        }
+
+        private void ApplySuggestionFromMouseClick(ListBox listBox, TextBox textBox, Popup popup, MouseButtonEventArgs e, Action<PartyEntry> onFill)
+        {
+            var clickedItem = ItemsControl.ContainerFromElement(listBox, e.OriginalSource as DependencyObject) as ListBoxItem;
+            var name = clickedItem?.Content as string;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return;
+            }
+
+            _ignoreSelection = true;
+            listBox.SelectedItem = name;
+            _ignoreSelection = false;
+            ApplySuggestionValue(textBox, popup, name, onFill);
+            e.Handled = true;
+        }
+
+        private void ApplySuggestionValue(TextBox textBox, Popup popup, string name, Action<PartyEntry> onFill)
+        {
+            _partySuggestionTimer.Stop();
+            _suppressSuggestionQueue = true;
+            try
+            {
                 textBox.Text = name;
                 popup.IsOpen = false;
                 AutoFillParty(name, onFill);
+                textBox.CaretIndex = textBox.Text.Length;
+            }
+            finally
+            {
+                _suppressSuggestionQueue = false;
             }
         }
 

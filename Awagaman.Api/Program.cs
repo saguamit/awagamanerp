@@ -330,6 +330,17 @@ challans.MapGet("/pending-bookings", async (int? limit, string? ledgerKind, Awag
         return Results.Problem(ex.ToString(), statusCode: 500);
     }
 });
+challans.MapGet("/pending-bookings/page", async (int page, int pageSize, string? search, string? ledgerKind, AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetPendingBookingPageAsync(page, pageSize, search, ledgerKind));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
 challans.MapGet("/max-sr", async (string? ledgerKind, AwagamanRepository repo) =>
 {
     try
@@ -358,6 +369,29 @@ challans.MapGet("/page", async (
     try
     {
         return Results.Ok(await repo.GetChallansPageAsync(page, pageSize, search, sort, asc ?? true, challanNo, lrNo, from, to, useLhsDerived ?? false, ledgerKind));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
+challans.MapGet("/ledger-page", async (
+    int page,
+    int pageSize,
+    string? search,
+    string? sort,
+    bool? asc,
+    string? challanNo,
+    string? lrNo,
+    string? from,
+    string? to,
+    bool? useLhsDerived,
+    string? ledgerKind,
+    AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetChallanLedgerPageAsync(page, pageSize, search, sort, asc ?? true, challanNo, lrNo, from, to, useLhsDerived ?? false, ledgerKind));
     }
     catch (Exception ex)
     {
@@ -517,6 +551,30 @@ lrs.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
     var item = await repo.GetLREntryAsync(id);
     return item is null ? Results.NotFound() : Results.Ok(item);
 });
+lrs.MapPost("/by-nos", async (IEnumerable<string> lrNumbers, AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetLREntriesByNumbersAsync(lrNumbers));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
+lrs.MapPost("/create-from-challan", async (HttpContext context, CreateLrFromChallanRequest request, AwagamanRepository repo) =>
+{
+    try
+    {
+        var result = await repo.CreateLREntryFromChallanAsync(request.ChallanId, request.Entry);
+        await WriteAuditAsync(context, repo, "LR Ledger", "Create", result.Entry?.LRNo, $"Saved LR {result.Entry?.LRNo}.");
+        return Results.Ok(result);
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
 lrs.MapPost("/", async (HttpContext context, LREntry entry, AwagamanRepository repo) =>
 {
     var id = await repo.UpsertLREntryAsync(entry);
@@ -615,6 +673,18 @@ bills.MapGet("/page", async (int page, int pageSize, string? search, string? sor
     try
     {
         return Results.Ok(await repo.GetBillsPageAsync(page, pageSize, search, sort, asc ?? true, party, dueOnly ?? false));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
+bills.MapGet("/preview", async (string? billNo, AwagamanRepository repo) =>
+{
+    try
+    {
+        var item = await repo.GetBillPreviewAsync(billNo);
+        return item is null ? Results.NotFound() : Results.Ok(item);
     }
     catch (Exception ex)
     {
@@ -845,6 +915,7 @@ tracking.MapPost("/{trackingEntryId:int}/reports", async (HttpContext context, i
     return Results.Created($"/api/tracking/{trackingEntryId}/reports/{id}", new { id });
 });
 tracking.MapGet("/{trackingEntryId:int}/reports", async (int trackingEntryId, AwagamanRepository repo) => Results.Ok(await repo.GetReportingTracksAsync(trackingEntryId)));
+tracking.MapGet("/latest-reports", async (AwagamanRepository repo) => Results.Ok(await repo.GetLatestTrackingReportsAsync()));
 tracking.MapDelete("/{id:int}", async (HttpContext context, int id, AwagamanRepository repo) =>
 {
     await repo.DeleteTrackingAsync(id);

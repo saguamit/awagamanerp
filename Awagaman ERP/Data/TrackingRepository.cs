@@ -56,17 +56,36 @@ namespace Awagaman_ERP.Data
         {
             if (BackendSettings.UseRemoteApi)
             {
-                var result = new Dictionary<int, string>();
-                foreach (var entry in RemoteApiClient.GetList<TrackingEntry>("api/tracking"))
+                try
                 {
-                    var reports = RemoteApiClient.GetList<ReportingTrackEntry>($"api/tracking/{entry.Id}/reports");
-                    var latest = reports.OrderByDescending(x => x.ReportDateTime).FirstOrDefault();
-                    if (latest != null)
+                    var result = new Dictionary<int, string>();
+                    foreach (var item in RemoteApiClient.GetList<TrackingLatestReportItem>("api/tracking/latest-reports"))
                     {
-                        result[entry.Id] = $"{latest.ReportDateTime:dd-MMM HH:mm} - {latest.Remarks}";
+                        if (item == null || item.TrackingEntryId <= 0 || !item.ReportDateTime.HasValue)
+                        {
+                            continue;
+                        }
+
+                        result[item.TrackingEntryId] = $"{item.ReportDateTime.Value:dd-MMM HH:mm} - {item.Remarks}";
                     }
+
+                    return result;
                 }
-                return result;
+                catch
+                {
+                    var result = new Dictionary<int, string>();
+                    foreach (var entry in RemoteApiClient.GetList<TrackingEntry>("api/tracking"))
+                    {
+                        var reports = RemoteApiClient.GetList<ReportingTrackEntry>($"api/tracking/{entry.Id}/reports");
+                        var latest = reports.OrderByDescending(x => x.ReportDateTime).FirstOrDefault();
+                        if (latest != null)
+                        {
+                            result[entry.Id] = $"{latest.ReportDateTime:dd-MMM HH:mm} - {latest.Remarks}";
+                        }
+                    }
+
+                    return result;
+                }
             }
             var localResult = new Dictionary<int, string>();
 
@@ -317,6 +336,13 @@ SELECT last_insert_rowid();";
         {
             var raw = value as string;
             return DateTime.TryParse(raw, out var parsed) ? parsed : (DateTime?)null;
+        }
+
+        private sealed class TrackingLatestReportItem
+        {
+            public int TrackingEntryId { get; set; }
+            public DateTime? ReportDateTime { get; set; }
+            public string Remarks { get; set; }
         }
     }
 }

@@ -365,7 +365,6 @@ namespace Awagaman_ERP
             }
 
             window.Closing += MainWindow_Closing;
-            window.StateChanged += MainWindow_StateChanged;
         }
 
         private void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
@@ -376,17 +375,6 @@ namespace Awagaman_ERP
             }
 
             e.Cancel = true;
-            HideMainWindowToTray();
-        }
-
-        private void MainWindow_StateChanged(object sender, EventArgs e)
-        {
-            var window = sender as Window;
-            if (window == null || window.WindowState != WindowState.Minimized)
-            {
-                return;
-            }
-
             HideMainWindowToTray();
         }
 

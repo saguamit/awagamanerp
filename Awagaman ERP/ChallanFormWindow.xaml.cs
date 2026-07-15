@@ -158,10 +158,22 @@ namespace Awagaman_ERP
 
             if (!string.IsNullOrWhiteSpace(Result.LRNumber))
             {
-                var inputLRs = Result.LRNumber.Split(new[] { ',', '\n', '\r' }, System.StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).ToList();
-                foreach (var other in _allEntries.Where(x => x.Sr != _editingSr && !string.IsNullOrWhiteSpace(x.LRNumber)))
+                var inputLRs = Result.LRNumber
+                    .Split(new[] { ',', '\n', '\r' }, System.StringSplitOptions.RemoveEmptyEntries)
+                    .Select(s => s.Trim())
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct(System.StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                var entriesForValidation = (_repository?.GetAll() ?? _allEntries ?? new List<ChallanEntry>())
+                    .Where(x => x != null && x.Sr != _editingSr && !string.IsNullOrWhiteSpace(x.LRNumber))
+                    .ToList();
+
+                foreach (var other in entriesForValidation)
                 {
-                    var otherLRs = other.LRNumber.Split(new[] { ',', '\n', '\r' }, System.StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim());
+                    var otherLRs = (other.LRNumber ?? string.Empty)
+                        .Split(new[] { ',', '\n', '\r' }, System.StringSplitOptions.RemoveEmptyEntries)
+                        .Select(s => s.Trim());
                     var overlap = inputLRs.Intersect(otherLRs, System.StringComparer.OrdinalIgnoreCase).FirstOrDefault();
                     if (overlap != null)
                     {
@@ -243,13 +255,14 @@ namespace Awagaman_ERP
             {
                 var fyStart = ChallanNumberFormatter.GetFinancialYearStart(challanDate);
                 var challanLedgerRepository = new ChallanRepository { LedgerMode = "Challan" };
-                var rows = challanLedgerRepository.GetAll() ?? new List<ChallanEntry>();
-                var nextSequence = rows
-                    .Where(x => x != null)
-                    .Where(x => ChallanNumberFormatter.GetFinancialYearStart(x.ChallanNumber, x.Date) == fyStart)
-                    .Select(x => ChallanNumberFormatter.GetSequence(x.ChallanNumber))
-                    .DefaultIfEmpty(0)
-                    .Max() + 1;
+                var fySuffix = ChallanNumberFormatter.GetFinancialYearSuffix(challanDate);
+                var latestRow = challanLedgerRepository
+                    .SearchAdvanced(fySuffix, string.Empty, string.Empty, string.Empty, 1, 1, "ChallanNumber", false, true)
+                    .FirstOrDefault();
+                var nextSequence = latestRow != null &&
+                                   ChallanNumberFormatter.GetFinancialYearStart(latestRow.ChallanNumber, latestRow.Date) == fyStart
+                    ? ChallanNumberFormatter.GetSequence(latestRow.ChallanNumber) + 1
+                    : 1;
 
                 return ChallanNumberFormatter.Normalize(nextSequence.ToString(), challanDate);
             }

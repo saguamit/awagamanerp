@@ -4,6 +4,7 @@ public class BillReceiptEntry
 {
     public int Id { get; set; }
     public string? BillNo { get; set; }
+    public string? LRNo { get; set; }
     public string? Party { get; set; }
     public decimal BillTotal { get; set; }
     public DateTime? BillDate { get; set; }

@@ -383,11 +383,21 @@ namespace Awagaman_ERP.ViewModels
                 return;
             }
 
+            if (BackendSettings.UseRemoteApi)
+            {
+                _pageLoaded = false;
+                OnPropertyChanged(nameof(HasLoadedPage));
+                return;
+            }
+
             _isLoadingPage = true;
             _suppressPersistence = true;
             try
             {
                 PagedEntries.Clear();
+                var sortColumn = GetEffectiveSortColumn();
+                var sortAscending = GetEffectiveSortAscending();
+
                 if (_countDirty)
                 {
                     if (_hasAdvancedFilter)
@@ -406,8 +416,6 @@ namespace Awagaman_ERP.ViewModels
                         : _repository.GetTotalDue(_searchFilter, UseLhsDerivedValues);
 
                 List<ChallanEntry> items;
-                var sortColumn = GetEffectiveSortColumn();
-                var sortAscending = GetEffectiveSortAscending();
                 if (_hasAdvancedFilter)
                 {
                     items = _repository.SearchAdvanced(_filterChallanNo, _filterLRNo, _filterFrom, _filterTo, CurrentPage, PageSize, sortColumn, sortAscending, UseLhsDerivedValues);
@@ -516,35 +524,39 @@ namespace Awagaman_ERP.ViewModels
                 var result = new PageLoadResult();
                 result.CurrentPage = requestedPage;
 
-                if (hasAdvancedFilter)
-                    result.TotalDue = _repository.GetTotalDueAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, UseLhsDerivedValues);
-                else if (string.IsNullOrEmpty(searchFilter))
-                    result.TotalDue = _repository.GetTotalDue("", UseLhsDerivedValues);
-                else
-                    result.TotalDue = _repository.GetTotalDue(searchFilter, UseLhsDerivedValues);
-
                 var challanRepository = _repository as ChallanRepository;
                 if (challanRepository != null)
                 {
                     var pageResult = hasAdvancedFilter
-                        ? challanRepository.GetRemotePageResult(requestedPage, requestedPageSize, null, sortColumn, sortAscending, filterChallanNo, filterLRNo, filterFrom, filterTo, UseLhsDerivedValues)
-                        : challanRepository.GetRemotePageResult(requestedPage, requestedPageSize, searchFilter, sortColumn, sortAscending, null, null, null, null, UseLhsDerivedValues);
+                        ? challanRepository.GetRemoteLedgerPageResult(requestedPage, requestedPageSize, null, sortColumn, sortAscending, filterChallanNo, filterLRNo, filterFrom, filterTo, UseLhsDerivedValues)
+                        : challanRepository.GetRemoteLedgerPageResult(requestedPage, requestedPageSize, searchFilter, sortColumn, sortAscending, null, null, null, null, UseLhsDerivedValues);
 
                     result.TotalCount = pageResult?.TotalCount ?? 0;
+                    result.TotalDue = pageResult?.TotalDue ?? 0m;
                     result.Items = pageResult?.Items ?? new List<ChallanEntry>();
+                    result.CommentIds = new HashSet<int>(pageResult?.CommentIds ?? new List<int>());
 
                     if (!result.Items.Any() && requestedPage > 1)
                     {
                         result.CurrentPage = 1;
                         pageResult = hasAdvancedFilter
-                            ? challanRepository.GetRemotePageResult(1, requestedPageSize, null, sortColumn, sortAscending, filterChallanNo, filterLRNo, filterFrom, filterTo, UseLhsDerivedValues)
-                            : challanRepository.GetRemotePageResult(1, requestedPageSize, searchFilter, sortColumn, sortAscending, null, null, null, null, UseLhsDerivedValues);
+                            ? challanRepository.GetRemoteLedgerPageResult(1, requestedPageSize, null, sortColumn, sortAscending, filterChallanNo, filterLRNo, filterFrom, filterTo, UseLhsDerivedValues)
+                            : challanRepository.GetRemoteLedgerPageResult(1, requestedPageSize, searchFilter, sortColumn, sortAscending, null, null, null, null, UseLhsDerivedValues);
                         result.TotalCount = pageResult?.TotalCount ?? 0;
+                        result.TotalDue = pageResult?.TotalDue ?? 0m;
                         result.Items = pageResult?.Items ?? new List<ChallanEntry>();
+                        result.CommentIds = new HashSet<int>(pageResult?.CommentIds ?? new List<int>());
                     }
                 }
                 else
                 {
+                    if (hasAdvancedFilter)
+                        result.TotalDue = _repository.GetTotalDueAdvanced(filterChallanNo, filterLRNo, filterFrom, filterTo, UseLhsDerivedValues);
+                    else if (string.IsNullOrEmpty(searchFilter))
+                        result.TotalDue = _repository.GetTotalDue("", UseLhsDerivedValues);
+                    else
+                        result.TotalDue = _repository.GetTotalDue(searchFilter, UseLhsDerivedValues);
+
                     if (countDirty)
                     {
                         if (hasAdvancedFilter)
@@ -583,7 +595,8 @@ namespace Awagaman_ERP.ViewModels
                     }
                 }
 
-                result.CommentIds = _repository.GetChallanIdsWithComments();
+                if (result.CommentIds == null)
+                    result.CommentIds = _repository.GetChallanIdsWithComments();
                 return result;
             }).ContinueWith(task =>
             {
@@ -1174,6 +1187,11 @@ namespace Awagaman_ERP.ViewModels
 
         public IEnumerable<ChallanEntry> GetFilteredEntriesForSummary()
         {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return PagedEntries ?? Enumerable.Empty<ChallanEntry>();
+            }
+
             IEnumerable<ChallanEntry> rows = _repository.GetAll() ?? Enumerable.Empty<ChallanEntry>();
 
             if (_hasAdvancedFilter)

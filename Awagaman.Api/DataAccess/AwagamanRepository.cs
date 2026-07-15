@@ -908,6 +908,143 @@ ORDER BY id DESC, LRNumber DESC
         return await conn.QueryAsync<ChallanEntry>(sql, new { limit });
     }
 
+    public async Task<PagedResult<ChallanEntry>> GetPendingBookingPageAsync(
+        int page,
+        int pageSize,
+        string? search = null,
+        string? ledgerKind = null)
+    {
+        var challanLedgerMode = IsChallanLedgerKind(ledgerKind);
+        var tableName = GetChallanTableName(challanLedgerMode);
+        page = NormalizePage(page);
+        pageSize = NormalizePageSize(pageSize);
+        var offset = (page - 1) * pageSize;
+        var searchValue = (search ?? string.Empty).Trim();
+        var hasSearch = !string.IsNullOrWhiteSpace(searchValue);
+        var searchPattern = hasSearch ? $"%{searchValue}%" : string.Empty;
+
+        var sql = $@"
+WITH split_pending AS (
+    SELECT
+        c.id,
+        c.challan_number AS ChallanNumber,
+        c.date AS date_sort,
+        c.from_location AS ""From"",
+        c.to_location AS ""To"",
+        c.vehicle_number AS VehicleNumber,
+        c.broker_name AS BrokerName,
+        c.lorry_hire AS LorryHire,
+        btrim(token.lr_no) AS LRNumber
+    FROM {tableName} c
+    CROSS JOIN LATERAL regexp_split_to_table(COALESCE(c.lr_number, ''), E'[,;\\s]+') AS token(lr_no)
+    WHERE btrim(token.lr_no) <> ''
+      AND NOT EXISTS (
+          SELECT 1
+          FROM lr_entries l
+          WHERE lower(btrim(COALESCE(l.lrno, ''))) = lower(btrim(token.lr_no))
+      )
+),
+blank_pending AS (
+    SELECT
+        c.id,
+        c.challan_number AS ChallanNumber,
+        c.date AS date_sort,
+        c.from_location AS ""From"",
+        c.to_location AS ""To"",
+        c.vehicle_number AS VehicleNumber,
+        c.broker_name AS BrokerName,
+        c.lorry_hire AS LorryHire,
+        ''::text AS LRNumber
+    FROM {tableName} c
+    WHERE btrim(COALESCE(c.lr_number, '')) = ''
+      AND NOT EXISTS (
+          SELECT 1
+          FROM lr_entries l
+          WHERE lower(btrim(COALESCE(l.chno, ''))) = lower(btrim(COALESCE(c.challan_number, '')))
+      )
+),
+pending AS (
+    SELECT * FROM split_pending
+    UNION ALL
+    SELECT * FROM blank_pending
+),
+filtered AS (
+    SELECT *
+    FROM pending
+    WHERE @hasSearch = FALSE
+       OR ChallanNumber ILIKE @searchPattern
+       OR LRNumber ILIKE @searchPattern
+       OR COALESCE(BrokerName, '') ILIKE @searchPattern
+       OR COALESCE(""From"", '') ILIKE @searchPattern
+       OR COALESCE(""To"", '') ILIKE @searchPattern
+       OR COALESCE(VehicleNumber, '') ILIKE @searchPattern
+       OR to_char(COALESCE(date_sort, CURRENT_DATE), 'DD-Mon-YYYY') ILIKE @searchPattern
+)
+SELECT
+    id,
+    0 AS sr,
+    ChallanNumber,
+    COALESCE(date_sort, CURRENT_DATE) AS date,
+    LRNumber,
+    BrokerName,
+    ""From"",
+    ""To"",
+    VehicleNumber,
+    NULL::text AS VehicleType,
+    NULL::text AS DriverName,
+    NULL::text AS DriverMobile,
+    NULL::text AS EngineNo,
+    NULL::text AS LicenceNo,
+    NULL::text AS PolicyNo,
+    NULL::text AS ChassisNo,
+    NULL::text AS OwnerName,
+    NULL::text AS PAN,
+    LorryHire,
+    0::numeric AS LessTDS,
+    0::numeric AS AdvanceAmount,
+    0::numeric AS AdvanceNEFT,
+    0::numeric AS AdvanceCash,
+    NULL::date AS AdvanceDate,
+    0::numeric AS Detention,
+    0::numeric AS Hamali,
+    0::numeric AS Other,
+    0::numeric AS Deduction,
+    0::numeric AS BalancePaidNEFT,
+    0::numeric AS BalancePaidCash,
+    NULL::date AS BalancePaidDate,
+    NULL::text AS PaidTo,
+    NULL::text AS Remarks,
+    0::numeric AS BillAmount,
+    0::numeric AS Margin,
+    NULL::numeric AS ImportedBalance,
+    NULL::numeric AS ImportedDue,
+    false AS PreserveImportedBilling,
+    NULL::integer AS SourcePurchaseId
+FROM filtered
+ORDER BY id DESC, LRNumber DESC
+LIMIT @pageSize OFFSET @offset;
+
+SELECT COUNT(*) FROM filtered;";
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        await using var multi = await conn.QueryMultipleAsync(sql, new
+        {
+            hasSearch,
+            searchPattern,
+            pageSize,
+            offset
+        });
+
+        var items = (await multi.ReadAsync<ChallanEntry>()).ToList();
+        var total = await multi.ReadFirstAsync<int>();
+        return new PagedResult<ChallanEntry>
+        {
+            Items = items,
+            TotalCount = total
+        };
+    }
+
     public async Task<PagedResult<ChallanEntry>> GetChallansPageAsync(
         int page,
         int pageSize,
@@ -957,6 +1094,82 @@ ORDER BY id DESC, LRNumber DESC
         var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM {tableName} {where};", parameters);
         var items = (await conn.QueryAsync<ChallanEntry>($"{select} {where} ORDER BY {orderBy} LIMIT @limit OFFSET @offset;", parameters)).ToList();
         return new PagedResult<ChallanEntry> { Items = items, TotalCount = total };
+    }
+
+    public async Task<ChallanLedgerPageResult> GetChallanLedgerPageAsync(
+        int page,
+        int pageSize,
+        string? search,
+        string? sortColumn,
+        bool sortAscending,
+        string? challanNo = null,
+        string? lrNo = null,
+        string? from = null,
+        string? to = null,
+        bool useLhsDerived = false,
+        string? ledgerKind = null)
+    {
+        var challanLedgerMode = IsChallanLedgerKind(ledgerKind);
+        var tableName = GetChallanTableName(challanLedgerMode);
+        page = NormalizePage(page);
+        pageSize = NormalizePageSize(pageSize);
+        var offset = (page - 1) * pageSize;
+        var whereParts = new List<string>();
+        var parameters = new DynamicParameters();
+        parameters.Add("limit", pageSize);
+        parameters.Add("offset", offset);
+
+        var q = (search ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            whereParts.Add(@"(
+                challan_number ILIKE @search OR lr_number ILIKE @search OR vehicle_number ILIKE @search OR
+                vehicle_type ILIKE @search OR driver_name ILIKE @search OR driver_mobile ILIKE @search OR broker_name ILIKE @search OR
+                from_location ILIKE @search OR to_location ILIKE @search OR owner_name ILIKE @search OR
+                engine_no ILIKE @search OR licence_no ILIKE @search OR policy_no ILIKE @search OR chassis_no ILIKE @search OR
+                pan ILIKE @search OR paid_to ILIKE @search OR remarks ILIKE @search)");
+            parameters.Add("search", $"%{q}%");
+        }
+
+        AddLikeFilter(whereParts, parameters, "challan_number", "challanNo", challanNo);
+        AddLikeFilter(whereParts, parameters, "lr_number", "lrNo", lrNo);
+        AddLikeFilter(whereParts, parameters, "from_location", "from", from);
+        AddLikeFilter(whereParts, parameters, "to_location", "to", to);
+
+        var where = whereParts.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", whereParts);
+        var orderBy = BuildChallanOrderBy(sortColumn, sortAscending, useLhsDerived);
+        var select = GetChallanSelectSql(challanLedgerMode);
+        var dueSql = useLhsDerived
+            ? $@"SELECT COALESCE(SUM(
+                ((lorry_hire + other_amount) - less_tds - advance_amount + detention + hamali + deduction) - balance_paid_neft - balance_paid_cash
+            ), 0) FROM {tableName} {where};"
+            : $@"SELECT COALESCE(SUM(
+                (lorry_hire - less_tds - advance_amount + detention + hamali + deduction) - balance_paid_neft - balance_paid_cash
+            ), 0) FROM {tableName} {where};";
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+
+        var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM {tableName} {where};", parameters);
+        var due = await conn.ExecuteScalarAsync<decimal>(dueSql, parameters);
+        var items = (await conn.QueryAsync<ChallanEntry>($"{select} {where} ORDER BY {orderBy} LIMIT @limit OFFSET @offset;", parameters)).ToList();
+
+        var commentIds = new List<int>();
+        var pageIds = items.Select(x => x.Id).Distinct().ToArray();
+        if (pageIds.Length > 0)
+        {
+            commentIds = (await conn.QueryAsync<int>(
+                "SELECT DISTINCT challan_id FROM challan_comments WHERE challan_id = ANY(@ids);",
+                new { ids = pageIds })).ToList();
+        }
+
+        return new ChallanLedgerPageResult
+        {
+            TotalCount = total,
+            TotalDue = due,
+            CommentIds = commentIds,
+            Items = items
+        };
     }
 
     public async Task<ChallanSummaryResult> GetChallansSummaryAsync(
@@ -1215,8 +1428,8 @@ WHERE source_purchase_id = @SourcePurchaseId
             BalancePaidDate = existingMirror?.BalancePaidDate ?? purchaseEntry.BalancePaidDate,
             PaidTo = existingMirror?.PaidTo ?? purchaseEntry.PaidTo,
             Remarks = existingMirror?.Remarks ?? purchaseEntry.Remarks,
-            BillAmount = existingMirror?.BillAmount ?? purchaseEntry.BillAmount,
-            Margin = existingMirror?.Margin ?? purchaseEntry.Margin,
+            BillAmount = purchaseEntry.BillAmount,
+            Margin = purchaseEntry.Margin,
             ImportedBalance = existingMirror?.ImportedBalance ?? purchaseEntry.ImportedBalance,
             ImportedDue = existingMirror?.ImportedDue ?? purchaseEntry.ImportedDue,
             PreserveImportedBilling = existingMirror?.PreserveImportedBilling ?? purchaseEntry.PreserveImportedBilling
@@ -1374,6 +1587,97 @@ WHERE NULLIF(TRIM(COALESCE(lr.lrno, '')), '') IS NOT NULL
             preserve_imported_billing AS PreserveImportedBilling
             FROM lr_entries WHERE id = @id;", new { id });
 
+    public async Task<CreateLrFromChallanResponse> CreateLREntryFromChallanAsync(int challanId, LREntry entry)
+    {
+        if (entry == null)
+        {
+            throw new ArgumentNullException(nameof(entry));
+        }
+
+        var savedId = await UpsertLREntryAsync(entry);
+        entry.Id = savedId;
+
+        await EnsurePartyExistsAsync(entry.ConsignorName, entry.ConsignorAddress, entry.ConsignorGST);
+        await EnsurePartyExistsAsync(entry.ConsigneeName, entry.ConsigneeAddress, entry.ConsigneeGST);
+        await EnsurePartyExistsAsync(entry.BillParty, string.Empty, string.Empty);
+
+        ChallanEntry? linkedChallan = null;
+        if (challanId > 0)
+        {
+            linkedChallan = await GetChallanAsync(challanId, "purchase");
+        }
+
+        if (linkedChallan == null && !string.IsNullOrWhiteSpace(entry.CHNo))
+        {
+            linkedChallan = await QuerySingleOrDefaultAsync<ChallanEntry>(
+                GetChallanSelectSql(false) + @"
+WHERE lower(trim(challan_number)) = lower(trim(@challanNumber))
+LIMIT 1;",
+                new { challanNumber = entry.CHNo.Trim() });
+        }
+
+        if (linkedChallan != null && !string.IsNullOrWhiteSpace(entry.LRNo))
+        {
+            var existing = SplitLrNumbers(linkedChallan.LRNumber).ToList();
+            var lrNo = entry.LRNo.Trim();
+            if (!existing.Contains(lrNo, StringComparer.OrdinalIgnoreCase))
+            {
+                existing.Add(lrNo);
+                linkedChallan.LRNumber = string.Join(", ", existing);
+                await UpsertChallanAsync(linkedChallan, "purchase", skipCbsSync: true);
+            }
+        }
+
+        return new CreateLrFromChallanResponse
+        {
+            Entry = entry,
+            LinkedChallan = linkedChallan
+        };
+    }
+
+    private static IEnumerable<string> SplitLrNumbers(string? raw)
+    {
+        return (raw ?? string.Empty)
+            .Split(new[] { ',', ';', ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => x.Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public async Task<IEnumerable<LREntry>> GetLREntriesByNumbersAsync(IEnumerable<string>? lrNumbers)
+    {
+        var keys = (lrNumbers ?? Enumerable.Empty<string>())
+            .Select(x => (x ?? string.Empty).Trim())
+            .Where(x => x.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (keys.Length == 0)
+        {
+            return Array.Empty<LREntry>();
+        }
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        return await conn.QueryAsync<LREntry>(@"SELECT
+            id, sr, lrno AS LRNo, date, consignor_name AS ConsignorName, consignor_address AS ConsignorAddress, consignor_gst AS ConsignorGST,
+            consignee_name AS ConsigneeName, consignee_address AS ConsigneeAddress, consignee_gst AS ConsigneeGST,
+            from_location AS ""From"", to_location AS ""To"", vehicle_no AS VehicleNo, vehicle_type AS VehicleType,
+            weight AS Weight, size_l AS SizeL, size_w AS SizeW, size_h AS SizeH, actual_weight AS ActualWeight, charged_weight AS ChargedWeight,
+            pkg AS PKG, pkg_type AS PkgType, description AS Description, invoice AS Invoice, value AS Value, chno AS CHNo,
+            total_freight AS TotalFreight, hamali AS Hamali, detention AS Detention, others AS Others, st_charge AS StCharge,
+            neft AS NEFT, cash AS CASH, tds AS TDS, ded AS Ded, bill_no AS BillNo, bill_date AS BillDate, bill AS BILL,
+            challan_lorry_hire AS ChallanLorryHire,
+            bill_party AS BillParty, broker AS Broker, frt_type AS FrtType, pay_type AS PayType, comm AS Comm, paid AS Paid,
+            preserve_imported_billing AS PreserveImportedBilling
+            FROM lr_entries
+            WHERE lower(btrim(COALESCE(lrno, ''))) = ANY(@keys)
+            ORDER BY id;", new
+        {
+            keys = keys.Select(x => x.ToLowerInvariant()).ToArray()
+        });
+    }
+
     public async Task<bool> LRNumberExistsAsync(string? lrNo, int excludeId = 0)
     {
         var normalized = (lrNo ?? string.Empty).Trim();
@@ -1419,6 +1723,37 @@ WHERE lower(btrim(COALESCE(lrno, ''))) = lower(btrim(@lrNo))
                 WHERE id = @Id;
                SELECT @Id;";
         return await ExecuteScalarIntAsync(sql, entry);
+    }
+
+    private async Task EnsurePartyExistsAsync(string? name, string? address, string? gstNo)
+    {
+        var partyName = (name ?? string.Empty).Trim();
+        if (partyName.Length == 0)
+        {
+            return;
+        }
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        var existing = await conn.QuerySingleOrDefaultAsync<int?>(
+            "SELECT id FROM parties WHERE lower(trim(party_name)) = lower(trim(@name)) LIMIT 1;",
+            new { name = partyName });
+        if (existing.HasValue)
+        {
+            return;
+        }
+
+        var nextSr = await conn.ExecuteScalarAsync<int>("SELECT COALESCE(MAX(sr), 0) + 1 FROM parties;");
+        await conn.ExecuteAsync(
+            @"INSERT INTO parties (sr, party_name, address, gst_no)
+              VALUES (@Sr, @PartyName, @Address, @GSTNo);",
+            new
+            {
+                Sr = nextSr,
+                PartyName = partyName,
+                Address = (address ?? string.Empty).Trim(),
+                GSTNo = (gstNo ?? string.Empty).Trim()
+            });
     }
 
     public Task<int> DeleteLREntryAsync(int id) =>
@@ -1506,6 +1841,111 @@ WHERE lower(btrim(COALESCE(lrno, ''))) = lower(btrim(@lrNo))
             parameters);
     }
 
+    public async Task<BillPreviewResult?> GetBillPreviewAsync(string? billNo)
+    {
+        var key = (billNo ?? string.Empty).Trim();
+        if (key.Length == 0)
+        {
+            return null;
+        }
+
+        const string sql = @"
+SELECT
+    b.id,
+    b.sr,
+    b.bill_no AS BillNo,
+    b.bill_date AS BillDate,
+    b.party AS Party,
+    b.lr_no AS LRNo,
+    b.lr_date AS LRDate,
+    b.from_loc AS ""From"",
+    b.to_loc AS ""To"",
+    b.vehicle_type AS VehicleType,
+    b.freight AS Freight,
+    b.detention AS Detention,
+    b.hml AS HML,
+    b.othr AS OTHR,
+    b.st_charge AS StCharge,
+    b.rcvd AS RCVD,
+    b.tds AS TDS,
+    b.ded AS DED,
+    b.mop AS MOP,
+    b.mr AS MR,
+    b.remarks AS Remarks,
+    b.date AS Date,
+    COALESCE(l.invoice, '') AS Invoice,
+    COALESCE(l.vehicle_no, '') AS VehicleNo,
+    COALESCE(p.address, '') AS PartyAddress,
+    COALESCE(p.gst_no, '') AS PartyGST
+FROM bills b
+LEFT JOIN lr_entries l
+    ON lower(trim(COALESCE(l.lrno, ''))) = lower(trim(COALESCE(b.lr_no, '')))
+LEFT JOIN parties p
+    ON lower(trim(COALESCE(p.party_name, ''))) = lower(trim(COALESCE(b.party, '')))
+WHERE lower(trim(COALESCE(b.bill_no, ''))) = lower(trim(@billNo))
+ORDER BY b.sr ASC, b.id ASC;";
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        var rows = (await conn.QueryAsync<BillPreviewSourceRow>(sql, new { billNo = key })).ToList();
+        if (rows.Count == 0)
+        {
+            return null;
+        }
+
+        var first = rows[0];
+        var billEntries = rows.Select(r => new BillEntry
+        {
+            Id = r.Id,
+            Sr = r.Sr,
+            BillNo = r.BillNo,
+            BillDate = r.BillDate,
+            Party = r.Party,
+            LRNo = r.LRNo,
+            LRDate = r.LRDate,
+            From = r.From,
+            To = r.To,
+            VehicleType = r.VehicleType,
+            Freight = r.Freight,
+            Detention = r.Detention,
+            HML = r.HML,
+            OTHR = r.OTHR,
+            StCharge = r.StCharge,
+            RCVD = r.RCVD,
+            TDS = r.TDS,
+            DED = r.DED,
+            MOP = r.MOP,
+            MR = r.MR,
+            Remarks = r.Remarks,
+            Date = r.Date
+        }).ToList();
+
+        var invoiceByLr = rows
+            .Where(r => !string.IsNullOrWhiteSpace(r.LRNo))
+            .GroupBy(r => r.LRNo.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.Invoice ?? string.Empty).FirstOrDefault() ?? string.Empty, StringComparer.OrdinalIgnoreCase);
+        var vehicleByLr = rows
+            .Where(r => !string.IsNullOrWhiteSpace(r.LRNo))
+            .GroupBy(r => r.LRNo.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.VehicleNo ?? string.Empty).FirstOrDefault() ?? string.Empty, StringComparer.OrdinalIgnoreCase);
+
+        var totalAmount = billEntries.Sum(x => x.Freight + x.Detention + x.HML + x.OTHR + x.StCharge);
+        var partyGst = (first.PartyGST ?? string.Empty).Trim();
+        var preview = new BillPreviewResult
+        {
+            Party = (first.Party ?? string.Empty).Trim(),
+            PartyAddress = (first.PartyAddress ?? string.Empty).Trim(),
+            PartyGST = partyGst,
+            PartyStateCode = partyGst.Length >= 2 ? partyGst.Substring(0, 2) : string.Empty,
+            BillNo = (first.BillNo ?? string.Empty).Trim(),
+            BillDate = first.BillDate == default ? string.Empty : first.BillDate.ToString("dd-MMM-yyyy"),
+            TotalAmount = totalAmount,
+            Lines = BuildBillPreviewLines(billEntries, invoiceByLr, vehicleByLr)
+        };
+
+        return preview;
+    }
+
     public async Task<IEnumerable<BillPartyDueSummaryItem>> GetBillPartyDueSummaryAsync()
     {
         const string dueExpr = "(b.freight + b.detention + b.hml + b.othr + b.st_charge - b.rcvd - b.tds - b.ded)";
@@ -1522,6 +1962,236 @@ WHERE NULLIF(TRIM(COALESCE(b.bill_no, '')), '') IS NOT NULL
 GROUP BY TRIM(COALESCE(NULLIF(b.party, ''), NULLIF(l.bill_party, ''), NULLIF(l.consignor_name, ''), ''))
 ORDER BY Due DESC, Party ASC;";
         return await QueryAsync<BillPartyDueSummaryItem>(sql);
+    }
+
+    private sealed class BillPreviewSourceRow
+    {
+        public int Id { get; set; }
+        public int Sr { get; set; }
+        public string BillNo { get; set; } = string.Empty;
+        public DateTime BillDate { get; set; }
+        public string Party { get; set; } = string.Empty;
+        public string LRNo { get; set; } = string.Empty;
+        public DateTime? LRDate { get; set; }
+        public string From { get; set; } = string.Empty;
+        public string To { get; set; } = string.Empty;
+        public string VehicleType { get; set; } = string.Empty;
+        public decimal Freight { get; set; }
+        public decimal Detention { get; set; }
+        public decimal HML { get; set; }
+        public decimal OTHR { get; set; }
+        public decimal StCharge { get; set; }
+        public decimal RCVD { get; set; }
+        public decimal TDS { get; set; }
+        public decimal DED { get; set; }
+        public string MOP { get; set; } = string.Empty;
+        public string MR { get; set; } = string.Empty;
+        public string Remarks { get; set; } = string.Empty;
+        public DateTime Date { get; set; }
+        public string Invoice { get; set; } = string.Empty;
+        public string VehicleNo { get; set; } = string.Empty;
+        public string PartyAddress { get; set; } = string.Empty;
+        public string PartyGST { get; set; } = string.Empty;
+    }
+
+    private static List<BillPreviewLineItem> BuildBillPreviewLines(List<BillEntry> billRows, IDictionary<string, string> invoiceByLr, IDictionary<string, string> vehicleByLr)
+    {
+        var output = new List<BillPreviewLineItem>();
+        var rows = (billRows ?? new List<BillEntry>()).Where(x => (x.Freight + x.Detention + x.HML + x.OTHR + x.StCharge) != 0m).ToList();
+        var totalStChargeForBill = rows.Sum(x => x.StCharge);
+        foreach (var x in rows)
+        {
+            var lrNo = (x.LRNo ?? string.Empty).Trim();
+            var lrDate = x.LRDate.HasValue ? x.LRDate.Value.ToString("dd.MM.yy") : string.Empty;
+            var invoiceValues = SplitInvoiceValues(invoiceByLr.TryGetValue(lrNo, out var invoice) ? invoice : string.Empty);
+            var vehicle = vehicleByLr.TryGetValue(lrNo, out var vehicleNo) ? vehicleNo : string.Empty;
+            var from = (x.From ?? string.Empty).Trim();
+            var to = (x.To ?? string.Empty).Trim();
+            var weight = (x.VehicleType ?? string.Empty).Trim();
+            var blockRows = new List<BillPreviewLineItem>();
+
+            blockRows.Add(new BillPreviewLineItem
+            {
+                LRNo = lrNo,
+                LRDate = lrDate,
+                Invoice = string.Empty,
+                Vehicle = vehicle,
+                From = from,
+                To = to,
+                ChargesBreakdown = string.IsNullOrWhiteSpace(from) && string.IsNullOrWhiteSpace(to) ? string.Empty : ((from ?? string.Empty) + "        " + (to ?? string.Empty)).Trim(),
+                WeightOrType = weight,
+                Rate = string.Empty,
+                Amount = x.Freight != 0m ? x.Freight.ToString("0.##") : string.Empty
+            });
+
+            if (x.HML != 0m)
+            {
+                blockRows.Add(new BillPreviewLineItem { From = "Hamali", ChargesBreakdown = "Hamali", Amount = x.HML.ToString("0.##") });
+            }
+            if (x.Detention != 0m)
+            {
+                blockRows.Add(new BillPreviewLineItem { From = "Detention", ChargesBreakdown = "Detention", Amount = x.Detention.ToString("0.##") });
+            }
+            if (x.OTHR != 0m)
+            {
+                blockRows.Add(new BillPreviewLineItem { From = "Other", ChargesBreakdown = "Other", Amount = x.OTHR.ToString("0.##") });
+            }
+
+            var invoiceCellValues = PackInvoiceValuesForCells(invoiceValues);
+            for (var invIndex = 0; invIndex < invoiceCellValues.Count; invIndex++)
+            {
+                if (invIndex < blockRows.Count)
+                {
+                    blockRows[invIndex].Invoice = invoiceCellValues[invIndex];
+                }
+                else
+                {
+                    blockRows.Add(new BillPreviewLineItem { Invoice = invoiceCellValues[invIndex] });
+                }
+            }
+
+            output.AddRange(blockRows);
+        }
+
+        EnsureStChargeSummaryRow(output, totalStChargeForBill);
+        NormalizeInvoiceCellsInPreviewLines(output);
+        return output;
+    }
+
+    private static List<string> SplitInvoiceValues(string rawInvoice)
+    {
+        var raw = (rawInvoice ?? string.Empty).Trim();
+        var result = new List<string>();
+        if (raw.Length == 0) return result;
+        var normalized = raw.Replace("\r\n", "\n").Replace('\r', '\n');
+        foreach (var line in normalized.Split('\n'))
+        {
+            var parts = line.Split(new[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0)
+            {
+                var single = (line ?? string.Empty).Trim();
+                if (single.Length > 0) result.Add(single);
+                continue;
+            }
+
+            for (var i = 0; i < parts.Length; i++)
+            {
+                var value = (parts[i] ?? string.Empty).Trim();
+                if (value.Length > 0) result.Add(value);
+            }
+        }
+        return result;
+    }
+
+    private static List<string> PackInvoiceValuesForCells(List<string> invoiceValues)
+    {
+        var values = (invoiceValues ?? new List<string>())
+            .Select(v => (v ?? string.Empty).Trim())
+            .Where(v => v.Length > 0)
+            .ToList();
+        var packed = new List<string>();
+        if (values.Count == 0) return packed;
+
+        const int maxCharsPerCell = 24;
+        var current = string.Empty;
+        for (var i = 0; i < values.Count; i++)
+        {
+            var next = values[i];
+            var candidate = string.IsNullOrEmpty(current) ? next : (current + ", " + next);
+            if (candidate.Length <= maxCharsPerCell || string.IsNullOrEmpty(current))
+            {
+                current = candidate;
+                continue;
+            }
+
+            packed.Add(current);
+            current = next;
+        }
+
+        if (!string.IsNullOrEmpty(current))
+        {
+            packed.Add(current);
+        }
+
+        return packed;
+    }
+
+    private static void EnsureStChargeSummaryRow(List<BillPreviewLineItem> lines, decimal totalStChargeForBill)
+    {
+        if (lines == null) return;
+
+        lines.RemoveAll(x =>
+            string.Equals((x?.ChargesBreakdown ?? string.Empty).Trim(), "St. Charge", StringComparison.OrdinalIgnoreCase) &&
+            string.IsNullOrWhiteSpace(x?.LRNo) &&
+            string.IsNullOrWhiteSpace(x?.Vehicle));
+
+        if (totalStChargeForBill == 0m) return;
+
+        lines.Add(new BillPreviewLineItem
+        {
+            From = "St. Charge",
+            ChargesBreakdown = "St. Charge",
+            Amount = totalStChargeForBill.ToString("0.##")
+        });
+    }
+
+    private static void NormalizeInvoiceCellsInPreviewLines(List<BillPreviewLineItem> lines)
+    {
+        if (lines == null || lines.Count == 0) return;
+
+        var i = 0;
+        while (i < lines.Count)
+        {
+            var lrNo = ((lines[i]?.LRNo) ?? string.Empty).Trim();
+            if (lrNo.Length == 0)
+            {
+                i++;
+                continue;
+            }
+
+            var groupStart = i;
+            var groupEnd = lines.Count - 1;
+            for (var j = i + 1; j < lines.Count; j++)
+            {
+                var nextLr = ((lines[j]?.LRNo) ?? string.Empty).Trim();
+                if (nextLr.Length > 0)
+                {
+                    groupEnd = j - 1;
+                    break;
+                }
+            }
+
+            var values = new List<string>();
+            for (var j = groupStart; j <= groupEnd; j++)
+            {
+                values.AddRange(SplitInvoiceValues(lines[j]?.Invoice));
+            }
+
+            var packed = PackInvoiceValuesForCells(values);
+            for (var j = groupStart; j <= groupEnd; j++)
+            {
+                lines[j].Invoice = string.Empty;
+            }
+
+            var capacity = Math.Max(0, groupEnd - groupStart + 1);
+            for (var j = 0; j < Math.Min(capacity, packed.Count); j++)
+            {
+                lines[groupStart + j].Invoice = packed[j];
+            }
+
+            if (packed.Count > capacity)
+            {
+                var insertAt = groupEnd + 1;
+                for (var j = capacity; j < packed.Count; j++)
+                {
+                    lines.Insert(insertAt, new BillPreviewLineItem { Invoice = packed[j] });
+                    insertAt++;
+                }
+                groupEnd = insertAt - 1;
+            }
+
+            i = groupEnd + 1;
+        }
     }
 
     public async Task<IEnumerable<BillDueDetailItem>> GetBillDueDetailsForPartyAsync(string? party)
@@ -1876,13 +2546,13 @@ ORDER BY date DESC, sr, id;", new { challanNumbers = keys });
         if (key.Length == 0)
         {
             return QueryAsync<BillReceiptEntry>(@"SELECT
-                id, bill_no AS BillNo, party AS Party, bill_total AS BillTotal, bill_date AS BillDate, receipt_date AS ReceiptDate,
+                id, bill_no AS BillNo, lr_no AS LRNo, party AS Party, bill_total AS BillTotal, bill_date AS BillDate, receipt_date AS ReceiptDate,
                 rcvd AS RCVD, tds AS TDS, ded AS DED, mop AS MOP, mr AS MR, remarks AS Remarks, due_after AS DueAfter, created_at AS CreatedAt
                 FROM bill_receipts ORDER BY receipt_date DESC, id DESC;");
         }
 
         return QueryAsync<BillReceiptEntry>(@"SELECT
-                id, bill_no AS BillNo, party AS Party, bill_total AS BillTotal, bill_date AS BillDate, receipt_date AS ReceiptDate,
+                id, bill_no AS BillNo, lr_no AS LRNo, party AS Party, bill_total AS BillTotal, bill_date AS BillDate, receipt_date AS ReceiptDate,
                 rcvd AS RCVD, tds AS TDS, ded AS DED, mop AS MOP, mr AS MR, remarks AS Remarks, due_after AS DueAfter, created_at AS CreatedAt
                 FROM bill_receipts
                 WHERE trim(COALESCE(bill_no, '')) = @billNo
@@ -1892,10 +2562,10 @@ ORDER BY date DESC, sr, id;", new { challanNumbers = keys });
     public async Task<int> UpsertBillReceiptAsync(BillReceiptEntry entry)
     {
         var sql = entry.Id <= 0
-            ? @"INSERT INTO bill_receipts (bill_no, party, bill_total, bill_date, receipt_date, rcvd, tds, ded, mop, mr, remarks, due_after, created_at)
-                VALUES (@BillNo, @Party, @BillTotal, @BillDate, @ReceiptDate, @RCVD, @TDS, @DED, @MOP, @MR, @Remarks, @DueAfter, @CreatedAt)
+            ? @"INSERT INTO bill_receipts (bill_no, lr_no, party, bill_total, bill_date, receipt_date, rcvd, tds, ded, mop, mr, remarks, due_after, created_at)
+                VALUES (@BillNo, @LRNo, @Party, @BillTotal, @BillDate, @ReceiptDate, @RCVD, @TDS, @DED, @MOP, @MR, @Remarks, @DueAfter, @CreatedAt)
                 RETURNING id;"
-            : @"UPDATE bill_receipts SET bill_no = @BillNo, party = @Party, bill_total = @BillTotal, bill_date = @BillDate,
+            : @"UPDATE bill_receipts SET bill_no = @BillNo, lr_no = @LRNo, party = @Party, bill_total = @BillTotal, bill_date = @BillDate,
                     receipt_date = @ReceiptDate, rcvd = @RCVD, tds = @TDS, ded = @DED, mop = @MOP, mr = @MR, remarks = @Remarks, due_after = @DueAfter, created_at = @CreatedAt
                 WHERE id = @Id;
                SELECT @Id;";
@@ -1997,6 +2667,22 @@ ORDER BY date DESC, sr, id;", new { challanNumbers = keys });
 
     public Task<IEnumerable<ReportingTrackEntry>> GetReportingTracksAsync(int trackingEntryId) =>
         QueryAsync<ReportingTrackEntry>("SELECT id AS Id, tracking_entry_id AS TrackingEntryId, report_date_time AS ReportDateTime, remarks AS Remarks FROM reporting_tracks WHERE tracking_entry_id = @trackingEntryId ORDER BY report_date_time;", new { trackingEntryId });
+
+    public Task<IEnumerable<TrackingLatestReportItem>> GetLatestTrackingReportsAsync() =>
+        QueryAsync<TrackingLatestReportItem>(@"
+SELECT
+    t.id AS TrackingEntryId,
+    r.report_date_time AS ReportDateTime,
+    COALESCE(r.remarks, '') AS Remarks
+FROM tracking_entries t
+LEFT JOIN LATERAL (
+    SELECT report_date_time, remarks
+    FROM reporting_tracks
+    WHERE tracking_entry_id = t.id
+    ORDER BY report_date_time DESC, id DESC
+    LIMIT 1
+) r ON TRUE
+ORDER BY t.id;");
 
     public Task<IEnumerable<AppUserInfo>> GetUsersAsync() =>
         QueryAsync<AppUserInfo>(@"

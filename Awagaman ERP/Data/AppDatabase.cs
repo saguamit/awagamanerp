@@ -411,6 +411,7 @@ CREATE TABLE IF NOT EXISTS VehicleLedger (
                     ExecuteNonQuery(c, @"CREATE TABLE IF NOT EXISTS BillReceipts (
                         Id INTEGER PRIMARY KEY AUTOINCREMENT,
                         BillNo TEXT NOT NULL,
+                        LRNo TEXT,
                         Party TEXT,
                         BillTotal REAL NOT NULL DEFAULT 0,
                         BillDate TEXT,
@@ -423,6 +424,7 @@ CREATE TABLE IF NOT EXISTS VehicleLedger (
                         Remarks TEXT,
                         DueAfter REAL NOT NULL DEFAULT 0,
                         CreatedAt TEXT NOT NULL);");
+                    TryAddColumn(c, "BillReceipts", "LRNo", "TEXT", "EnsureBillTablesExist.BillReceipts.LRNo");
                     ExecuteNonQuery(c, "CREATE INDEX IF NOT EXISTS IX_BillReceipts_BillNo ON BillReceipts(BillNo);");
                 }
             }

@@ -326,40 +326,7 @@ WHERE LOWER(TRIM(COALESCE(LRNo, ''))) = LOWER(TRIM(@lrNo))
 
         public List<LREntry> GetByLRNumbers(IEnumerable<string> lrNumbers)
         {
-            var keys = (lrNumbers ?? Enumerable.Empty<string>())
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Select(x => x.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            if (keys.Count == 0) return new List<LREntry>();
-
-            if (BackendSettings.UseRemoteApi)
-            {
-                var lookup = new HashSet<string>(keys, StringComparer.OrdinalIgnoreCase);
-                return GetAllRemoteSafe()
-                    .Where(x => x != null && lookup.Contains((x.LRNo ?? string.Empty).Trim()))
-                    .OrderBy(x => x.Id)
-                    .ToList();
-            }
-
-            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
-            using (var command = connection.CreateCommand())
-            {
-                var paramNames = keys.Select((_, i) => "@lr" + i).ToList();
-                command.CommandText = $"SELECT * FROM LREntries WHERE TRIM(COALESCE(LRNo,'')) IN ({string.Join(",", paramNames)}) ORDER BY Id;";
-                for (var i = 0; i < keys.Count; i++)
-                {
-                    command.Parameters.AddWithValue(paramNames[i], keys[i]);
-                }
-
-                var list = new List<LREntry>();
-                connection.Open();
-                using (var reader = command.ExecuteReader())
-                {
-                    while (reader.Read()) list.Add(ReadEntry(reader));
-                }
-                return list;
-            }
+            return GetByLrNumbers(lrNumbers);
         }
 
         public List<LREntry> GetByChallanNumbers(IEnumerable<string> challanNumbers)
@@ -420,6 +387,77 @@ WHERE TRIM(COALESCE(BillNo,'')) = @billNo
 ORDER BY Id;", connection))
             {
                 command.Parameters.AddWithValue("@billNo", billNo);
+                var list = new List<LREntry>();
+                connection.Open();
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read()) list.Add(ReadEntry(reader));
+                }
+                return list;
+            }
+        }
+
+        public LREntry GetById(int id)
+        {
+            if (id <= 0) return null;
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                try
+                {
+                    return RemoteApiClient.Get<LREntry>($"api/lr/{id}");
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = new SQLiteCommand("SELECT * FROM LREntries WHERE Id = @id LIMIT 1;", connection))
+            {
+                command.Parameters.AddWithValue("@id", id);
+                connection.Open();
+                using (var reader = command.ExecuteReader())
+                {
+                    return reader.Read() ? ReadEntry(reader) : null;
+                }
+            }
+        }
+
+        public List<LREntry> GetByLrNumbers(IEnumerable<string> lrNumbers)
+        {
+            var keys = (lrNumbers ?? Enumerable.Empty<string>())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (keys.Count == 0) return new List<LREntry>();
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                try
+                {
+                    return RemoteApiClient.Post<List<LREntry>>("api/lr/by-nos", keys)?
+                               .OrderBy(x => x.Id)
+                               .ToList()
+                           ?? new List<LREntry>();
+                }
+                catch
+                {
+                }
+            }
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = connection.CreateCommand())
+            {
+                var paramNames = keys.Select((_, i) => "@lr" + i).ToList();
+                command.CommandText = $"SELECT * FROM LREntries WHERE TRIM(COALESCE(LRNo,'')) IN ({string.Join(",", paramNames)}) ORDER BY Id;";
+                for (var i = 0; i < keys.Count; i++)
+                {
+                    command.Parameters.AddWithValue(paramNames[i], keys[i]);
+                }
+
                 var list = new List<LREntry>();
                 connection.Open();
                 using (var reader = command.ExecuteReader())

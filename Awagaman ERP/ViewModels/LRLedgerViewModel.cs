@@ -308,6 +308,51 @@ namespace Awagaman_ERP.ViewModels
             OnPropertyChanged(nameof(CanGoNext));
         }
 
+        public void RemoveOptimisticEntry(LREntry entry)
+        {
+            if (entry == null)
+            {
+                return;
+            }
+
+            _suppressPersistence = true;
+            try
+            {
+                var existing = Entries.FirstOrDefault(x => ReferenceEquals(x, entry) ||
+                    (entry.Id > 0 && x.Id == entry.Id) ||
+                    (!string.IsNullOrWhiteSpace(entry.LRNo) &&
+                     string.Equals(x.LRNo, entry.LRNo, StringComparison.OrdinalIgnoreCase)));
+                if (existing != null)
+                {
+                    Entries.Remove(existing);
+                }
+
+                existing = PagedEntries.FirstOrDefault(x => ReferenceEquals(x, entry) ||
+                    (entry.Id > 0 && x.Id == entry.Id) ||
+                    (!string.IsNullOrWhiteSpace(entry.LRNo) &&
+                     string.Equals(x.LRNo, entry.LRNo, StringComparison.OrdinalIgnoreCase)));
+                if (existing != null)
+                {
+                    PagedEntries.Remove(existing);
+                }
+            }
+            finally
+            {
+                _suppressPersistence = false;
+            }
+
+            _totalCount = Math.Max(0, _totalCount - 1);
+            FilteredEntriesCount = Math.Max(0, _totalCount);
+            _countDirty = true;
+            _nextPageCache = null;
+            _prevPageCache = null;
+            OnPropertyChanged(nameof(TotalCount));
+            OnPropertyChanged(nameof(PageInfo));
+            OnPropertyChanged(nameof(TotalPages));
+            OnPropertyChanged(nameof(CanGoPrevious));
+            OnPropertyChanged(nameof(CanGoNext));
+        }
+
         public void SetSort(string column, bool ascending)
         {
             var normalized = column ?? "";

@@ -263,6 +263,36 @@ ORDER BY Date DESC, Id DESC;", c))
             }
         }
 
+        public decimal GetBankNet()
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetAll().Sum(x => x.BankDr - x.BankCr);
+            }
+
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand("SELECT COALESCE(SUM(BankDr - BankCr), 0) FROM CashBankStatements;", c))
+            {
+                c.Open();
+                return Convert.ToDecimal(cmd.ExecuteScalar() ?? 0m);
+            }
+        }
+
+        public decimal GetCashNet()
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return GetAll().Sum(x => x.CashDr - x.CashCr);
+            }
+
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand("SELECT COALESCE(SUM(CashDr - CashCr), 0) FROM CashBankStatements;", c))
+            {
+                c.Open();
+                return Convert.ToDecimal(cmd.ExecuteScalar() ?? 0m);
+            }
+        }
+
         public void Upsert(CashBankStatementEntry entry)
         {
             if (entry == null) return;

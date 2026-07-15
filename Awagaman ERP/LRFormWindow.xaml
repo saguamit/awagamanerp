@@ -204,7 +204,7 @@
                                 <TextBox x:Name="ConsignorNameBox" Text="{Binding CurrentEntry.ConsignorName, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,12" LostFocus="PartyName_LostFocus" TextChanged="ConsignorName_TextChanged" />
                                 <Popup x:Name="ConsignorPopup" PlacementTarget="{Binding ElementName=ConsignorNameBox}" Placement="Bottom" StaysOpen="False" Width="{Binding ActualWidth, ElementName=ConsignorNameBox}">
                                     <Border BorderBrush="#AAA" BorderThickness="1" Background="White" CornerRadius="4">
-                                        <ListBox x:Name="ConsignorSuggestionList" MaxHeight="200" FontSize="13" SelectionChanged="ConsignorSuggestionList_SelectionChanged" />
+                                        <ListBox x:Name="ConsignorSuggestionList" MaxHeight="200" FontSize="13" SelectionChanged="ConsignorSuggestionList_SelectionChanged" PreviewMouseLeftButtonDown="ConsignorSuggestionList_PreviewMouseLeftButtonDown" />
                                     </Border>
                                 </Popup>
                             </Grid>
@@ -223,7 +223,7 @@
                                 <TextBox x:Name="ConsigneeNameBox" Text="{Binding CurrentEntry.ConsigneeName, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,12" LostFocus="ConsigneeName_LostFocus" TextChanged="ConsigneeName_TextChanged" />
                                 <Popup x:Name="ConsigneePopup" PlacementTarget="{Binding ElementName=ConsigneeNameBox}" Placement="Bottom" StaysOpen="False" Width="{Binding ActualWidth, ElementName=ConsigneeNameBox}">
                                     <Border BorderBrush="#AAA" BorderThickness="1" Background="White" CornerRadius="4">
-                                        <ListBox x:Name="ConsigneeSuggestionList" MaxHeight="200" FontSize="13" SelectionChanged="ConsigneeSuggestionList_SelectionChanged" />
+                                        <ListBox x:Name="ConsigneeSuggestionList" MaxHeight="200" FontSize="13" SelectionChanged="ConsigneeSuggestionList_SelectionChanged" PreviewMouseLeftButtonDown="ConsigneeSuggestionList_PreviewMouseLeftButtonDown" />
                                     </Border>
                                 </Popup>
                             </Grid>
@@ -444,7 +444,8 @@
                                             <ListBox x:Name="BillPartySuggestionList"
                                                      MaxHeight="200"
                                                      FontSize="13"
-                                                     SelectionChanged="BillPartySuggestionList_SelectionChanged" />
+                                                     SelectionChanged="BillPartySuggestionList_SelectionChanged"
+                                                     PreviewMouseLeftButtonDown="BillPartySuggestionList_PreviewMouseLeftButtonDown" />
                                         </Border>
                                     </Popup>
                                 </Grid>

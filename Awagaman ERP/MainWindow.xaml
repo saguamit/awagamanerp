@@ -591,7 +591,7 @@
                                         <StackPanel Grid.Row="1" Margin="0,16,0,0">
                                             <TextBlock Text="Outstanding" Style="{StaticResource DashboardMetricLabel}" Foreground="#166534" />
                                             <TextBlock x:Name="DashboardOutstanding" Text="Rs. 0.00" Style="{StaticResource DashboardMetricValue}" Foreground="#14532D" Margin="0,4,0,0" />
-                                            <TextBlock Text="Amount pending across bill records" Style="{StaticResource DashboardMetricHint}" Foreground="#166534" Margin="0,6,0,0" />
+                                            <TextBlock x:Name="DashboardPendingBills" Text="0 Pending Bills" FontSize="16" FontWeight="SemiBold" Foreground="#166534" Margin="0,8,0,0" />
                                         </StackPanel>
                                     </Grid>
                                 </Border>
@@ -959,13 +959,13 @@
                                     <DataGridTextColumn Header="OTHR" Binding="{Binding OTHR, StringFormat=N2}" Width="60" IsReadOnly="True" />
                                     <DataGridTextColumn Header="St. Charge" Binding="{Binding StCharge, StringFormat=N2}" Width="80" IsReadOnly="True" />
                                     <DataGridTextColumn Header="TOTAL" Binding="{Binding Total, StringFormat=N2}" Width="80" IsReadOnly="True" Foreground="#18609A" FontWeight="SemiBold" />
-                                    <DataGridTextColumn Header="RCVD" Binding="{Binding RCVD, StringFormat=N2}" Width="70" />
-                                    <DataGridTextColumn Header="TDS" Binding="{Binding TDS, StringFormat=N2}" Width="60" />
-                                    <DataGridTextColumn Header="DED" Binding="{Binding DED, StringFormat=N2}" Width="60" />
+                                    <DataGridTextColumn Header="RCVD" Binding="{Binding RCVD, StringFormat=N2}" Width="70" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="TDS" Binding="{Binding TDS, StringFormat=N2}" Width="60" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="DED" Binding="{Binding DED, StringFormat=N2}" Width="60" IsReadOnly="True" />
                                     <DataGridTextColumn Header="DUE" Binding="{Binding Due, StringFormat=N2}" Width="80" IsReadOnly="True" Foreground="#DC2626" FontWeight="Bold" />
-                                    <DataGridTextColumn Header="MOP" Binding="{Binding MOP}" Width="60" />
-                                    <DataGridTextColumn Header="MR" Binding="{Binding MR}" Width="90" />
-                                    <DataGridTextColumn Header="RECEIVED DATE" Binding="{Binding Date, StringFormat=dd-MMM-yyyy}" Width="110" />
+                                    <DataGridTextColumn Header="MOP" Binding="{Binding MOP}" Width="60" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="MR" Binding="{Binding MR}" Width="90" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="RECEIVED DATE" Binding="{Binding Date, StringFormat=dd-MMM-yyyy}" Width="110" IsReadOnly="True" />
                                     <DataGridTextColumn Header="REMARKS" Binding="{Binding Remarks}" Width="180" />
                                 </DataGrid.Columns>
                             </DataGrid>

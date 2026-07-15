@@ -13,6 +13,9 @@ namespace Awagaman_ERP.Data
         decimal GetTotalFreight(string searchFilter = "");
         decimal GetTotalBalance(string searchFilter = "");
         int GetMaxSr();
+        LREntry GetById(int id);
+        List<LREntry> GetByLrNumbers(IEnumerable<string> lrNumbers);
+        List<LREntry> GetByBillNo(string billNo);
         void Upsert(LREntry entry);
         void Delete(LREntry entry);
     }

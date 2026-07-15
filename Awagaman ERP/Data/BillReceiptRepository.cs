@@ -95,9 +95,9 @@ ORDER BY ReceiptDate ASC, Id ASC;", c))
                 {
                     cmd.CommandText = @"
 INSERT INTO BillReceipts
-(BillNo, Party, BillTotal, BillDate, ReceiptDate, RCVD, TDS, DED, MOP, MR, Remarks, DueAfter, CreatedAt)
+(BillNo, LRNo, Party, BillTotal, BillDate, ReceiptDate, RCVD, TDS, DED, MOP, MR, Remarks, DueAfter, CreatedAt)
 VALUES
-(@BillNo, @Party, @BillTotal, @BillDate, @ReceiptDate, @RCVD, @TDS, @DED, @MOP, @MR, @Remarks, @DueAfter, @CreatedAt);
+(@BillNo, @LRNo, @Party, @BillTotal, @BillDate, @ReceiptDate, @RCVD, @TDS, @DED, @MOP, @MR, @Remarks, @DueAfter, @CreatedAt);
 SELECT last_insert_rowid();";
                 }
                 else
@@ -105,6 +105,7 @@ SELECT last_insert_rowid();";
                     cmd.CommandText = @"
 UPDATE BillReceipts
 SET BillNo = @BillNo,
+    LRNo = @LRNo,
     Party = @Party,
     BillTotal = @BillTotal,
     BillDate = @BillDate,
@@ -121,6 +122,7 @@ WHERE Id = @Id;";
                     cmd.Parameters.AddWithValue("@Id", entry.Id);
                 }
                 cmd.Parameters.AddWithValue("@BillNo", (object)entry.BillNo ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@LRNo", (object)entry.LRNo ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@Party", (object)entry.Party ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@BillTotal", entry.BillTotal);
                 cmd.Parameters.AddWithValue("@BillDate", entry.BillDate.HasValue ? (object)entry.BillDate.Value.ToString("o") : DBNull.Value);
@@ -174,6 +176,7 @@ WHERE Id = @Id;";
             {
                 Id = Convert.ToInt32(r["Id"]),
                 BillNo = r["BillNo"] as string,
+                LRNo = r["LRNo"] as string,
                 Party = r["Party"] as string,
                 BillTotal = Convert.ToDecimal(r["BillTotal"]),
                 BillDate = DateTime.TryParse(r["BillDate"] as string, out var billDate) ? billDate : (DateTime?)null,

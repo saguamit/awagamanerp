@@ -299,6 +299,48 @@ namespace Awagaman_ERP.ViewModels
             LoadPage();
         }
 
+        public void RemoveOptimisticEntry(BillEntry entry)
+        {
+            if (entry == null)
+            {
+                return;
+            }
+
+            var existing = Entries.FirstOrDefault(x => ReferenceEquals(x, entry) ||
+                (entry.Id > 0 && x.Id == entry.Id) ||
+                (!string.IsNullOrWhiteSpace(entry.BillNo) &&
+                 string.Equals(x.BillNo, entry.BillNo, StringComparison.OrdinalIgnoreCase) &&
+                 string.Equals((x.LRNo ?? string.Empty).Trim(), (entry.LRNo ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase)));
+            if (existing != null)
+            {
+                Entries.Remove(existing);
+            }
+
+            existing = PagedEntries.FirstOrDefault(x => ReferenceEquals(x, entry) ||
+                (entry.Id > 0 && x.Id == entry.Id) ||
+                (!string.IsNullOrWhiteSpace(entry.BillNo) &&
+                 string.Equals(x.BillNo, entry.BillNo, StringComparison.OrdinalIgnoreCase) &&
+                 string.Equals((x.LRNo ?? string.Empty).Trim(), (entry.LRNo ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase)));
+            if (existing != null)
+            {
+                PagedEntries.Remove(existing);
+                ApplyGroupingAndDisplay(PagedEntries);
+            }
+
+            _totalCount = Math.Max(0, _totalCount - 1);
+            FilteredEntriesCount = Math.Max(0, _totalCount);
+            _countDirty = true;
+            _nextPageCache = null;
+            _prevPageCache = null;
+            OnPropertyChanged(nameof(TotalCount));
+            OnPropertyChanged(nameof(PageInfo));
+            OnPropertyChanged(nameof(TotalPages));
+            OnPropertyChanged(nameof(CanGoPrevious));
+            OnPropertyChanged(nameof(CanGoNext));
+            OnPropertyChanged(nameof(CanGoFirst));
+            OnPropertyChanged(nameof(CanGoLast));
+        }
+
         public void GoToNextPage()
         {
             if (!CanGoNext) return;

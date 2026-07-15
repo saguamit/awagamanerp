@@ -432,6 +432,55 @@ namespace Awagaman_ERP.Data
             }
         }
 
+        public int GetDueCount(string searchFilter = "", bool useLhsDerived = false)
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                IEnumerable<ChallanEntry> rows = GetAllRemoteSafe();
+                if (!string.IsNullOrWhiteSpace(searchFilter))
+                {
+                    rows = rows.Where(e =>
+                        Contains(e.ChallanNumber, searchFilter) ||
+                        Contains(e.LRNumber, searchFilter) ||
+                        Contains(e.VehicleNumber, searchFilter) ||
+                        Contains(e.VehicleType, searchFilter) ||
+                        Contains(e.DriverName, searchFilter) ||
+                        Contains(e.BrokerName, searchFilter) ||
+                        Contains(e.From, searchFilter) ||
+                        Contains(e.To, searchFilter) ||
+                        Contains(e.OwnerName, searchFilter));
+                }
+
+                return rows.Count(x => (useLhsDerived ? x.ChallanDue : x.Due) > 0m);
+            }
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = connection.CreateCommand())
+            {
+                var dueExpr = useLhsDerived
+                    ? "(((LorryHire + OtherAmount) - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash)"
+                    : "((LorryHire - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash)";
+
+                if (string.IsNullOrWhiteSpace(searchFilter))
+                {
+                    command.CommandText = $"SELECT COUNT(*) FROM {ActiveTableName} WHERE {dueExpr} > 0;";
+                }
+                else
+                {
+                    command.CommandText = $@"SELECT COUNT(*) FROM {ActiveTableName} WHERE {dueExpr} > 0 AND (
+                        ChallanNumber LIKE @filter OR LRNumber LIKE @filter OR VehicleNumber LIKE @filter 
+                        OR VehicleType LIKE @filter OR DriverName LIKE @filter OR DriverMobile LIKE @filter OR BrokerName LIKE @filter 
+                        OR FromLocation LIKE @filter OR ToLocation LIKE @filter OR OwnerName LIKE @filter
+                        OR EngineNo LIKE @filter OR LicenceNo LIKE @filter OR PolicyNo LIKE @filter OR ChassisNo LIKE @filter
+                        OR PAN LIKE @filter OR PaidTo LIKE @filter OR Remarks LIKE @filter);";
+                    command.Parameters.AddWithValue("@filter", $"%{searchFilter}%");
+                }
+
+                connection.Open();
+                return Convert.ToInt32(command.ExecuteScalar());
+            }
+        }
+
         public decimal GetTotalDueAdvanced(string challanNo, string lrNo, string from, string to, bool useLhsDerived = false)
         {
             if (BackendSettings.UseRemoteApi)
@@ -474,6 +523,37 @@ namespace Awagaman_ERP.Data
                     : $"SELECT COALESCE(SUM((LorryHire - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash), 0) FROM {ActiveTableName} {where};";
                 connection.Open();
                 return Convert.ToDecimal(command.ExecuteScalar() ?? 0m);
+            }
+        }
+
+        public int GetDueCountAdvanced(string challanNo, string lrNo, string from, string to, bool useLhsDerived = false)
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                var rows = GetAllRemoteSafe().Where(e =>
+                    (string.IsNullOrWhiteSpace(challanNo) || Contains(e.ChallanNumber, challanNo)) &&
+                    (string.IsNullOrWhiteSpace(lrNo) || Contains(e.LRNumber, lrNo)) &&
+                    (string.IsNullOrWhiteSpace(from) || Contains(e.From, from)) &&
+                    (string.IsNullOrWhiteSpace(to) || Contains(e.To, to)));
+                return rows.Count(x => (useLhsDerived ? x.ChallanDue : x.Due) > 0m);
+            }
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = connection.CreateCommand())
+            {
+                var conditions = new List<string>();
+                if (!string.IsNullOrWhiteSpace(challanNo)) { conditions.Add("ChallanNumber LIKE @challanNo"); command.Parameters.AddWithValue("@challanNo", $"%{challanNo}%"); }
+                if (!string.IsNullOrWhiteSpace(lrNo)) { conditions.Add("LRNumber LIKE @lrNo"); command.Parameters.AddWithValue("@lrNo", $"%{lrNo}%"); }
+                if (!string.IsNullOrWhiteSpace(from)) { conditions.Add("FromLocation LIKE @from"); command.Parameters.AddWithValue("@from", $"%{from}%"); }
+                if (!string.IsNullOrWhiteSpace(to)) { conditions.Add("ToLocation LIKE @to"); command.Parameters.AddWithValue("@to", $"%{to}%"); }
+                var dueExpr = useLhsDerived
+                    ? "(((LorryHire + OtherAmount) - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash)"
+                    : "((LorryHire - LessTDS - AdvanceAmount + Detention + Hamali + Deduction) - BalancePaidNEFT - BalancePaidCash)";
+                conditions.Add($"{dueExpr} > 0");
+                var where = "WHERE " + string.Join(" AND ", conditions);
+                command.CommandText = $"SELECT COUNT(*) FROM {ActiveTableName} {where};";
+                connection.Open();
+                return Convert.ToInt32(command.ExecuteScalar());
             }
         }
 
@@ -524,7 +604,14 @@ namespace Awagaman_ERP.Data
             if (id <= 0) return null;
             if (BackendSettings.UseRemoteApi)
             {
-                return GetAllRemoteSafe().Find(e => e.Id == id);
+                try
+                {
+                    return RemoteApiClient.Get<ChallanEntry>(AppendLedgerQuery($"api/challans/{id}"));
+                }
+                catch
+                {
+                    return GetAllRemoteSafe().Find(e => e.Id == id);
+                }
             }
             using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
             using (var command = new SQLiteCommand($"SELECT * FROM {ActiveTableName} WHERE Id = @id LIMIT 1;", connection))
@@ -587,6 +674,54 @@ namespace Awagaman_ERP.Data
             }
 
             return GetAll();
+        }
+
+        public RemotePagedResult<ChallanEntry> GetPendingBookingPage(int pageNumber, int pageSize, string search = "")
+        {
+            pageNumber = pageNumber <= 0 ? 1 : pageNumber;
+            pageSize = pageSize <= 0 ? 50 : pageSize;
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                var route = AppendLedgerQuery($"api/challans/pending-bookings/page?page={pageNumber}&pageSize={pageSize}");
+                if (!string.IsNullOrWhiteSpace(search))
+                {
+                    route += $"&search={RemoteApiClient.UrlEncode(search)}";
+                }
+
+                try
+                {
+                    return RemoteApiClient.GetPage<ChallanEntry>(route);
+                }
+                catch
+                {
+                }
+            }
+
+            var items = GetPendingBookingItems(0);
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = search.Trim();
+                items = items
+                    .Where(entry =>
+                        (!string.IsNullOrWhiteSpace(entry.ChallanNumber) && entry.ChallanNumber.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                        || (!string.IsNullOrWhiteSpace(entry.LRNumber) && entry.LRNumber.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                        || (!string.IsNullOrWhiteSpace(entry.From) && entry.From.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                        || (!string.IsNullOrWhiteSpace(entry.To) && entry.To.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                        || (!string.IsNullOrWhiteSpace(entry.VehicleNumber) && entry.VehicleNumber.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                        || (!string.IsNullOrWhiteSpace(entry.BrokerName) && entry.BrokerName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                        || entry.Date.ToString("dd-MMM-yyyy").IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                    .ToList();
+            }
+
+            return new RemotePagedResult<ChallanEntry>
+            {
+                TotalCount = items.Count,
+                Items = items
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList()
+            };
         }
 
         public HashSet<int> GetChallanIdsWithComments()
@@ -850,6 +985,8 @@ LIMIT 1;";
             mirror.OwnerName = purchaseEntry.OwnerName;
             mirror.PAN = purchaseEntry.PAN;
             mirror.LorryHire = purchaseEntry.LorryHire;
+            mirror.BillAmount = purchaseEntry.BillAmount;
+            mirror.Margin = purchaseEntry.Margin;
             if (existingMirror == null)
             {
                 mirror.LessTDS = purchaseEntry.LessTDS;
@@ -866,8 +1003,6 @@ LIMIT 1;";
                 mirror.BalancePaidDate = purchaseEntry.BalancePaidDate;
                 mirror.PaidTo = purchaseEntry.PaidTo;
                 mirror.Remarks = purchaseEntry.Remarks;
-                mirror.BillAmount = purchaseEntry.BillAmount;
-                mirror.Margin = purchaseEntry.Margin;
                 mirror.PreserveImportedBilling = purchaseEntry.PreserveImportedBilling;
             }
 
@@ -977,6 +1112,48 @@ WHERE SourcePurchaseId = @SourcePurchaseId
             bool useLhsDerived = false)
         {
             return GetRemotePage(pageNumber, pageSize, searchFilter, sortColumn, sortAscending, challanNo, lrNo, from, to, useLhsDerived);
+        }
+
+        internal RemoteChallanLedgerPageResult GetRemoteLedgerPageResult(
+            int pageNumber,
+            int pageSize,
+            string searchFilter,
+            string sortColumn,
+            bool sortAscending,
+            string challanNo = null,
+            string lrNo = null,
+            string from = null,
+            string to = null,
+            bool useLhsDerived = false)
+        {
+            var query = AppendLedgerQuery($"api/challans/ledger-page?page={pageNumber}&pageSize={pageSize}&asc={sortAscending.ToString().ToLowerInvariant()}");
+            if (!string.IsNullOrWhiteSpace(searchFilter)) query += $"&search={RemoteApiClient.UrlEncode(searchFilter)}";
+            if (!string.IsNullOrWhiteSpace(sortColumn)) query += $"&sort={RemoteApiClient.UrlEncode(sortColumn)}";
+            if (!string.IsNullOrWhiteSpace(challanNo)) query += $"&challanNo={RemoteApiClient.UrlEncode(challanNo)}";
+            if (!string.IsNullOrWhiteSpace(lrNo)) query += $"&lrNo={RemoteApiClient.UrlEncode(lrNo)}";
+            if (!string.IsNullOrWhiteSpace(from)) query += $"&from={RemoteApiClient.UrlEncode(from)}";
+            if (!string.IsNullOrWhiteSpace(to)) query += $"&to={RemoteApiClient.UrlEncode(to)}";
+            if (useLhsDerived) query += "&useLhsDerived=true";
+
+            try
+            {
+                return RemoteApiClient.Get<RemoteChallanLedgerPageResult>(query) ?? new RemoteChallanLedgerPageResult();
+            }
+            catch
+            {
+                var page = GetRemotePage(pageNumber, pageSize, searchFilter, sortColumn, sortAscending, challanNo, lrNo, from, to, useLhsDerived);
+                var summary = string.IsNullOrWhiteSpace(challanNo) && string.IsNullOrWhiteSpace(lrNo) && string.IsNullOrWhiteSpace(from) && string.IsNullOrWhiteSpace(to)
+                    ? GetTotalDue(searchFilter, useLhsDerived)
+                    : GetTotalDueAdvanced(challanNo, lrNo, from, to, useLhsDerived);
+
+                return new RemoteChallanLedgerPageResult
+                {
+                    Items = page?.Items ?? new List<ChallanEntry>(),
+                    TotalCount = page?.TotalCount ?? 0,
+                    TotalDue = summary,
+                    CommentIds = new List<int>()
+                };
+            }
         }
 
         private RemotePagedResult<ChallanEntry> BuildRemotePageFromLocalSort(

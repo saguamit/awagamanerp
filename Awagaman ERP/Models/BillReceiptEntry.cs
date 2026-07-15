@@ -8,6 +8,7 @@ namespace Awagaman_ERP.Models
     {
         private int _id;
         private string _billNo;
+        private string _lrNo;
         private string _party;
         private decimal _billTotal;
         private DateTime? _billDate;
@@ -23,6 +24,7 @@ namespace Awagaman_ERP.Models
 
         public int Id { get => _id; set { _id = value; OnPropertyChanged(); } }
         public string BillNo { get => _billNo; set { _billNo = value; OnPropertyChanged(); } }
+        public string LRNo { get => _lrNo; set { _lrNo = value; OnPropertyChanged(); } }
         public string Party { get => _party; set { _party = value; OnPropertyChanged(); } }
         public decimal BillTotal { get => _billTotal; set { _billTotal = value; OnPropertyChanged(); } }
         public DateTime? BillDate { get => _billDate; set { _billDate = value; OnPropertyChanged(); } }
