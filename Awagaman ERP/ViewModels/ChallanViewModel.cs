@@ -36,6 +36,7 @@ namespace Awagaman_ERP.ViewModels
         private string _sortColumn = "ChallanNumber";
         private bool _sortAscending = false;
         private bool _useLhsDerivedValues;
+        private int _frozenColumnCount;
 
         // Exposed for the Sorting event handler to determine toggle direction
         public bool IsCurrentSortAscending
@@ -88,6 +89,16 @@ namespace Awagaman_ERP.ViewModels
 
         public string PageInfo => $"Page {CurrentPage}";
         public bool HasLoadedPage => _pageLoaded && !_countDirty;
+        public int FrozenColumnCount
+        {
+            get => _frozenColumnCount;
+            set
+            {
+                if (_frozenColumnCount == value) return;
+                _frozenColumnCount = Math.Max(0, value);
+                OnPropertyChanged();
+            }
+        }
         public bool UseLhsDerivedValues
         {
             get => _useLhsDerivedValues;
@@ -306,6 +317,11 @@ namespace Awagaman_ERP.ViewModels
                 if (data.TryGetValue("ShowRemarks", out v)) _showRemarks = (bool)v;
                 if (data.TryGetValue("ShowBillAmount", out v)) _showBillAmount = (bool)v;
                 if (data.TryGetValue("ShowMargin", out v)) _showMargin = (bool)v;
+                if (data.TryGetValue("FrozenColumnCount", out v))
+                {
+                    if (v is int iv) _frozenColumnCount = Math.Max(0, iv);
+                    else if (int.TryParse(v?.ToString() ?? string.Empty, out iv)) _frozenColumnCount = Math.Max(0, iv);
+                }
                 if (data.TryGetValue("SortColumn", out var sv)) _sortColumn = sv?.ToString() ?? "";
                 if (data.TryGetValue("SortAscending", out var av)) _sortAscending = av is bool b ? b : true;
             }
@@ -355,6 +371,7 @@ namespace Awagaman_ERP.ViewModels
                     ["ShowRemarks"] = _showRemarks,
                     ["ShowBillAmount"] = _showBillAmount,
                     ["ShowMargin"] = _showMargin,
+                    ["FrozenColumnCount"] = _frozenColumnCount,
                     ["SortColumn"] = _sortColumn,
                     ["SortAscending"] = _sortAscending
                 };

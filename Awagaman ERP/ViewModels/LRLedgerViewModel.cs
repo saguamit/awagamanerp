@@ -110,43 +110,71 @@ namespace Awagaman_ERP.ViewModels
             try
             {
                 PagedEntries.Clear();
-                if (_countDirty)
-                {
-                    _totalCount = string.IsNullOrEmpty(_searchFilter)
-                        ? _repository.GetTotalCount()
-                        : _repository.GetTotalCount(_searchFilter);
-                    _countDirty = false;
-                }
-
-                List<LREntry> items;
                 var sortColumn = GetEffectiveSortColumn();
                 var sortAscending = GetEffectiveSortAscending();
-                if (string.IsNullOrEmpty(_searchFilter))
+
+                if (BackendSettings.UseRemoteApi && _repository is LRRepository)
                 {
-                    items = _repository.GetPage(CurrentPage, PageSize, sortColumn, sortAscending);
+                    var result = LRRepository.GetRemoteLedgerPageResult(CurrentPage, PageSize, _searchFilter, sortColumn, sortAscending);
+                    var items = result?.Items ?? new List<LREntry>();
+                    _totalCount = result?.TotalCount ?? 0;
+                    _countDirty = false;
+                    ApplyDerivedLorryHire(items);
+                    PagedEntries = new ObservableCollection<LREntry>(items);
+                    MarkComments(PagedEntries, result?.CommentIds);
+
+                    if (CurrentPage < TotalPages)
+                    {
+                        if (string.IsNullOrEmpty(_searchFilter))
+                            _nextPageCache = _repository.GetPage(CurrentPage + 1, PageSize, sortColumn, sortAscending);
+                        else
+                            _nextPageCache = _repository.Search(_searchFilter, CurrentPage + 1, PageSize, sortColumn, sortAscending);
+                    }
+                    else { _nextPageCache = null; }
+
+                    FilteredEntriesCount = _totalCount;
+                    FilteredTotalFreight = result?.TotalFreight ?? 0m;
+                    FilteredTotalBalance = result?.TotalBalance ?? 0m;
                 }
                 else
                 {
-                    items = _repository.Search(_searchFilter, CurrentPage, PageSize, sortColumn, sortAscending);
-                    if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.Search(_searchFilter, 1, PageSize, sortColumn, sortAscending); }
-                }
+                    if (_countDirty)
+                    {
+                        _totalCount = string.IsNullOrEmpty(_searchFilter)
+                            ? _repository.GetTotalCount()
+                            : _repository.GetTotalCount(_searchFilter);
+                        _countDirty = false;
+                    }
 
-                ApplyDerivedLorryHire(items);
-                PagedEntries = new ObservableCollection<LREntry>(items);
-                MarkComments(PagedEntries);
-
-                if (CurrentPage < TotalPages)
-                {
+                    List<LREntry> items;
                     if (string.IsNullOrEmpty(_searchFilter))
-                        _nextPageCache = _repository.GetPage(CurrentPage + 1, PageSize, sortColumn, sortAscending);
+                    {
+                        items = _repository.GetPage(CurrentPage, PageSize, sortColumn, sortAscending);
+                    }
                     else
-                        _nextPageCache = _repository.Search(_searchFilter, CurrentPage + 1, PageSize, sortColumn, sortAscending);
-                }
-                else { _nextPageCache = null; }
+                    {
+                        items = _repository.Search(_searchFilter, CurrentPage, PageSize, sortColumn, sortAscending);
+                        if (!items.Any() && CurrentPage > 1) { CurrentPage = 1; items = _repository.Search(_searchFilter, 1, PageSize, sortColumn, sortAscending); }
+                    }
 
-                FilteredEntriesCount = _totalCount;
-                FilteredTotalFreight = _repository.GetTotalFreight(_searchFilter);
-                FilteredTotalBalance = _repository.GetTotalBalance(_searchFilter);
+                    ApplyDerivedLorryHire(items);
+                    PagedEntries = new ObservableCollection<LREntry>(items);
+                    MarkComments(PagedEntries);
+
+                    if (CurrentPage < TotalPages)
+                    {
+                        if (string.IsNullOrEmpty(_searchFilter))
+                            _nextPageCache = _repository.GetPage(CurrentPage + 1, PageSize, sortColumn, sortAscending);
+                        else
+                            _nextPageCache = _repository.Search(_searchFilter, CurrentPage + 1, PageSize, sortColumn, sortAscending);
+                    }
+                    else { _nextPageCache = null; }
+
+                    FilteredEntriesCount = _totalCount;
+                    FilteredTotalFreight = _repository.GetTotalFreight(_searchFilter);
+                    FilteredTotalBalance = _repository.GetTotalBalance(_searchFilter);
+                }
+
                 OnPropertyChanged(nameof(PageInfo));
                 OnPropertyChanged(nameof(TotalCount));
                 OnPropertyChanged(nameof(TotalPages));
@@ -417,11 +445,13 @@ namespace Awagaman_ERP.ViewModels
 
         public int GetNextSr() => _repository.GetMaxSr() + 1;
 
-        private void MarkComments(IEnumerable<LREntry> items)
+        private void MarkComments(IEnumerable<LREntry> items, IEnumerable<int> commentIds = null)
         {
             try
             {
-                var ids = new Data.CommentRepository().GetLREntryIdsWithComments();
+                var ids = commentIds != null
+                    ? new HashSet<int>(commentIds)
+                    : new Data.CommentRepository().GetLREntryIdsWithComments();
                 foreach (var e in items)
                     if (e != null) e.HasComments = ids.Contains(e.Id);
             }

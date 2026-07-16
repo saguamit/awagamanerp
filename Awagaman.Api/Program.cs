@@ -513,6 +513,17 @@ lrs.MapGet("/page", async (int page, int pageSize, string? search, string? sort,
         return Results.Problem(ex.ToString(), statusCode: 500);
     }
 });
+lrs.MapGet("/ledger-page", async (int page, int pageSize, string? search, string? sort, bool? asc, AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetLRLedgerPageAsync(page, pageSize, search, sort, asc ?? true));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
 lrs.MapGet("/pending-bill-page", async (int page, int pageSize, string? search, AwagamanRepository repo) =>
 {
     try

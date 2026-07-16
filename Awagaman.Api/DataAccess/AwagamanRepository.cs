@@ -1493,6 +1493,75 @@ WHERE source_purchase_id = @SourcePurchaseId
         return new PagedResult<LREntry> { Items = items, TotalCount = total };
     }
 
+    public async Task<LRLedgerPageResult> GetLRLedgerPageAsync(int page, int pageSize, string? search, string? sortColumn, bool sortAscending)
+    {
+        page = NormalizePage(page);
+        pageSize = NormalizePageSize(pageSize);
+        var offset = (page - 1) * pageSize;
+        var parameters = new DynamicParameters();
+        parameters.Add("limit", pageSize);
+        parameters.Add("offset", offset);
+        var where = string.Empty;
+        var q = (search ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            where = @"WHERE lrno ILIKE @search OR consignor_name ILIKE @search OR consignor_address ILIKE @search OR consignor_gst ILIKE @search OR
+                consignee_name ILIKE @search OR consignee_address ILIKE @search OR consignee_gst ILIKE @search OR
+                from_location ILIKE @search OR to_location ILIKE @search OR
+                vehicle_no ILIKE @search OR vehicle_type ILIKE @search OR
+                pkg_type ILIKE @search OR description ILIKE @search OR invoice ILIKE @search OR value ILIKE @search OR
+                bill_no ILIKE @search OR bill_party ILIKE @search OR broker ILIKE @search OR frt_type ILIKE @search OR pay_type ILIKE @search OR paid ILIKE @search OR
+                chno ILIKE @search";
+            parameters.Add("search", $"%{q}%");
+        }
+
+        var orderBy = BuildLROrderBy(sortColumn, sortAscending);
+        var select = @"SELECT
+            id, sr, lrno AS LRNo, date, consignor_name AS ConsignorName, consignor_address AS ConsignorAddress, consignor_gst AS ConsignorGST,
+            consignee_name AS ConsigneeName, consignee_address AS ConsigneeAddress, consignee_gst AS ConsigneeGST,
+            from_location AS ""From"", to_location AS ""To"", vehicle_no AS VehicleNo, vehicle_type AS VehicleType,
+            weight AS Weight, size_l AS SizeL, size_w AS SizeW, size_h AS SizeH, actual_weight AS ActualWeight, charged_weight AS ChargedWeight,
+            pkg AS PKG, pkg_type AS PkgType, description AS Description, invoice AS Invoice, value AS Value, chno AS CHNo,
+            total_freight AS TotalFreight, hamali AS Hamali, detention AS Detention, others AS Others, st_charge AS StCharge,
+            neft AS NEFT, cash AS CASH, tds AS TDS, ded AS Ded, bill_no AS BillNo, bill_date AS BillDate, bill AS BILL,
+            challan_lorry_hire AS ChallanLorryHire,
+            bill_party AS BillParty, broker AS Broker, frt_type AS FrtType, pay_type AS PayType, comm AS Comm, paid AS Paid,
+            preserve_imported_billing AS PreserveImportedBilling
+            FROM lr_entries";
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+
+        var summary = await conn.QuerySingleAsync<(int TotalCount, decimal TotalFreight, decimal TotalBalance)>(
+            $@"SELECT
+                    COUNT(*) AS TotalCount,
+                    COALESCE(SUM(total_freight), 0) AS TotalFreight,
+                    COALESCE(SUM((neft + cash - tds + ded)), 0) AS TotalBalance
+               FROM lr_entries
+               {where};",
+            parameters);
+
+        var items = (await conn.QueryAsync<LREntry>($"{select} {where} ORDER BY {orderBy} LIMIT @limit OFFSET @offset;", parameters)).ToList();
+
+        List<int> commentIds = new();
+        var pageIds = items.Select(x => x.Id).Distinct().ToArray();
+        if (pageIds.Length > 0)
+        {
+            commentIds = (await conn.QueryAsync<int>(
+                "SELECT DISTINCT lr_entry_id FROM lr_comments WHERE lr_entry_id = ANY(@ids);",
+                new { ids = pageIds })).ToList();
+        }
+
+        return new LRLedgerPageResult
+        {
+            TotalCount = summary.TotalCount,
+            TotalFreight = summary.TotalFreight,
+            TotalBalance = summary.TotalBalance,
+            CommentIds = commentIds,
+            Items = items
+        };
+    }
+
     public async Task<PagedResult<LREntry>> GetPendingBillLREntriesPageAsync(int page, int pageSize, string? search)
     {
         page = NormalizePage(page);

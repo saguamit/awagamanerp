@@ -21,6 +21,15 @@ namespace Awagaman_ERP.Data
         public decimal TotalBalance { get; set; }
     }
 
+    internal sealed class RemoteLRLedgerPageResult
+    {
+        public int TotalCount { get; set; }
+        public decimal TotalFreight { get; set; }
+        public decimal TotalBalance { get; set; }
+        public System.Collections.Generic.List<int> CommentIds { get; set; }
+        public System.Collections.Generic.List<Awagaman_ERP.Models.LREntry> Items { get; set; }
+    }
+
     internal sealed class RemoteBillSummary
     {
         public int TotalCount { get; set; }

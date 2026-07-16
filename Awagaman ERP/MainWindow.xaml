@@ -433,7 +433,7 @@
                                 <Button x:Name="TabTrackingLedger" Content="Tracking Ledger" Style="{StaticResource TabButtonStyle}" Width="134" Click="OpenTrackingLedger_Click" />
                             </StackPanel>
 
-                            <Button x:Name="TopResetDataButton" Grid.Column="1" Content="Reset Data" Background="#C62828" Foreground="White" BorderThickness="0" Padding="12,6" FontSize="12" Cursor="Hand" Click="ResetAllData_Click" ToolTip="Delete all ledger data" Margin="8,8,12,8" VerticalAlignment="Center" />
+                            <Button x:Name="TopResetDataButton" Grid.Column="1" Content="Reset Data" Background="#C62828" Foreground="White" BorderThickness="0" Padding="12,6" FontSize="12" Cursor="Hand" Click="ResetAllData_Click" ToolTip="Delete all ledger data" Margin="8,8,12,8" VerticalAlignment="Center" Visibility="Collapsed" />
                         </Grid>
                     </Border>
 
@@ -1358,7 +1358,7 @@
                             <!-- Create + Reset Buttons -->
                             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                                 <Button x:Name="CreatePurchaseButton" Content="+ Create Purchase" Style="{StaticResource GreenButtonStyle}" Click="OpenChallanForm_Click" ToolTip="Ctrl+N" Margin="0,0,8,0" />
-                                <Button x:Name="LedgerResetDataButton" Content="Reset Data" Background="#C62828" Foreground="White" BorderThickness="0" Padding="12,6" FontSize="12" Cursor="Hand" Click="ResetAllData_Click" ToolTip="Delete all ledger data" />
+                                <Button x:Name="LedgerResetDataButton" Content="Reset Data" Background="#C62828" Foreground="White" BorderThickness="0" Padding="12,6" FontSize="12" Cursor="Hand" Click="ResetAllData_Click" ToolTip="Delete all ledger data" Visibility="Collapsed" />
                             </StackPanel>
 
                         </Grid>

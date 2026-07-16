@@ -848,6 +848,54 @@ LRNo {dir}, Sr, Id";
             }
         }
 
+        internal static RemoteLRLedgerPageResult GetRemoteLedgerPageResult(int pageNumber, int pageSize, string searchFilter, string sortColumn, bool sortAscending)
+        {
+            var query = $"api/lr/ledger-page?page={pageNumber}&pageSize={pageSize}&asc={sortAscending.ToString().ToLowerInvariant()}";
+            if (!string.IsNullOrWhiteSpace(searchFilter)) query += $"&search={RemoteApiClient.UrlEncode(searchFilter)}";
+            if (!string.IsNullOrWhiteSpace(sortColumn)) query += $"&sort={RemoteApiClient.UrlEncode(sortColumn)}";
+
+            try
+            {
+                return RemoteApiClient.Get<RemoteLRLedgerPageResult>(query) ?? new RemoteLRLedgerPageResult();
+            }
+            catch
+            {
+                var page = GetRemotePage(pageNumber, pageSize, searchFilter, sortColumn, sortAscending);
+                var summaryQuery = "api/lr/summary";
+                if (!string.IsNullOrWhiteSpace(searchFilter))
+                {
+                    summaryQuery += $"?search={RemoteApiClient.UrlEncode(searchFilter)}";
+                }
+
+                RemoteLRSummary summary = null;
+                try
+                {
+                    summary = RemoteApiClient.Get<RemoteLRSummary>(summaryQuery);
+                }
+                catch
+                {
+                }
+
+                HashSet<int> commentIds = null;
+                try
+                {
+                    commentIds = new Data.CommentRepository().GetLREntryIdsWithComments();
+                }
+                catch
+                {
+                }
+
+                return new RemoteLRLedgerPageResult
+                {
+                    TotalCount = page?.TotalCount ?? 0,
+                    TotalFreight = summary?.TotalFreight ?? 0m,
+                    TotalBalance = summary?.TotalBalance ?? 0m,
+                    CommentIds = commentIds?.ToList() ?? new List<int>(),
+                    Items = page?.Items ?? new List<LREntry>()
+                };
+            }
+        }
+
         private sealed class RemoteExistsResult
         {
             public bool Exists { get; set; }

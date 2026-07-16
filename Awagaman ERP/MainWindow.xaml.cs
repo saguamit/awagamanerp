@@ -191,6 +191,43 @@ namespace Awagaman_ERP
         private readonly Dictionary<string, DateTime> _pendingBillPageCacheUtc = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private static readonly TimeSpan BillDueCacheLifetime = TimeSpan.FromMinutes(2);
 
+        private void AddFreezeMenuItems(ContextMenu menu, DataGrid grid, DataGridColumnHeader header, Action saveAction)
+        {
+            if (menu == null || grid == null || header?.Column == null || saveAction == null)
+            {
+                return;
+            }
+
+            if (menu.Items.Count > 0)
+            {
+                menu.Items.Add(new Separator());
+            }
+
+            var targetFrozenCount = Math.Max(0, header.Column.DisplayIndex + 1);
+            var freezeItem = new MenuItem
+            {
+                Header = $"Freeze Up To '{header.Column.Header}'"
+            };
+            freezeItem.Click += (_, __) =>
+            {
+                grid.FrozenColumnCount = Math.Min(targetFrozenCount, grid.Columns.Count);
+                saveAction();
+            };
+            menu.Items.Add(freezeItem);
+
+            var unfreezeItem = new MenuItem
+            {
+                Header = "Unfreeze All Columns",
+                IsEnabled = grid.FrozenColumnCount > 0
+            };
+            unfreezeItem.Click += (_, __) =>
+            {
+                grid.FrozenColumnCount = 0;
+                saveAction();
+            };
+            menu.Items.Add(unfreezeItem);
+        }
+
         private IChallanRepository GetActiveChallanRepository()
         {
             var repo = VM?.GetRepository() ?? _challanRepo;
@@ -9867,6 +9904,8 @@ namespace Awagaman_ERP
                 copyCol.Click += (_, __) => CopyColumnFromGrid(BillLedgerGrid, colRef);
                 menu.Items.Add(copyCol);
                 menu.Items.Add(new Separator());
+                AddFreezeMenuItems(menu, BillLedgerGrid, header, SaveBillColumnSettings);
+                menu.Items.Add(new Separator());
             }
             if (rowHeader != null || row != null)
             {
@@ -10274,6 +10313,7 @@ namespace Awagaman_ERP
                 var lines = new List<string>();
                 lines.Add($"_SortColumn:{BillVM?.GetSortColumn() ?? ""}");
                 lines.Add($"_SortAscending:{BillVM?.IsCurrentSortAscending}");
+                lines.Add($"_FrozenColumnCount:{Math.Max(0, BillLedgerGrid?.FrozenColumnCount ?? 0)}");
                 foreach (var col in BillLedgerGrid.Columns)
                 {
                     var h = (col.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", "").Trim();
@@ -10291,11 +10331,12 @@ namespace Awagaman_ERP
             {
                 var path = BillSettingsPath;
                 if (!System.IO.File.Exists(path)) return;
-                string sortCol = ""; bool sortAsc = true;
+                string sortCol = ""; bool sortAsc = true; int frozenColumnCount = 0;
                 foreach (var line in System.IO.File.ReadAllLines(path))
                 {
                     if (line.StartsWith("_SortColumn:")) { sortCol = line.Substring("_SortColumn:".Length); continue; }
                     if (line.StartsWith("_SortAscending:")) { bool.TryParse(line.Substring("_SortAscending:".Length), out sortAsc); continue; }
+                    if (line.StartsWith("_FrozenColumnCount:")) { int.TryParse(line.Substring("_FrozenColumnCount:".Length), out frozenColumnCount); continue; }
                     var parts = line.Split(':');
                     if (parts.Length >= 2)
                     {
@@ -10318,6 +10359,10 @@ namespace Awagaman_ERP
                      BillVM.IsCurrentSortAscending != sortAsc))
                 {
                     BillVM.SetSort(sortCol, sortAsc);
+                }
+                if (BillLedgerGrid != null)
+                {
+                    BillLedgerGrid.FrozenColumnCount = Math.Max(0, Math.Min(frozenColumnCount, BillLedgerGrid.Columns.Count));
                 }
             }
             catch { }
@@ -11618,6 +11663,15 @@ namespace Awagaman_ERP
                 var colRef = header.Column;
                 copyCol.Click += (_, __) => CopyColumnFromGrid(LedgerGrid, colRef);
                 menu.Items.Add(copyCol);
+                menu.Items.Add(new Separator());
+                AddFreezeMenuItems(menu, LedgerGrid, header, () =>
+                {
+                    if (VM != null)
+                    {
+                        VM.FrozenColumnCount = LedgerGrid.FrozenColumnCount;
+                        VM.SaveColumnSettings();
+                    }
+                });
                 menu.Items.Add(new Separator());
             }
 
@@ -13676,6 +13730,8 @@ namespace Awagaman_ERP
                 copyCol.Click += (_, __) => CopyColumnFromGrid(LRLedgerGrid, colRef);
                 menu.Items.Add(copyCol);
                 menu.Items.Add(new Separator());
+                AddFreezeMenuItems(menu, LRLedgerGrid, header, SaveLRColumnSettings);
+                menu.Items.Add(new Separator());
             }
             if (rowHeader != null || row != null)
             {
@@ -14442,6 +14498,7 @@ namespace Awagaman_ERP
             {
                 var cv = CollectionViewSource.GetDefaultView(LedgerGrid.ItemsSource);
                 cv?.SortDescriptions.Clear();
+                LedgerGrid.FrozenColumnCount = Math.Max(0, Math.Min(VM?.FrozenColumnCount ?? 0, LedgerGrid.Columns.Count));
             }
 
             if (BackendSettings.UseRemoteApi)
@@ -14490,6 +14547,11 @@ namespace Awagaman_ERP
                 VM.UseLhsDerivedValues = _isChallanLedgerMode;
                 VM.ShowOther = _isChallanLedgerMode;
                 VM.ShowLHS = _isChallanLedgerMode;
+            }
+
+            if (LedgerGrid != null)
+            {
+                LedgerGrid.FrozenColumnCount = Math.Max(0, Math.Min(VM?.FrozenColumnCount ?? 0, LedgerGrid.Columns.Count));
             }
 
             if (ChallanBalanceColumn != null)
@@ -14644,7 +14706,7 @@ namespace Awagaman_ERP
         private void ImportLR_Click(object sender, RoutedEventArgs e) { if (!EnsureAdminAccess("LR import")) return; var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "CSV Files|*.csv", Title = "Select LR Import File" }; if (dialog.ShowDialog() != true) return; try { var records = ReadCsvRecords(dialog.FileName); if (records.Count < 2) { MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } var headers = records[0]; var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase); for (int i = 0; i < headers.Length; i++) { var key = headers[i].Trim().Replace(".", "").Replace(" ", ""); if (!colMap.ContainsKey(key)) colMap[key] = new List<int>(); colMap[key].Add(i); } var repo = new LRRepository(); int imported = 0, errors = 0; int totalRows = records.Count - 1; var progress = ImportProgressBar; var status = ImportStatusText; if (progress != null) { progress.Visibility = Visibility.Visible; progress.Maximum = totalRows; progress.Value = 0; } if (status != null) status.Visibility = Visibility.Visible; var importProgress = BeginImportProgress("Importing LR", totalRows); try { for (int i = 1; i < records.Count; i++) { try { var parts = records[i]; var entry = new LREntry(); entry.LRNo = GetFirstCol(parts, colMap, "LRNo", "LRNO", "LR"); entry.Date = ParseDate(GetFirstCol(parts, colMap, "Date", "DATE")); entry.ConsignorName = GetFirstCol(parts, colMap, "ConsignorName", "Consignor"); entry.ConsignorAddress = GetFirstCol(parts, colMap, "ConsignorAddress", "ConsignorAddr", "Consignor Address"); entry.ConsignorGST = GetFirstCol(parts, colMap, "ConsignorGST", "Consignor GST"); entry.ConsigneeName = GetFirstCol(parts, colMap, "ConsigneeName", "Consignee"); entry.ConsigneeAddress = GetFirstCol(parts, colMap, "ConsigneeAddress", "ConsigneeAddr", "Consignee Address"); entry.ConsigneeGST = GetFirstCol(parts, colMap, "ConsigneeGST", "Consignee GST"); entry.From = GetFirstCol(parts, colMap, "From", "FROM"); entry.To = GetFirstCol(parts, colMap, "To", "TO"); entry.VehicleNo = GetFirstCol(parts, colMap, "VehicleNo", "Vehicle", "Vehicle No."); entry.VehicleType = GetFirstCol(parts, colMap, "VehicleType", "Type"); entry.SizeL = ParseDecimal(GetFirstCol(parts, colMap, "L", "SizeL")); entry.SizeW = ParseDecimal(GetFirstCol(parts, colMap, "W", "SizeW")); entry.SizeH = ParseDecimal(GetFirstCol(parts, colMap, "H", "SizeH")); entry.ActualWeight = ParseDecimal(GetFirstCol(parts, colMap, "ActualWeight", "Actual Weight", "WEIGHT")); entry.ChargedWeight = ParseDecimal(GetFirstCol(parts, colMap, "ChargedWeight", "Charged Weight", "WEIGHT")); int.TryParse(GetFirstCol(parts, colMap, "PKG"), out int pkg); entry.PKG = pkg; entry.PkgType = GetFirstCol(parts, colMap, "PkgType", "PackageType", "Pkg Type"); entry.Description = GetFirstCol(parts, colMap, "Description", "DESCRIPTION", "Desc"); entry.Invoice = GetFirstCol(parts, colMap, "Invoice"); entry.Value = GetFirstCol(parts, colMap, "Value"); entry.CHNo = GetFirstCol(parts, colMap, "CHNo", "CHNO", "ChallanNo", "CH No.", "CH No"); entry.TotalFreight = ParseDecimal(GetFirstCol(parts, colMap, "TotalFreight", "Freight")); entry.Hamali = ParseDecimal(GetFirstCol(parts, colMap, "Hamali")); entry.Detention = ParseDecimal(GetFirstCol(parts, colMap, "Detention")); entry.Others = ParseDecimal(GetFirstCol(parts, colMap, "Others", "Other", "OTHR")); entry.StCharge = ParseDecimal(GetFirstCol(parts, colMap, "StCharge", "St. Charge", "StChargeAmount")); entry.NEFT = ParseDecimal(GetFirstCol(parts, colMap, "NEFT")); entry.CASH = ParseDecimal(GetFirstCol(parts, colMap, "CASH")); entry.TDS = ParseDecimal(GetFirstCol(parts, colMap, "TDS")); entry.Ded = ParseDecimal(GetFirstCol(parts, colMap, "Ded", "DED")); entry.BillNo = GetFirstCol(parts, colMap, "BillNo", "BILLNO", "Bill No."); entry.BillDate = ParseNullableDate(GetFirstCol(parts, colMap, "BillDate", "Bill Date")); entry.BILL = ParseDecimal(GetFirstCol(parts, colMap, "BILL")); entry.ChallanLorryHire = ParseDecimal(GetFirstCol(parts, colMap, "LorryHire", "Lorry Hire", "TF")); entry.BillParty = GetFirstCol(parts, colMap, "BillParty", "Bill Party"); entry.Broker = GetFirstCol(parts, colMap, "Broker", "Broker "); entry.FrtType = GetFirstCol(parts, colMap, "FrtType", "Frt Type"); entry.PayType = GetFirstCol(parts, colMap, "PayType", "ToPayToBeBilled", "To Pay/To Be Billed"); entry.Comm = ParseDecimal(GetFirstCol(parts, colMap, "Comm", "comm")); entry.Paid = GetFirstCol(parts, colMap, "Paid"); entry.PreserveImportedBilling = true; repo.Upsert(entry); imported++; } catch (Exception ex) { AppLogger.LogException(nameof(ImportLR_Click), ex); errors++; } int processed = i; if (progress != null) progress.Value = processed; if (status != null) status.Text = $"Importing {processed}/{totalRows}"; UpdateImportProgress(importProgress, processed, totalRows, imported, errors); } } finally { importProgress.Dispose(); } if (progress != null) progress.Visibility = Visibility.Collapsed; if (status != null) { status.Text = string.Empty; status.Visibility = Visibility.Collapsed; } LRVM.RefreshAfterDelete(); SyncAllChallanBillingFromLR(); LRUpdatePageUI(); MessageBox.Show($"Import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning); } catch (Exception ex) { MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error); } }
         private void ShowLRColumnsMenu_Click(object sender, RoutedEventArgs e) { if (!(sender is System.Windows.Controls.Button button)) return; _lrColumnsMenu = BuildLRColumnsMenu(); _lrColumnsMenu.PlacementTarget = button; _lrColumnsMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom; _lrColumnsMenu.IsOpen = true; }
         private static string LRSettingsPath => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Awagaman ERP", "lr_column_settings.json");
-        private void SaveLRColumnSettings() { try { var lines = new List<string>(); lines.Add($"_SortColumn:{LRVM?.GetSortColumn() ?? ""}"); lines.Add($"_SortAscending:{LRVM?.IsCurrentSortAscending}"); foreach (var col in LRLedgerGrid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", "").Trim(); if (!string.IsNullOrEmpty(h)) lines.Add(col.Visibility == Visibility.Visible ? $"1:{h}:{(int)col.Width.DisplayValue}" : $"0:{h}:{(int)col.Width.DisplayValue}"); } var dir = System.IO.Path.GetDirectoryName(LRSettingsPath); if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir); System.IO.File.WriteAllText(LRSettingsPath, string.Join("\n", lines)); } catch { } }
+        private void SaveLRColumnSettings() { try { var lines = new List<string>(); lines.Add($"_SortColumn:{LRVM?.GetSortColumn() ?? ""}"); lines.Add($"_SortAscending:{LRVM?.IsCurrentSortAscending}"); lines.Add($"_FrozenColumnCount:{Math.Max(0, LRLedgerGrid?.FrozenColumnCount ?? 0)}"); foreach (var col in LRLedgerGrid.Columns) { var h = (col.Header?.ToString() ?? "").Replace(" ^", "").Replace(" v", "").Trim(); if (!string.IsNullOrEmpty(h)) lines.Add(col.Visibility == Visibility.Visible ? $"1:{h}:{(int)col.Width.DisplayValue}" : $"0:{h}:{(int)col.Width.DisplayValue}"); } var dir = System.IO.Path.GetDirectoryName(LRSettingsPath); if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir); System.IO.File.WriteAllText(LRSettingsPath, string.Join("\n", lines)); } catch { } }
         private void LoadLRColumnSettings()
         {
             try
@@ -14653,10 +14715,12 @@ namespace Awagaman_ERP
                 if (!System.IO.File.Exists(path)) return;
                 string sortCol = "";
                 bool sortAsc = true;
+                int frozenColumnCount = 0;
                 foreach (var line in System.IO.File.ReadAllLines(path))
                 {
                     if (line.StartsWith("_SortColumn:")) { sortCol = line.Substring("_SortColumn:".Length); continue; }
                     if (line.StartsWith("_SortAscending:")) { bool.TryParse(line.Substring("_SortAscending:".Length), out sortAsc); continue; }
+                    if (line.StartsWith("_FrozenColumnCount:")) { int.TryParse(line.Substring("_FrozenColumnCount:".Length), out frozenColumnCount); continue; }
                     var parts = line.Split(':');
                     if (parts.Length >= 2)
                     {
@@ -14683,6 +14747,11 @@ namespace Awagaman_ERP
                     {
                         LRVM.SetSort(sortCol, sortAsc);
                     }
+                }
+
+                if (LRLedgerGrid != null)
+                {
+                    LRLedgerGrid.FrozenColumnCount = Math.Max(0, Math.Min(frozenColumnCount, LRLedgerGrid.Columns.Count));
                 }
             }
             catch { }
