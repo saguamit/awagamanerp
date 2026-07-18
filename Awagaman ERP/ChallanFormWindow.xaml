@@ -223,7 +223,7 @@
                                         <TextBox x:Name="VehicleNumberBox" Text="{Binding VehicleNumber, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" TextChanged="VehicleNumberBox_TextChanged" LostFocus="VehicleNumberBox_LostFocus" PreviewKeyDown="VehicleNumberBox_PreviewKeyDown" />
                                         <Popup x:Name="VehiclePopup" PlacementTarget="{Binding ElementName=VehicleNumberBox}" Placement="Bottom" StaysOpen="False" Width="{Binding ActualWidth, ElementName=VehicleNumberBox}">
                                             <Border BorderBrush="#AAA" BorderThickness="1" Background="White" CornerRadius="4">
-                                                <ListBox x:Name="VehicleSuggestionList" MaxHeight="220" FontSize="12" SelectionChanged="VehicleSuggestionList_SelectionChanged" DisplayMemberPath="VehicleNumber" />
+                                                <ListBox x:Name="VehicleSuggestionList" MaxHeight="220" FontSize="12" SelectionChanged="VehicleSuggestionList_SelectionChanged" PreviewMouseLeftButtonDown="VehicleSuggestionList_PreviewMouseLeftButtonDown" DisplayMemberPath="VehicleNumber" />
                                             </Border>
                                         </Popup>
                                     </Grid>

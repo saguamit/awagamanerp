@@ -36,6 +36,13 @@ namespace Awagaman_ERP.Data
         public decimal TotalDue { get; set; }
     }
 
+    internal sealed class RemoteBillLedgerPageResult
+    {
+        public int TotalCount { get; set; }
+        public System.Collections.Generic.List<int> CommentIds { get; set; }
+        public System.Collections.Generic.List<Awagaman_ERP.Models.BillEntry> Items { get; set; }
+    }
+
     public sealed class BillPartyDueSummaryItem
     {
         public string Party { get; set; }

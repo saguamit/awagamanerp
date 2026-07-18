@@ -93,7 +93,7 @@ begin
     'Enter the server URL',
     'Leave the default for the Awagaman VPS cloud server.');
   ServerUrlPage.Add('API Base URL:', False);
-  ServerUrlPage.Values[0] := 'http://187.127.153.124:5088';
+  ServerUrlPage.Values[0] := 'http://187.127.157.47:5088';
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
@@ -101,7 +101,7 @@ begin
   if CurPageID = ServerUrlPage.ID then
   begin
     if InstallModePage.SelectedValueIndex = 0 then
-      ServerUrlPage.Values[0] := 'http://187.127.153.124:5088';
+      ServerUrlPage.Values[0] := 'http://187.127.157.47:5088';
   end;
 end;
 
@@ -115,7 +115,7 @@ var
 begin
   ServerMode := False;
   if InstallModePage.SelectedValueIndex = 0 then
-    ApiUrl := 'http://187.127.153.124:5088'
+    ApiUrl := 'http://187.127.157.47:5088'
   else
     ApiUrl := NormalizeApiUrl(ServerUrlPage.Values[0]);
 

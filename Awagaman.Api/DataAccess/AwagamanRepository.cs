@@ -1104,6 +1104,7 @@ SELECT COUNT(*) FROM filtered;";
         bool sortAscending,
         string? challanNo = null,
         string? lrNo = null,
+        string? broker = null,
         string? from = null,
         string? to = null,
         bool useLhsDerived = false,
@@ -1133,6 +1134,7 @@ SELECT COUNT(*) FROM filtered;";
 
         AddLikeFilter(whereParts, parameters, "challan_number", "challanNo", challanNo);
         AddLikeFilter(whereParts, parameters, "lr_number", "lrNo", lrNo);
+        AddLikeFilter(whereParts, parameters, "broker_name", "broker", broker);
         AddLikeFilter(whereParts, parameters, "from_location", "from", from);
         AddLikeFilter(whereParts, parameters, "to_location", "to", to);
 
@@ -1306,7 +1308,87 @@ SELECT COUNT(*) FROM filtered;";
             MarkLhsDirty("Purchase LHS");
         }
         await SyncVehicleLedgerFromChallanAsync(entry);
+        if (challanLedgerMode)
+        {
+            await SyncTrackingFromChallanAsync(entry);
+        }
         return id;
+    }
+
+    private async Task SyncTrackingFromChallanAsync(ChallanEntry entry)
+    {
+        if (entry == null)
+        {
+            return;
+        }
+
+        var challanNo = (entry.ChallanNumber ?? string.Empty).Trim();
+        if (challanNo.Length == 0)
+        {
+            return;
+        }
+
+        var existing = await QuerySingleOrDefaultAsync<TrackingEntry>(@"
+SELECT id AS Id, sr AS Sr, challan_no AS ChallanNo, challan_date AS ChallanDate, from_location AS From, to_location AS To,
+       vehicle_no AS VehicleNo, driver_mobile AS DriverMobile, eway_bill_till_date AS EwayBillTillDate,
+       dispatch_date AS DispatchDate, dispatch_time AS DispatchTime, delivered_date AS DeliveredDate, delivered_time AS DeliveredTime
+FROM tracking_entries
+WHERE lower(trim(challan_no)) = lower(trim(@challanNo))
+ORDER BY
+    CASE
+        WHEN dispatch_date IS NOT NULL OR delivered_date IS NOT NULL OR eway_bill_till_date IS NOT NULL
+             OR COALESCE(NULLIF(driver_mobile, ''), '') <> ''
+             OR COALESCE(NULLIF(vehicle_no, ''), '') <> ''
+        THEN 0 ELSE 1
+    END,
+    CASE WHEN sr > 0 THEN 0 ELSE 1 END,
+    id DESC
+LIMIT 1;", new { challanNo });
+
+        var trackingEntry = existing ?? new TrackingEntry();
+        trackingEntry.Sr = entry.Sr > 0 ? entry.Sr : trackingEntry.Sr;
+        trackingEntry.ChallanNo = challanNo;
+        trackingEntry.ChallanDate = entry.Date;
+        trackingEntry.From = entry.From;
+        trackingEntry.To = entry.To;
+        trackingEntry.VehicleNo = entry.VehicleNumber;
+        trackingEntry.DriverMobile = entry.DriverMobile;
+
+        var keepId = await UpsertTrackingAsync(trackingEntry);
+        await MergeTrackingDuplicatesAsync(keepId, challanNo);
+    }
+
+    private async Task MergeTrackingDuplicatesAsync(int keepId, string challanNo)
+    {
+        if (keepId <= 0 || string.IsNullOrWhiteSpace(challanNo))
+        {
+            return;
+        }
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+
+        var duplicateIds = (await conn.QueryAsync<int>(@"
+SELECT id
+FROM tracking_entries
+WHERE lower(trim(challan_no)) = lower(trim(@challanNo))
+  AND id <> @keepId;", new { challanNo, keepId }, tx)).ToList();
+
+        if (duplicateIds.Count > 0)
+        {
+            await conn.ExecuteAsync(
+                "UPDATE reporting_tracks SET tracking_entry_id = @keepId WHERE tracking_entry_id = ANY(@duplicateIds);",
+                new { keepId, duplicateIds },
+                tx);
+
+            await conn.ExecuteAsync(
+                "DELETE FROM tracking_entries WHERE id = ANY(@duplicateIds);",
+                new { duplicateIds },
+                tx);
+        }
+
+        await tx.CommitAsync();
     }
 
     private static void NormalizeChallanImportedBilling(ChallanEntry entry, bool challanLedgerMode)
@@ -1836,7 +1918,7 @@ WHERE lower(btrim(COALESCE(lrno, ''))) = lower(btrim(@lrNo))
             remarks AS Remarks, date AS Date
             FROM bills ORDER BY bill_date DESC NULLS LAST, sr, id;");
 
-    public async Task<PagedResult<BillEntry>> GetBillsPageAsync(int page, int pageSize, string? search, string? sortColumn, bool sortAscending, string? party = null, bool dueOnly = false)
+    public async Task<BillLedgerPageResult> GetBillsPageAsync(int page, int pageSize, string? search, string? sortColumn, bool sortAscending, string? party = null, bool dueOnly = false)
     {
         page = NormalizePage(page);
         pageSize = NormalizePageSize(pageSize);
@@ -1874,7 +1956,21 @@ WHERE lower(btrim(COALESCE(lrno, ''))) = lower(btrim(@lrNo))
         await conn.OpenAsync();
         var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM bills {where};", parameters);
         var items = (await conn.QueryAsync<BillEntry>($"{select} {where} ORDER BY {orderBy} LIMIT @limit OFFSET @offset;", parameters)).ToList();
-        return new PagedResult<BillEntry> { Items = items, TotalCount = total };
+        List<int> commentIds = new();
+        var pageIds = items.Select(x => x.Id).Distinct().ToArray();
+        if (pageIds.Length > 0)
+        {
+            commentIds = (await conn.QueryAsync<int>(
+                "SELECT DISTINCT bill_id FROM bill_comments WHERE bill_id = ANY(@ids);",
+                new { ids = pageIds })).ToList();
+        }
+
+        return new BillLedgerPageResult
+        {
+            Items = items,
+            TotalCount = total,
+            CommentIds = commentIds
+        };
     }
 
     public async Task<BillSummaryResult> GetBillsSummaryAsync(string? search, string? party = null, bool dueOnly = false)
@@ -2707,7 +2803,181 @@ ORDER BY date DESC, sr, id;", new { challanNumbers = keys });
         ExecuteAsync("DELETE FROM bill_comments WHERE id = @id;", new { id });
 
     public Task<IEnumerable<TrackingEntry>> GetTrackingAsync() =>
-        QueryAsync<TrackingEntry>("SELECT id AS Id, sr AS Sr, challan_no AS ChallanNo, challan_date AS ChallanDate, from_location AS From, to_location AS To, vehicle_no AS VehicleNo, driver_mobile AS DriverMobile, eway_bill_till_date AS EwayBillTillDate, dispatch_date AS DispatchDate, dispatch_time AS DispatchTime, delivered_date AS DeliveredDate, delivered_time AS DeliveredTime FROM tracking_entries ORDER BY sr, id;");
+        QueryAsync<TrackingEntry>(@"
+WITH ranked_tracking AS (
+    SELECT
+        id,
+        sr,
+        challan_no,
+        challan_date,
+        from_location,
+        to_location,
+        vehicle_no,
+        driver_mobile,
+        eway_bill_till_date,
+        dispatch_date,
+        dispatch_time,
+        delivered_date,
+        delivered_time,
+        ROW_NUMBER() OVER (
+            PARTITION BY COALESCE(NULLIF(LOWER(TRIM(challan_no)), ''), '__id__' || id::text)
+            ORDER BY
+                CASE
+                    WHEN dispatch_date IS NOT NULL OR delivered_date IS NOT NULL OR eway_bill_till_date IS NOT NULL
+                         OR COALESCE(NULLIF(driver_mobile, ''), '') <> ''
+                         OR COALESCE(NULLIF(vehicle_no, ''), '') <> ''
+                    THEN 0 ELSE 1
+                END,
+                CASE WHEN sr > 0 THEN 0 ELSE 1 END,
+                id DESC
+        ) AS rn
+    FROM tracking_entries
+)
+SELECT
+    id AS Id,
+    sr AS Sr,
+    challan_no AS ChallanNo,
+    challan_date AS ChallanDate,
+    from_location AS From,
+    to_location AS To,
+    vehicle_no AS VehicleNo,
+    driver_mobile AS DriverMobile,
+    eway_bill_till_date AS EwayBillTillDate,
+    dispatch_date AS DispatchDate,
+    dispatch_time AS DispatchTime,
+    delivered_date AS DeliveredDate,
+    delivered_time AS DeliveredTime
+FROM ranked_tracking
+WHERE rn = 1
+ORDER BY sr, id;");
+
+    public async Task<TrackingPageResult> GetTrackingPageAsync(int page, int pageSize, string? search, string? challanNo = null, string? from = null, string? to = null)
+    {
+        page = NormalizePage(page);
+        pageSize = NormalizePageSize(pageSize);
+        var offset = (page - 1) * pageSize;
+
+        var whereParts = new List<string>();
+        var parameters = new DynamicParameters();
+        parameters.Add("limit", pageSize);
+        parameters.Add("offset", offset);
+
+        var q = (search ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            whereParts.Add(@"(
+                challan_no ILIKE @search OR from_location ILIKE @search OR to_location ILIKE @search OR
+                vehicle_no ILIKE @search OR driver_mobile ILIKE @search
+            )");
+            parameters.Add("search", $"%{q}%");
+        }
+
+        AddLikeFilter(whereParts, parameters, "challan_no", "challanNo", challanNo);
+        AddLikeFilter(whereParts, parameters, "from_location", "from", from);
+        AddLikeFilter(whereParts, parameters, "to_location", "to", to);
+
+        var where = whereParts.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", whereParts);
+
+        await using var conn = _factory.Create();
+        await conn.OpenAsync();
+
+        var total = await conn.ExecuteScalarAsync<int>($@"
+WITH ranked_tracking AS (
+    SELECT
+        id,
+        sr,
+        challan_no,
+        challan_date,
+        from_location,
+        to_location,
+        vehicle_no,
+        driver_mobile,
+        eway_bill_till_date,
+        dispatch_date,
+        dispatch_time,
+        delivered_date,
+        delivered_time,
+        ROW_NUMBER() OVER (
+            PARTITION BY COALESCE(NULLIF(LOWER(TRIM(challan_no)), ''), '__id__' || id::text)
+            ORDER BY
+                CASE
+                    WHEN dispatch_date IS NOT NULL OR delivered_date IS NOT NULL OR eway_bill_till_date IS NOT NULL
+                         OR COALESCE(NULLIF(driver_mobile, ''), '') <> ''
+                         OR COALESCE(NULLIF(vehicle_no, ''), '') <> ''
+                    THEN 0 ELSE 1
+                END,
+                CASE WHEN sr > 0 THEN 0 ELSE 1 END,
+                id DESC
+        ) AS rn
+    FROM tracking_entries
+),
+deduped_tracking AS (
+    SELECT *
+    FROM ranked_tracking
+    WHERE rn = 1
+)
+SELECT COUNT(*) FROM deduped_tracking {where};", parameters);
+        var items = (await conn.QueryAsync<TrackingEntry>(
+            $@"
+            WITH ranked_tracking AS (
+                SELECT
+                    id,
+                    sr,
+                    challan_no,
+                    challan_date,
+                    from_location,
+                    to_location,
+                    vehicle_no,
+                    driver_mobile,
+                    eway_bill_till_date,
+                    dispatch_date,
+                    dispatch_time,
+                    delivered_date,
+                    delivered_time,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(NULLIF(LOWER(TRIM(challan_no)), ''), '__id__' || id::text)
+                        ORDER BY
+                            CASE
+                                WHEN dispatch_date IS NOT NULL OR delivered_date IS NOT NULL OR eway_bill_till_date IS NOT NULL
+                                     OR COALESCE(NULLIF(driver_mobile, ''), '') <> ''
+                                     OR COALESCE(NULLIF(vehicle_no, ''), '') <> ''
+                                THEN 0 ELSE 1
+                            END,
+                            CASE WHEN sr > 0 THEN 0 ELSE 1 END,
+                            id DESC
+                    ) AS rn
+                FROM tracking_entries
+            ),
+            deduped_tracking AS (
+                SELECT *
+                FROM ranked_tracking
+                WHERE rn = 1
+            )
+            SELECT
+                id AS Id,
+                sr AS Sr,
+                challan_no AS ChallanNo,
+                challan_date AS ChallanDate,
+                from_location AS From,
+                to_location AS To,
+                vehicle_no AS VehicleNo,
+                driver_mobile AS DriverMobile,
+                eway_bill_till_date AS EwayBillTillDate,
+                dispatch_date AS DispatchDate,
+                dispatch_time AS DispatchTime,
+                delivered_date AS DeliveredDate,
+                delivered_time AS DeliveredTime
+            FROM deduped_tracking
+            {where}
+            ORDER BY sr DESC, id DESC
+            LIMIT @limit OFFSET @offset;", parameters)).ToList();
+
+        return new TrackingPageResult
+        {
+            TotalCount = total,
+            Items = items
+        };
+    }
 
     public Task<TrackingEntry?> GetTrackingAsync(int id) =>
         QuerySingleOrDefaultAsync<TrackingEntry>("SELECT id AS Id, sr AS Sr, challan_no AS ChallanNo, challan_date AS ChallanDate, from_location AS From, to_location AS To, vehicle_no AS VehicleNo, driver_mobile AS DriverMobile, eway_bill_till_date AS EwayBillTillDate, dispatch_date AS DispatchDate, dispatch_time AS DispatchTime, delivered_date AS DeliveredDate, delivered_time AS DeliveredTime FROM tracking_entries WHERE id = @id;", new { id });
@@ -2739,11 +3009,29 @@ ORDER BY date DESC, sr, id;", new { challanNumbers = keys });
 
     public Task<IEnumerable<TrackingLatestReportItem>> GetLatestTrackingReportsAsync() =>
         QueryAsync<TrackingLatestReportItem>(@"
+WITH ranked_tracking AS (
+    SELECT
+        id,
+        ROW_NUMBER() OVER (
+            PARTITION BY COALESCE(NULLIF(LOWER(TRIM(challan_no)), ''), '__id__' || id::text)
+            ORDER BY
+                CASE
+                    WHEN dispatch_date IS NOT NULL OR delivered_date IS NOT NULL OR eway_bill_till_date IS NOT NULL
+                         OR COALESCE(NULLIF(driver_mobile, ''), '') <> ''
+                         OR COALESCE(NULLIF(vehicle_no, ''), '') <> ''
+                    THEN 0 ELSE 1
+                END,
+                CASE WHEN sr > 0 THEN 0 ELSE 1 END,
+                id DESC
+        ) AS rn
+    FROM tracking_entries
+)
 SELECT
     t.id AS TrackingEntryId,
     r.report_date_time AS ReportDateTime,
     COALESCE(r.remarks, '') AS Remarks
 FROM tracking_entries t
+INNER JOIN ranked_tracking rt ON rt.id = t.id AND rt.rn = 1
 LEFT JOIN LATERAL (
     SELECT report_date_time, remarks
     FROM reporting_tracks

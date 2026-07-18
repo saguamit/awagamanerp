@@ -140,6 +140,8 @@ namespace Awagaman_ERP
                 }
 
                 SignalExistingInstanceRestore();
+                Thread.Sleep(250);
+                SignalExistingInstanceRestore();
                 BringExistingInstanceToFront();
                 return false;
             }
@@ -264,14 +266,29 @@ namespace Awagaman_ERP
 
                 existing.Refresh();
                 var handle = existing.MainWindowHandle;
-                if (handle == IntPtr.Zero)
+                if (handle != IntPtr.Zero)
                 {
+                    NativeMethods.ShowWindowAsync(handle, NativeMethods.SW_RESTORE);
+                    NativeMethods.ShowWindowAsync(handle, NativeMethods.SW_SHOW);
+                    NativeMethods.SetForegroundWindow(handle);
                     return;
                 }
 
-                NativeMethods.ShowWindowAsync(handle, NativeMethods.SW_RESTORE);
-                NativeMethods.ShowWindowAsync(handle, NativeMethods.SW_SHOW);
-                NativeMethods.SetForegroundWindow(handle);
+                for (var attempt = 0; attempt < 10; attempt++)
+                {
+                    Thread.Sleep(200);
+                    existing.Refresh();
+                    handle = existing.MainWindowHandle;
+                    if (handle == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    NativeMethods.ShowWindowAsync(handle, NativeMethods.SW_RESTORE);
+                    NativeMethods.ShowWindowAsync(handle, NativeMethods.SW_SHOW);
+                    NativeMethods.SetForegroundWindow(handle);
+                    break;
+                }
             }
             catch
             {
@@ -460,6 +477,12 @@ namespace Awagaman_ERP
                 MainWindow.WindowState = _restoreWindowState == WindowState.Minimized
                     ? WindowState.Normal
                     : _restoreWindowState;
+                if (MainWindow.WindowState == WindowState.Minimized)
+                {
+                    MainWindow.WindowState = WindowState.Normal;
+                }
+                MainWindow.Topmost = true;
+                MainWindow.Topmost = false;
                 MainWindow.Activate();
                 MainWindow.Focus();
             }

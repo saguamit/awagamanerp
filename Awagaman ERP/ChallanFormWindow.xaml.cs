@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
+using System.Windows.Media;
 using Awagaman_ERP.Data;
 using Awagaman_ERP.Helpers;
 using Awagaman_ERP.Models;
@@ -305,6 +306,26 @@ namespace Awagaman_ERP
             if (selected == null) return;
             ApplyVehicleSelection(selected);
             if (VehiclePopup != null) VehiclePopup.IsOpen = false;
+        }
+
+        private void VehicleSuggestionList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            var dependencyObject = e.OriginalSource as DependencyObject;
+            while (dependencyObject != null && !(dependencyObject is ListBoxItem))
+            {
+                dependencyObject = VisualTreeHelper.GetParent(dependencyObject);
+            }
+
+            var item = dependencyObject as ListBoxItem;
+            if (item == null) return;
+
+            var selected = item.DataContext as VehicleEntry;
+            if (selected == null) return;
+
+            VehicleSuggestionList.SelectedItem = selected;
+            ApplyVehicleSelection(selected);
+            if (VehiclePopup != null) VehiclePopup.IsOpen = false;
+            e.Handled = true;
         }
 
         private void VehicleNumberBox_PreviewKeyDown(object sender, KeyEventArgs e)

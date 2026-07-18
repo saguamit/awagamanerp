@@ -451,8 +451,12 @@ namespace Awagaman_ERP.ViewModels
                 PagedEntries = new ObservableCollection<ChallanEntry>(items);
 
                 var commentIds = _repository.GetChallanIdsWithComments();
+                var commentPreviews = new Data.CommentRepository().GetLatestChallanCommentsByIds(PagedEntries.Select(x => x.Id));
                 foreach (var entry in PagedEntries)
+                {
                     entry.HasComments = commentIds.Contains(entry.Id);
+                    entry.CommentPreview = commentPreviews.TryGetValue(entry.Id, out var preview) ? preview : string.Empty;
+                }
 
                 if (!BackendSettings.UseRemoteApi && CurrentPage < TotalPages)
                 {
@@ -638,8 +642,12 @@ namespace Awagaman_ERP.ViewModels
                         PagedEntries = new ObservableCollection<ChallanEntry>(result.Items ?? new List<ChallanEntry>());
 
                         var commentIds = result.CommentIds ?? new HashSet<int>();
+                        var commentPreviews = new Data.CommentRepository().GetLatestChallanCommentsByIds(PagedEntries.Select(x => x.Id));
                         foreach (var entry in PagedEntries)
+                        {
                             entry.HasComments = commentIds.Contains(entry.Id);
+                            entry.CommentPreview = commentPreviews.TryGetValue(entry.Id, out var preview) ? preview : string.Empty;
+                        }
 
                         FilteredEntriesCount = _totalCount;
                         FilteredTotalDue = result.TotalDue;

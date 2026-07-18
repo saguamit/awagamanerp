@@ -127,6 +127,10 @@ namespace Awagaman_ERP.ViewModels
                 }
 
                 PagedEntries = new ObservableCollection<BillEntry>(items);
+                if (!BackendSettings.UseRemoteApi)
+                {
+                    MarkComments(PagedEntries);
+                }
                 ApplyGroupingAndDisplay(PagedEntries);
                 FilteredEntriesCount = _totalCount;
                 FilteredTotalDue = _repository.GetTotalDue(_searchFilter);
@@ -349,7 +353,10 @@ namespace Awagaman_ERP.ViewModels
             if (_nextPageCache != null)
             {
                 PagedEntries = new ObservableCollection<BillEntry>(_nextPageCache);
-                MarkComments(PagedEntries);
+                if (!BackendSettings.UseRemoteApi)
+                {
+                    MarkComments(PagedEntries);
+                }
                 ApplyGroupingAndDisplay(PagedEntries);
                 _nextPageCache = null;
                 OnPropertyChanged(nameof(CurrentPage));
@@ -376,7 +383,10 @@ namespace Awagaman_ERP.ViewModels
             if (_prevPageCache != null)
             {
                 PagedEntries = new ObservableCollection<BillEntry>(_prevPageCache);
-                MarkComments(PagedEntries);
+                if (!BackendSettings.UseRemoteApi)
+                {
+                    MarkComments(PagedEntries);
+                }
                 ApplyGroupingAndDisplay(PagedEntries);
                 _prevPageCache = null;
                 OnPropertyChanged(nameof(CurrentPage));
@@ -468,10 +478,13 @@ namespace Awagaman_ERP.ViewModels
         {
             try
             {
+                var itemList = items?.Where(x => x != null).ToList() ?? new List<BillEntry>();
                 var ids = new CommentRepository().GetBillIdsWithComments();
-                foreach (var entry in items)
+                var previews = new CommentRepository().GetLatestBillCommentsByIds(itemList.Select(x => x.Id));
+                foreach (var entry in itemList)
                 {
-                    if (entry != null) entry.HasComments = ids.Contains(entry.Id);
+                    entry.HasComments = ids.Contains(entry.Id);
+                    entry.CommentPreview = previews.TryGetValue(entry.Id, out var preview) ? preview : string.Empty;
                 }
             }
             catch (Exception ex)

@@ -6,6 +6,13 @@ public sealed class BillSummaryResult
     public decimal TotalDue { get; set; }
 }
 
+public sealed class BillLedgerPageResult
+{
+    public int TotalCount { get; set; }
+    public List<int> CommentIds { get; set; } = new();
+    public IReadOnlyList<BillEntry> Items { get; set; } = Array.Empty<BillEntry>();
+}
+
 public sealed class BillPartyDueSummaryItem
 {
     public string Party { get; set; } = string.Empty;

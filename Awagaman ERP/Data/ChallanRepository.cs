@@ -801,6 +801,12 @@ namespace Awagaman_ERP.Data
                 new VehicleRepository().UpsertFromChallan(entry);
             }
             catch { }
+
+            try
+            {
+                new TrackingRepository().UpsertFromChallan(entry);
+            }
+            catch { }
         }
 
         private static void SaveToLocalTable(SQLiteConnection connection, SQLiteCommand command, string tableName, ChallanEntry entry, bool includeSourcePurchaseId)

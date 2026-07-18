@@ -12,6 +12,7 @@ namespace Awagaman_ERP
         private readonly int _billId;
         private readonly CommentRepository _repo;
         private ObservableCollection<BillComment> _comments;
+        public bool CommentsChanged { get; private set; }
 
         public BillCommentPopupWindow(int billId, string title)
         {
@@ -33,6 +34,7 @@ namespace Awagaman_ERP
             var text = CommentTextBox.Text?.Trim();
             if (string.IsNullOrWhiteSpace(text)) { MessageBox.Show("Please enter a comment.", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
             _repo.AddBill(new BillComment { BillId = _billId, Comment = text, CreatedAt = DateTime.Now });
+            CommentsChanged = true;
             CommentTextBox.Text = "";
             LoadComments();
         }
@@ -43,9 +45,10 @@ namespace Awagaman_ERP
             if (comment == null || comment.Id <= 0) return;
             if (MessageBox.Show("Delete this comment?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
             _repo.DeleteBill(comment.Id);
+            CommentsChanged = true;
             LoadComments();
         }
 
-        private void Close_Click(object sender, RoutedEventArgs e) { Close(); }
+        private void Close_Click(object sender, RoutedEventArgs e) { try { Owner?.Activate(); } catch { } Close(); }
     }
 }

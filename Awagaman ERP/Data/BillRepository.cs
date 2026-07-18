@@ -416,7 +416,22 @@ LRNo {d}, Sr, Id";
             if (dueOnly) query += "&dueOnly=true";
             try
             {
-                return RemoteApiClient.GetPage<BillEntry>(query);
+                var result = RemoteApiClient.Get<RemoteBillLedgerPageResult>(query);
+                var items = result?.Items ?? new List<BillEntry>();
+                var commentIds = new HashSet<int>(result?.CommentIds ?? new List<int>());
+                foreach (var item in items)
+                {
+                    if (item != null)
+                    {
+                        item.HasComments = commentIds.Contains(item.Id);
+                    }
+                }
+
+                return new RemotePagedResult<BillEntry>
+                {
+                    TotalCount = result?.TotalCount ?? 0,
+                    Items = items
+                };
             }
             catch
             {

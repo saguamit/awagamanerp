@@ -48,3 +48,9 @@ public class ReportingTrackEntry
     public DateTime ReportDateTime { get; set; } = DateTime.Now;
     public string? Remarks { get; set; }
 }
+
+public sealed class TrackingPageResult
+{
+    public int TotalCount { get; set; }
+    public List<TrackingEntry> Items { get; set; } = new();
+}

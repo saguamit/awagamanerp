@@ -383,6 +383,7 @@ challans.MapGet("/ledger-page", async (
     bool? asc,
     string? challanNo,
     string? lrNo,
+    string? broker,
     string? from,
     string? to,
     bool? useLhsDerived,
@@ -391,7 +392,7 @@ challans.MapGet("/ledger-page", async (
 {
     try
     {
-        return Results.Ok(await repo.GetChallanLedgerPageAsync(page, pageSize, search, sort, asc ?? true, challanNo, lrNo, from, to, useLhsDerived ?? false, ledgerKind));
+        return Results.Ok(await repo.GetChallanLedgerPageAsync(page, pageSize, search, sort, asc ?? true, challanNo, lrNo, broker, from, to, useLhsDerived ?? false, ledgerKind));
     }
     catch (Exception ex)
     {
@@ -900,6 +901,17 @@ app.MapPost("/api/admin/reset-all", async (HttpContext context, AwagamanReposito
 
 var tracking = app.MapGroup("/api/tracking");
 tracking.MapGet("/", async (AwagamanRepository repo) => Results.Ok(await repo.GetTrackingAsync()));
+tracking.MapGet("/page", async (int page, int pageSize, string? search, string? challanNo, string? from, string? to, AwagamanRepository repo) =>
+{
+    try
+    {
+        return Results.Ok(await repo.GetTrackingPageAsync(page, pageSize, search, challanNo, from, to));
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.ToString(), statusCode: 500);
+    }
+});
 tracking.MapGet("/{id:int}", async (int id, AwagamanRepository repo) =>
 {
     var item = await repo.GetTrackingAsync(id);

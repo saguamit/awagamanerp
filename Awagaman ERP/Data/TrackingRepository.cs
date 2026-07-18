@@ -258,6 +258,70 @@ SELECT last_insert_rowid();";
             }
         }
 
+        public void UpsertFromChallan(ChallanEntry challan)
+        {
+            if (challan == null)
+            {
+                return;
+            }
+
+            var challanNo = (challan.ChallanNumber ?? string.Empty).Trim();
+            if (challanNo.Length == 0)
+            {
+                return;
+            }
+
+            TrackingEntry existing = null;
+
+            using (var connection = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var command = connection.CreateCommand())
+            {
+                connection.Open();
+                command.CommandText = @"
+SELECT Id, Sr, ChallanNo, ChallanDate, FromLocation, ToLocation, VehicleNo, DriverMobile,
+       EwayBillTillDate, DispatchDate, DispatchTime, DeliveredDate, DeliveredTime
+FROM TrackingEntries
+WHERE LOWER(TRIM(COALESCE(ChallanNo, ''))) = LOWER(TRIM(@ChallanNo))
+ORDER BY Id
+LIMIT 1;";
+                command.Parameters.AddWithValue("@ChallanNo", challanNo);
+
+                using (var reader = command.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        existing = new TrackingEntry
+                        {
+                            Id = Convert.ToInt32(reader["Id"]),
+                            Sr = Convert.ToInt32(reader["Sr"]),
+                            ChallanNo = reader["ChallanNo"] as string,
+                            ChallanDate = ParseDate(reader["ChallanDate"], challan.Date),
+                            From = reader["FromLocation"] as string,
+                            To = reader["ToLocation"] as string,
+                            VehicleNo = reader["VehicleNo"] as string,
+                            DriverMobile = reader["DriverMobile"] as string,
+                            EwayBillTillDate = ParseNullableDate(reader["EwayBillTillDate"]),
+                            DispatchDate = ParseNullableDate(reader["DispatchDate"]),
+                            DispatchTime = reader["DispatchTime"] as string,
+                            DeliveredDate = ParseNullableDate(reader["DeliveredDate"]),
+                            DeliveredTime = reader["DeliveredTime"] as string
+                        };
+                    }
+                }
+            }
+
+            var trackingEntry = existing ?? new TrackingEntry();
+            trackingEntry.Sr = challan.Sr > 0 ? challan.Sr : trackingEntry.Sr;
+            trackingEntry.ChallanNo = challanNo;
+            trackingEntry.ChallanDate = challan.Date;
+            trackingEntry.From = challan.From;
+            trackingEntry.To = challan.To;
+            trackingEntry.VehicleNo = challan.VehicleNumber;
+            trackingEntry.DriverMobile = challan.DriverMobile;
+
+            Upsert(trackingEntry);
+        }
+
         public void DeleteByChallanNo(string challanNo)
         {
             challanNo = (challanNo ?? string.Empty).Trim();

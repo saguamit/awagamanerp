@@ -945,7 +945,31 @@
                                     </GroupStyle>
                                 </DataGrid.GroupStyle>
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="BILL NO." Binding="{Binding BillNoDisplay}" Width="100" FontWeight="SemiBold" IsReadOnly="True" />
+                                    <DataGridTemplateColumn Header="BILL NO." Width="100" SortMemberPath="BillNo">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding BillNoDisplay}" FontWeight="SemiBold" VerticalAlignment="Center" Padding="4,0" ToolTip="{Binding CommentPreview}">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Background" Value="Transparent" />
+                                                            <Setter Property="Foreground" Value="#0F172A" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding HasComments}" Value="True">
+                                                                    <Setter Property="Background" Value="#FDE68A" />
+                                                                    <Setter Property="Foreground" Value="#92400E" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                    <TextBlock.ContextMenu>
+                                                        <ContextMenu>
+                                                            <MenuItem Header="View / Add Comment" Click="AddBillComment_Click" Tag="{Binding}" />
+                                                        </ContextMenu>
+                                                    </TextBlock.ContextMenu>
+                                                </TextBlock>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
                                     <DataGridTextColumn Header="BILL DATE" Binding="{Binding BillDate, StringFormat=dd-MMM-yyyy}" Width="90" />
                                     <DataGridTextColumn Header="PARTY" Binding="{Binding Party}" Width="120" />
                                     <DataGridTextColumn Header="LR NO." Binding="{Binding LRNo}" Width="90" IsReadOnly="True" />
@@ -1029,10 +1053,12 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="Vehicle Ledger" FontSize="20" FontWeight="Bold" Foreground="#333" VerticalAlignment="Center" />
-                                <Button x:Name="VehicleDeleteButton" Grid.Column="1" Content="🗑 Delete" Height="26" Margin="0,0,8,0" Padding="10,0" Background="#DC2626" Foreground="White" BorderThickness="0" Cursor="Hand" Click="VehicleDeleteSelected_Click" HorizontalAlignment="Right" />
-                                <TextBox Grid.Column="2" x:Name="VehicleSearchBox" TextChanged="VehicleSearchBox_TextChanged" Width="220" Height="26" FontSize="12" Padding="4,2" BorderBrush="#CCC" HorizontalAlignment="Right" />
+                                <Button Grid.Column="1" Content="📥 Import" Height="26" Margin="0,0,8,0" Padding="10,0" Background="#00B08B" Foreground="White" BorderThickness="0" Cursor="Hand" Click="ImportVehicle_Click" HorizontalAlignment="Right" />
+                                <Button x:Name="VehicleDeleteButton" Grid.Column="2" Content="🗑 Delete" Height="26" Margin="0,0,8,0" Padding="10,0" Background="#DC2626" Foreground="White" BorderThickness="0" Cursor="Hand" Click="VehicleDeleteSelected_Click" HorizontalAlignment="Right" />
+                                <TextBox Grid.Column="3" x:Name="VehicleSearchBox" TextChanged="VehicleSearchBox_TextChanged" Width="220" Height="26" FontSize="12" Padding="4,2" BorderBrush="#CCC" HorizontalAlignment="Right" />
                             </Grid>
                             <DataGrid x:Name="VehicleGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
                                       Background="White" BorderThickness="1" BorderBrush="#DDD" RowHeight="30"
@@ -1047,7 +1073,6 @@
                                     <DataGridTextColumn Header="PAN Number" Binding="{Binding PANNumber}" Width="130" />
                                     <DataGridTextColumn Header="Engine Number" Binding="{Binding EngineNumber}" Width="160" />
                                     <DataGridTextColumn Header="Chassis Number" Binding="{Binding ChassisNumber}" Width="180" />
-                                    <DataGridTextColumn Header="Vehicle Type" Binding="{Binding VehicleType}" Width="120" />
                                 </DataGrid.Columns>
                             </DataGrid>
                         </Grid>
@@ -1515,13 +1540,15 @@
                                                                 Visibility="{Binding DataContext.ShowChallanNumber, ElementName=Root, Converter={StaticResource BoolToVis}}">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBlock Text="{Binding ChallanNumber}" FontWeight="SemiBold" VerticalAlignment="Center" Padding="4,0">
+                                                    <TextBlock Text="{Binding ChallanNumber}" FontWeight="SemiBold" VerticalAlignment="Center" Padding="4,0" ToolTip="{Binding CommentPreview}">
                                                         <TextBlock.Style>
                                                             <Style TargetType="TextBlock">
                                                                 <Setter Property="Background" Value="Transparent" />
+                                                                <Setter Property="Foreground" Value="#0F172A" />
                                                                 <Style.Triggers>
                                                                     <DataTrigger Binding="{Binding HasComments}" Value="True">
-                                                                        <Setter Property="Background" Value="#FFF3E0" />
+                                                                        <Setter Property="Background" Value="#FDE68A" />
+                                                                        <Setter Property="Foreground" Value="#92400E" />
                                                                     </DataTrigger>
                                                                 </Style.Triggers>
                                                             </Style>
@@ -1849,7 +1876,6 @@
 
                                 </StackPanel>
 
-                                <Button Grid.Column="1" Content="+ Create LR" Style="{StaticResource GreenButtonStyle}" Click="OpenLRForm_Click" />
 
                             </Grid>
 
@@ -1949,13 +1975,15 @@
                                         <DataGridTemplateColumn Header="LR No." Width="100" SortMemberPath="LRNo">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBlock Text="{Binding LRNo}" FontWeight="SemiBold" VerticalAlignment="Center" Padding="4,0">
+                                                    <TextBlock Text="{Binding LRNo}" FontWeight="SemiBold" VerticalAlignment="Center" Padding="4,0" ToolTip="{Binding CommentPreview}">
                                                         <TextBlock.Style>
                                                             <Style TargetType="TextBlock">
                                                                 <Setter Property="Background" Value="Transparent" />
+                                                                <Setter Property="Foreground" Value="#0F172A" />
                                                                 <Style.Triggers>
                                                                     <DataTrigger Binding="{Binding HasComments}" Value="True">
-                                                                        <Setter Property="Background" Value="#FFF3E0" />
+                                                                        <Setter Property="Background" Value="#FDE68A" />
+                                                                        <Setter Property="Foreground" Value="#92400E" />
                                                                     </DataTrigger>
                                                                 </Style.Triggers>
                                                             </Style>

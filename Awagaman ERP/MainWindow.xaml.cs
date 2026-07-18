@@ -145,6 +145,11 @@ namespace Awagaman_ERP
             public ChallanEntry Before;
             public ChallanEntry After;
         }
+        private sealed class ChallanBillingSnapshot
+        {
+            public decimal BillAmount;
+            public decimal Margin;
+        }
         private readonly Stack<ChallanEditAction> _challanUndoStack = new Stack<ChallanEditAction>();
         private readonly Stack<ChallanEditAction> _challanRedoStack = new Stack<ChallanEditAction>();
         private ChallanEntry _challanEditBeforeSnapshot;
@@ -190,6 +195,7 @@ namespace Awagaman_ERP
         private readonly Dictionary<string, RemotePagedResult<LREntry>> _pendingBillPageCache = new Dictionary<string, RemotePagedResult<LREntry>>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, DateTime> _pendingBillPageCacheUtc = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private static readonly TimeSpan BillDueCacheLifetime = TimeSpan.FromMinutes(2);
+        private bool _trackingLedgerDirty = true;
 
         private void AddFreezeMenuItems(ContextMenu menu, DataGrid grid, DataGridColumnHeader header, Action saveAction)
         {
@@ -433,8 +439,8 @@ namespace Awagaman_ERP
                 if (SidebarUsersButton != null) SidebarUsersButton.Visibility = restrict ? Visibility.Collapsed : Visibility.Visible;
                 if (TabPartyLedger != null) TabPartyLedger.Visibility = restrict ? Visibility.Collapsed : Visibility.Visible;
                 if (TabVehicleLedger != null) TabVehicleLedger.Visibility = restrict ? Visibility.Collapsed : Visibility.Visible;
-                if (TopResetDataButton != null) TopResetDataButton.Visibility = restrict ? Visibility.Collapsed : Visibility.Visible;
-                if (LedgerResetDataButton != null) LedgerResetDataButton.Visibility = restrict ? Visibility.Collapsed : Visibility.Visible;
+                if (TopResetDataButton != null) TopResetDataButton.Visibility = Visibility.Collapsed;
+                if (LedgerResetDataButton != null) LedgerResetDataButton.Visibility = Visibility.Collapsed;
                 if (ChallanImportButton != null) ChallanImportButton.Visibility = restrict ? Visibility.Collapsed : Visibility.Visible;
                 if (ChallanImportGuideButton != null) ChallanImportGuideButton.Visibility = restrict ? Visibility.Collapsed : Visibility.Visible;
                 if (ChallanDeleteButton != null) ChallanDeleteButton.Visibility = restrict ? Visibility.Collapsed : (_isChallanLedgerMode ? Visibility.Collapsed : Visibility.Visible);
@@ -878,6 +884,39 @@ namespace Awagaman_ERP
             }
         }
 
+        private void RefreshTrackingAfterChallanChange()
+        {
+            try
+            {
+                _trackingLedgerDirty = true;
+
+                if (TrackingVM == null)
+                {
+                    return;
+                }
+
+                if (TrackingVM.Entries.Count == 0 && (TrackingLedgerView == null || TrackingLedgerView.Visibility != Visibility.Visible))
+                {
+                    return;
+                }
+
+                TrackingVM.LoadData();
+                _trackingLedgerDirty = false;
+                TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count;
+                RefreshTrackingReminderFromCurrentEntries();
+                RefreshDashboardTrackingTablesFromCurrentEntries();
+
+                if (TrackingLedgerGrid != null)
+                {
+                    TrackingLedgerGrid.Items.Refresh();
+                }
+            }
+            catch (Exception ex)
+            {
+                LogException(nameof(RefreshTrackingAfterChallanChange), ex);
+            }
+        }
+
         private static List<T> SafeLoad<T>(Func<List<T>> loader)
         {
             try
@@ -982,6 +1021,17 @@ namespace Awagaman_ERP
                 // Keep focus on current cell when commit fails (e.g., partially typed numeric value)
                 return;
             }
+
+            if (newCol < 0 || newCol >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            if (newRow < 0 || newRow >= grid.Items.Count)
+            {
+                return;
+            }
+
             var newItem = grid.Items[newRow];
             grid.CurrentCell = new DataGridCellInfo(newItem, grid.Columns[newCol]);
             grid.BeginEdit();
@@ -3151,8 +3201,7 @@ namespace Awagaman_ERP
                     (v.OwnerName ?? string.Empty).ToLowerInvariant().Contains(filter) ||
                     (v.PANNumber ?? string.Empty).ToLowerInvariant().Contains(filter) ||
                     (v.EngineNumber ?? string.Empty).ToLowerInvariant().Contains(filter) ||
-                    (v.ChassisNumber ?? string.Empty).ToLowerInvariant().Contains(filter) ||
-                    (v.VehicleType ?? string.Empty).ToLowerInvariant().Contains(filter)).ToList();
+                    (v.ChassisNumber ?? string.Empty).ToLowerInvariant().Contains(filter)).ToList();
         }
 
         private void VehicleGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
@@ -3166,6 +3215,134 @@ namespace Awagaman_ERP
                 new VehicleRepository().Upsert(entry);
             }
             catch (Exception ex) { LogException(nameof(SyncSingleChallanBillingFromLR), ex); }
+        }
+
+        private void ImportVehicle_Click(object sender, RoutedEventArgs e)
+        {
+            if (!EnsureAdminAccess("Vehicle import")) return;
+
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Filter = "CSV Files|*.csv",
+                Title = "Select Vehicle Import File"
+            };
+
+            if (dialog.ShowDialog() != true) return;
+
+            if (dialog.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) ||
+                dialog.FileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show("Please export your Excel file as CSV first.", "Format Not Supported", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                var records = ReadCsvRecords(dialog.FileName);
+                if (records.Count < 2)
+                {
+                    MessageBox.Show("CSV file has no data rows.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                var headers = records[0];
+                var colMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+                for (int index = 0; index < headers.Length; index++)
+                {
+                    var key = headers[index].Trim().Replace(".", "").Replace(" ", "");
+                    if (!colMap.ContainsKey(key)) colMap[key] = new List<int>();
+                    colMap[key].Add(index);
+                }
+
+                var repo = new VehicleRepository();
+                var existing = repo.GetAll();
+                var nextSr = existing.Count > 0 ? existing.Max(x => x.Sr) : 0;
+                var existingByNumber = existing
+                    .Where(x => !string.IsNullOrWhiteSpace(x.VehicleNumber))
+                    .GroupBy(x => (x.VehicleNumber ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+                int imported = 0, errors = 0;
+                int totalRows = records.Count - 1;
+                var progress = ImportProgressBar;
+                var status = ImportStatusText;
+                if (progress != null)
+                {
+                    progress.Visibility = Visibility.Visible;
+                    progress.Maximum = totalRows;
+                    progress.Value = 0;
+                }
+                if (status != null) status.Visibility = Visibility.Visible;
+
+                var importProgress = BeginImportProgress("Importing Vehicles", totalRows);
+                try
+                {
+                    for (int i = 1; i < records.Count; i++)
+                    {
+                        try
+                        {
+                            var parts = records[i];
+                            var vehicleNumber = GetFirstCol(parts, colMap, "VehicleNumber", "VehicleNo", "VEHICLENO", "Vehicle", "Vehicle No", "Vehicle No.");
+                            if (string.IsNullOrWhiteSpace(vehicleNumber))
+                            {
+                                throw new InvalidOperationException("Missing Vehicle Number value in import row.");
+                            }
+
+                            var normalizedVehicle = vehicleNumber.Trim().ToUpperInvariant();
+                            VehicleEntry match;
+                            existingByNumber.TryGetValue(normalizedVehicle, out match);
+
+                            var entry = new VehicleEntry
+                            {
+                                Id = match != null ? match.Id : 0,
+                                Sr = match != null ? match.Sr : ++nextSr,
+                                VehicleNumber = normalizedVehicle,
+                                OwnerName = GetFirstCol(parts, colMap, "OwnerName", "Owner", "Owner Name"),
+                                PANNumber = GetFirstCol(parts, colMap, "PANNumber", "PAN", "Pan Number"),
+                                EngineNumber = GetFirstCol(parts, colMap, "EngineNumber", "EngineNo", "Engine Number"),
+                                ChassisNumber = GetFirstCol(parts, colMap, "ChassisNumber", "ChassisNo", "Chassis Number"),
+                                VehicleType = GetFirstCol(parts, colMap, "VehicleType", "Type"),
+                                DriverName = GetFirstCol(parts, colMap, "DriverName", "Driver", "Driver Name"),
+                                DriverMobile = GetFirstCol(parts, colMap, "DriverMobile", "Driver Mobile", "Mobile"),
+                                LicenceNumber = GetFirstCol(parts, colMap, "LicenceNumber", "LicenceNo", "LicenseNumber", "Licence Number"),
+                                PolicyNumber = GetFirstCol(parts, colMap, "PolicyNumber", "PolicyNo", "Policy Number")
+                            };
+
+                            repo.Upsert(entry);
+                            existingByNumber[normalizedVehicle] = entry;
+                            imported++;
+                        }
+                        catch (Exception ex)
+                        {
+                            AppLogger.LogException(nameof(ImportVehicle_Click), ex);
+                            errors++;
+                        }
+
+                        int processed = i;
+                        if (progress != null) progress.Value = processed;
+                        if (status != null) status.Text = $"Importing {processed}/{totalRows}";
+                        UpdateImportProgress(importProgress, processed, totalRows, imported, errors);
+                    }
+                }
+                finally
+                {
+                    importProgress.Dispose();
+                }
+
+                if (progress != null) progress.Visibility = Visibility.Collapsed;
+                if (status != null)
+                {
+                    status.Text = string.Empty;
+                    status.Visibility = Visibility.Collapsed;
+                }
+
+                RefreshVehicleGrid();
+                MessageBox.Show($"Vehicle import complete.\nImported: {imported}\nErrors: {errors}", "Import Result", MessageBoxButton.OK, imported > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Import failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private async void OpenCBSLedger_Click(object sender, RoutedEventArgs e)
@@ -12112,7 +12289,8 @@ namespace Awagaman_ERP
                 Remarks = source.Remarks,
                 BillAmount = source.BillAmount,
                 Margin = source.Margin,
-                HasComments = source.HasComments
+                HasComments = source.HasComments,
+                CommentPreview = source.CommentPreview
             };
         }
 
@@ -12156,6 +12334,7 @@ namespace Awagaman_ERP
                 target.BillAmount = snapshot.BillAmount;
                 target.Margin = snapshot.Margin;
                 target.HasComments = snapshot.HasComments;
+                target.CommentPreview = snapshot.CommentPreview;
             }
             finally
             {
@@ -12192,7 +12371,9 @@ namespace Awagaman_ERP
                    a.BalancePaidNEFT == b.BalancePaidNEFT && a.BalancePaidCash == b.BalancePaidCash && a.BalancePaidDate == b.BalancePaidDate &&
                    string.Equals(a.PaidTo, b.PaidTo, StringComparison.Ordinal) &&
                    string.Equals(a.Remarks, b.Remarks, StringComparison.Ordinal) &&
-                   a.BillAmount == b.BillAmount && a.Margin == b.Margin && a.HasComments == b.HasComments;
+                   a.BillAmount == b.BillAmount && a.Margin == b.Margin &&
+                   a.HasComments == b.HasComments &&
+                   string.Equals(a.CommentPreview, b.CommentPreview, StringComparison.Ordinal);
         }
 
         private void RunAfterEditCommit(Action action, string context)
@@ -12256,7 +12437,8 @@ namespace Awagaman_ERP
                    string.Equals(bindingPath, "Hamali", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(bindingPath, "Deduction", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(bindingPath, "Other", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(bindingPath, "LessTDS", StringComparison.OrdinalIgnoreCase);
+                   string.Equals(bindingPath, "LessTDS", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(bindingPath, "LRNumber", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool ChallanEditRequiresLocalMarginRefresh(string bindingPath)
@@ -12291,6 +12473,7 @@ namespace Awagaman_ERP
                 SyncLinkedLREntriesFromChallan(entry);
                 SyncSingleChallanBillingFromLR(entry);
                 SyncLhsCBSFromChallan(entry.CloneForPersistence());
+                RefreshTrackingAfterChallanChange();
             }
             finally { _suppressChallanHistory = false; }
             _challanRedoStack.Push(new ChallanEditAction { EntryId = action.EntryId, Before = current, After = CloneChallanEntry(entry) });
@@ -12315,6 +12498,7 @@ namespace Awagaman_ERP
                 SyncLinkedLREntriesFromChallan(entry);
                 SyncSingleChallanBillingFromLR(entry);
                 SyncLhsCBSFromChallan(entry.CloneForPersistence());
+                RefreshTrackingAfterChallanChange();
             }
             finally { _suppressChallanHistory = false; }
             _challanUndoStack.Push(new ChallanEditAction { EntryId = action.EntryId, Before = current, After = CloneChallanEntry(entry) });
@@ -12587,10 +12771,14 @@ namespace Awagaman_ERP
                 return;
             }
 
-            if (ChallanEditCanPersistInBackground(bindingPath) &&
-                !ChallanEditRequiresLinkedLrSync(bindingPath) &&
-                !ChallanEditRequiresBillingSync(bindingPath) &&
-                !ChallanEditRequiresCbsSync(bindingPath))
+            var canPersistInBackground = ChallanEditCanPersistInBackground(bindingPath) &&
+                                         (!ChallanEditRequiresLinkedLrSync(bindingPath) ||
+                                          string.Equals(bindingPath, "LRNumber", StringComparison.OrdinalIgnoreCase)) &&
+                                         (!ChallanEditRequiresBillingSync(bindingPath) ||
+                                          string.Equals(bindingPath, "LRNumber", StringComparison.OrdinalIgnoreCase)) &&
+                                         !ChallanEditRequiresCbsSync(bindingPath);
+
+            if (canPersistInBackground)
             {
                 if (ChallanEditRequiresLocalMarginRefresh(bindingPath))
                 {
@@ -12620,6 +12808,25 @@ namespace Awagaman_ERP
                     try
                     {
                         new ChallanRepository { LedgerMode = _isChallanLedgerMode ? "Challan" : "Purchase" }.Upsert(saveCopy);
+                        ChallanBillingSnapshot billingSnapshot = null;
+                        if (string.Equals(bindingPath, "LRNumber", StringComparison.OrdinalIgnoreCase))
+                        {
+                            SyncLinkedLREntriesFromChallanBackground(saveCopy);
+                            billingSnapshot = SyncSingleChallanBillingFromLRBackground(saveCopy);
+                        }
+
+                        Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            if (billingSnapshot != null)
+                            {
+                                entry.BillAmount = billingSnapshot.BillAmount;
+                                entry.Margin = billingSnapshot.Margin;
+                                RefreshDataGridItemsSafely(LedgerGrid);
+                            }
+
+                            RefreshTrackingAfterChallanChange();
+                            QueueDashboardRefresh();
+                        }));
                     }
                     catch (Exception saveEx)
                     {
@@ -12660,6 +12867,7 @@ namespace Awagaman_ERP
                     SyncLhsCBSFromChallan(entry.CloneForPersistence());
                     QueueCBSRefresh();
                 }
+                RefreshTrackingAfterChallanChange();
                 QueueDashboardRefresh();
 
                 if (!_suppressChallanHistory &&
@@ -13413,6 +13621,123 @@ namespace Awagaman_ERP
             finally
             {
                 _challanBillingSyncInProgress = false;
+            }
+        }
+
+        private void SyncLinkedLREntriesFromChallanBackground(ChallanEntry challan)
+        {
+            if (challan == null) return;
+
+            var challanNo = (challan.ChallanNumber ?? string.Empty).Trim();
+            var lrTokens = SplitLrNumbers(challan.LRNumber).ToList();
+            if (string.IsNullOrWhiteSpace(challanNo) && lrTokens.Count == 0) return;
+
+            try
+            {
+                var set = new HashSet<string>(lrTokens, StringComparer.OrdinalIgnoreCase);
+                var linkedRows = _lrRepo.GetByLRNumbers(set);
+                foreach (var lr in _lrRepo.GetByChallanNumbers(new[] { challanNo }))
+                {
+                    if (lr != null && linkedRows.All(x => x.Id != lr.Id))
+                    {
+                        linkedRows.Add(lr);
+                    }
+                }
+
+                foreach (var lr in linkedRows)
+                {
+                    if (lr == null) continue;
+                    lr.From = challan.From;
+                    lr.To = challan.To;
+                    lr.VehicleNo = challan.VehicleNumber;
+                    lr.VehicleType = challan.VehicleType;
+                    lr.Broker = challan.BrokerName;
+                    _lrRepo.Upsert(lr);
+                }
+            }
+            catch { }
+        }
+
+        private ChallanBillingSnapshot SyncSingleChallanBillingFromLRBackground(ChallanEntry challan)
+        {
+            if (challan == null || challan.PreserveImportedBilling) return null;
+
+            try
+            {
+                var challanRepo = GetPurchaseChallanRepository();
+                var sourceId = challan.SourcePurchaseId ?? (challan.Id > 0 && !_isChallanLedgerMode ? (int?)challan.Id : null);
+                var purchaseChallan = sourceId.HasValue
+                    ? challanRepo.FindById(sourceId.Value)
+                    : null;
+                if (purchaseChallan == null)
+                {
+                    purchaseChallan = challanRepo.FindByChallanNumber(challan.ChallanNumber);
+                }
+                if (purchaseChallan == null)
+                {
+                    purchaseChallan = challan;
+                }
+
+                var lrRows = new List<LREntry>();
+                if (!string.IsNullOrWhiteSpace(purchaseChallan.LRNumber))
+                {
+                    lrRows.AddRange(_lrRepo.GetByLRNumbers(SplitLrNumbers(purchaseChallan.LRNumber)));
+                }
+                if (!string.IsNullOrWhiteSpace(purchaseChallan.ChallanNumber))
+                {
+                    foreach (var lr in _lrRepo.GetByChallanNumbers(new[] { purchaseChallan.ChallanNumber }))
+                    {
+                        if (!lrRows.Any(x => x.Id == lr.Id))
+                        {
+                            lrRows.Add(lr);
+                        }
+                    }
+                }
+
+                var lrByNo = lrRows
+                    .Where(x => !string.IsNullOrWhiteSpace(x.LRNo))
+                    .GroupBy(x => (x.LRNo ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.Sum(x => x?.TotalBill ?? 0m),
+                        StringComparer.OrdinalIgnoreCase);
+
+                var lrSet = new HashSet<string>(SplitLrNumbers(purchaseChallan.LRNumber), StringComparer.OrdinalIgnoreCase);
+                if (!string.IsNullOrWhiteSpace(purchaseChallan.ChallanNumber))
+                {
+                    foreach (var lr in lrRows)
+                    {
+                        if (string.Equals((lr.CHNo ?? string.Empty).Trim(), purchaseChallan.ChallanNumber.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrWhiteSpace(lr.LRNo))
+                        {
+                            lrSet.Add(lr.LRNo.Trim());
+                        }
+                    }
+                }
+
+                decimal billAmount = 0m;
+                foreach (var lrNo in lrSet)
+                {
+                    if (lrByNo.TryGetValue(lrNo, out var total)) billAmount += total;
+                }
+
+                var margin = billAmount != 0m ? (billAmount - (purchaseChallan.LHS + purchaseChallan.Detention + purchaseChallan.Hamali)) : 0m;
+                if (purchaseChallan.BillAmount != billAmount || purchaseChallan.Margin != margin)
+                {
+                    purchaseChallan.BillAmount = billAmount;
+                    purchaseChallan.Margin = margin;
+                    challanRepo.Upsert(purchaseChallan);
+                }
+
+                return new ChallanBillingSnapshot
+                {
+                    BillAmount = billAmount,
+                    Margin = margin
+                };
+            }
+            catch
+            {
+                return null;
             }
         }
 
@@ -14205,32 +14530,7 @@ namespace Awagaman_ERP
                         QueueCBSRefresh();
                         QueueDashboardRefresh();
 
-                        try
-                        {
-                            var trackingEntry = new TrackingEntry
-                            {
-                                ChallanNo = saveEntry.ChallanNumber,
-                                ChallanDate = saveEntry.Date,
-                                From = saveEntry.From,
-                                To = saveEntry.To,
-                                VehicleNo = saveEntry.VehicleNumber,
-                                DriverMobile = saveEntry.DriverMobile
-                            };
-
-                            if (useRemoteApi)
-                            {
-                                _trackingRepo.Upsert(trackingEntry);
-                                uiDispatcher.BeginInvoke(new Action(() => TrackingVM.AddEntry(trackingEntry, persist: false)));
-                            }
-                            else
-                            {
-                                uiDispatcher.BeginInvoke(new Action(() => TrackingVM.AddEntry(trackingEntry)));
-                            }
-                        }
-                        catch (Exception trackingEx)
-                        {
-                            LogException("OpenChallanForm TrackingSave", trackingEx);
-                        }
+                        uiDispatcher.BeginInvoke(new Action(RefreshTrackingAfterChallanChange));
                     });
                 }
                 catch (Exception ex)
@@ -14589,7 +14889,7 @@ namespace Awagaman_ERP
         {
             ShowPurchaseLedger(TabChallan, "Chllan List");
         }
-        private void OpenTrackingLedger_Click(object sender, RoutedEventArgs e) { using (EnterBusyCursor()) { HideUtilityViews(); DashboardView.Visibility = Visibility.Collapsed; DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; if (TrackingLedgerView.DataContext == null) TrackingLedgerView.DataContext = TrackingVM; if (TrackingLedgerGrid != null) TrackingLedgerGrid.ItemsSource = TrackingVM.Entries; if (TrackingVM != null && TrackingVM.Entries.Count == 0) TrackingVM.LoadData(); TabTrackingLedger.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDashboard.Style = (Style)FindResource("TabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabChallan.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count; RefreshTrackingReminderFromCurrentEntries(); if (PageTitle != null) PageTitle.Text = "Tracking Ledger"; } }
+        private void OpenTrackingLedger_Click(object sender, RoutedEventArgs e) { using (EnterBusyCursor()) { HideUtilityViews(); DashboardView.Visibility = Visibility.Collapsed; DeliveryChallanView.Visibility = Visibility.Collapsed; LRLedgerView.Visibility = Visibility.Collapsed; TrackingLedgerView.Visibility = Visibility.Visible; PartyLedgerView.Visibility = Visibility.Collapsed; BillLedgerView.Visibility = Visibility.Collapsed; VehicleLedgerView.Visibility = Visibility.Collapsed; CBSLedgerView.Visibility = Visibility.Collapsed; if (TrackingLedgerView.DataContext == null) TrackingLedgerView.DataContext = TrackingVM; if (TrackingLedgerGrid != null) TrackingLedgerGrid.ItemsSource = TrackingVM.Entries; if (TrackingVM != null && (TrackingVM.Entries.Count == 0 || _trackingLedgerDirty)) { TrackingVM.LoadData(); _trackingLedgerDirty = false; } TabTrackingLedger.Style = (Style)FindResource("ActiveTabButtonStyle"); TabDashboard.Style = (Style)FindResource("TabButtonStyle"); TabDeliveryChallans.Style = (Style)FindResource("TabButtonStyle"); TabChallan.Style = (Style)FindResource("TabButtonStyle"); TabLRLedger.Style = (Style)FindResource("TabButtonStyle"); TabPartyLedger.Style = (Style)FindResource("TabButtonStyle"); TabBillLedger.Style = (Style)FindResource("TabButtonStyle"); TabVehicleLedger.Style = (Style)FindResource("TabButtonStyle"); TabCBSLedger.Style = (Style)FindResource("TabButtonStyle"); TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count; RefreshTrackingReminderFromCurrentEntries(); if (PageTitle != null) PageTitle.Text = "Tracking Ledger"; } }
         private async void TrackingDeleteSelected_Click(object sender, RoutedEventArgs e)
         {
             if (!EnsureAdminAccess("Delete tracking entries")) return;
@@ -14774,20 +15074,52 @@ namespace Awagaman_ERP
                     var updated = form.Result;
                     if (updated == null) return;
 
+                    updated.HasComments = item.HasComments;
+                    updated.CommentPreview = item.CommentPreview;
                     updated.RecalculateBalance();
                     challanRepository.LedgerMode = _isChallanLedgerMode ? "Challan" : "Purchase";
-                    try { challanRepository.Upsert(updated); } catch { }
+                    var beforeSnapshot = CloneChallanEntry(item);
+                    ApplyChallanSnapshot(item, updated);
+                    RefreshDataGridItemsSafely(LedgerGrid);
+                    QueueDashboardRefresh();
 
-                    var idx = VM.Entries.IndexOf(item);
-                    if (idx >= 0) VM.Entries[idx] = updated;
+                    var saveCopy = item.CloneForPersistence();
+                    var uiDispatcher = Dispatcher;
+                    Task.Run(() =>
+                    {
+                        try
+                        {
+                            challanRepository.Upsert(saveCopy);
 
-                    VM.RefreshAfterDelete();
-                    SyncLinkedLREntriesFromChallan(updated);
-                    SyncSingleChallanBillingFromLR(updated);
-                    SyncLhsCBSFromChallan(updated.CloneForPersistence());
-                    QueueCBSRefresh();
-                    UpdatePageUI();
-                    RefreshDashboard();
+                            SyncLinkedLREntriesFromChallanBackground(saveCopy);
+                            var billingSnapshot = SyncSingleChallanBillingFromLRBackground(saveCopy);
+                            SyncLhsCBSFromChallan(saveCopy);
+
+                            uiDispatcher.BeginInvoke(new Action(() =>
+                            {
+                                if (billingSnapshot != null)
+                                {
+                                    item.BillAmount = billingSnapshot.BillAmount;
+                                    item.Margin = billingSnapshot.Margin;
+                                }
+
+                                RefreshTrackingAfterChallanChange();
+                                QueueCBSRefresh();
+                                QueueDashboardRefresh();
+                                RefreshDataGridItemsSafely(LedgerGrid);
+                            }));
+                        }
+                        catch (Exception saveEx)
+                        {
+                            LogException(nameof(EditSelected_Click) + ".BackgroundSave", saveEx);
+                            uiDispatcher.BeginInvoke(new Action(() =>
+                            {
+                                ApplyChallanSnapshot(item, beforeSnapshot);
+                                RefreshDataGridItemsSafely(LedgerGrid);
+                                MessageBox.Show("Unable to update challan entry: " + saveEx.Message, "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                            }));
+                        }
+                    });
                 }
                 catch (Exception ex)
                 {
@@ -14890,8 +15222,24 @@ namespace Awagaman_ERP
             if (entry == null || entry.Id <= 0) return;
             var popup = new CommentPopupWindow(entry.Id, entry.ChallanNumber);
             popup.Owner = this;
+            popup.Closed += (_, __) =>
+            {
+                try
+                {
+                    if (popup.CommentsChanged)
+                    {
+                        var repo = new CommentRepository();
+                        var comments = repo.GetByChallanId(entry.Id);
+                        entry.HasComments = comments.Count > 0;
+                        entry.CommentPreview = comments.FirstOrDefault()?.Comment ?? string.Empty;
+                        VM?.RefreshAfterDelete();
+                        LedgerGrid?.Items.Refresh();
+                    }
+                    Activate();
+                }
+                catch { }
+            };
             popup.Show();
-            VM?.RefreshAfterDelete();
         }
 
         private void OpenLRCommentPopup(LREntry entry)
@@ -14899,8 +15247,24 @@ namespace Awagaman_ERP
             if (entry == null || entry.Id <= 0) return;
             var popup = new LRCommentPopupWindow(entry.Id, entry.LRNo);
             popup.Owner = this;
+            popup.Closed += (_, __) =>
+            {
+                try
+                {
+                    if (popup.CommentsChanged)
+                    {
+                        var repo = new CommentRepository();
+                        var comments = repo.GetLRByEntryId(entry.Id);
+                        entry.HasComments = comments.Count > 0;
+                        entry.CommentPreview = comments.FirstOrDefault()?.Comment ?? string.Empty;
+                        LRVM?.RefreshAfterDelete();
+                        LRLedgerGrid?.Items.Refresh();
+                    }
+                    Activate();
+                }
+                catch { }
+            };
             popup.Show();
-            LRVM?.RefreshAfterDelete();
         }
 
         private void OpenBillCommentPopup(BillEntry entry)
@@ -14909,12 +15273,29 @@ namespace Awagaman_ERP
             var title = string.IsNullOrWhiteSpace(entry.BillNo) ? $"Bill Id {entry.Id}" : $"Bill {entry.BillNo}";
             var popup = new BillCommentPopupWindow(entry.Id, title);
             popup.Owner = this;
+            popup.Closed += (_, __) =>
+            {
+                try
+                {
+                    if (popup.CommentsChanged)
+                    {
+                        var repo = new CommentRepository();
+                        var comments = repo.GetBillByBillId(entry.Id);
+                        entry.HasComments = comments.Count > 0;
+                        entry.CommentPreview = comments.FirstOrDefault()?.Comment ?? string.Empty;
+                        BillVM?.RefreshAfterDelete();
+                        BillLedgerGrid?.Items.Refresh();
+                    }
+                    Activate();
+                }
+                catch { }
+            };
             popup.Show();
-            BillVM?.RefreshAfterDelete();
         }
 
         private void AddChallanComment_Click(object sender, RoutedEventArgs e) { var entry = (sender as System.Windows.Controls.MenuItem)?.Tag as ChallanEntry; OpenChallanCommentPopup(entry); }
         private void AddLRComment_Click(object sender, RoutedEventArgs e) { var entry = (sender as System.Windows.Controls.MenuItem)?.Tag as LREntry; OpenLRCommentPopup(entry); }
+        private void AddBillComment_Click(object sender, RoutedEventArgs e) { var entry = (sender as System.Windows.Controls.MenuItem)?.Tag as BillEntry; OpenBillCommentPopup(entry); }
         private void DashboardMakeLR_Click(object sender, RoutedEventArgs e)
         {
             var btn = sender as System.Windows.Controls.Button;
@@ -15295,9 +15676,9 @@ namespace Awagaman_ERP
                     ("pay_type", "To Pay/To Be Billed", 430, 270, 260, 24, $"{entry.PayType}"),
                     ("no_of_pkg", "No. of Pkg", 42, 298, 160, 24, $"{entry.PKG}"),
                     ("package_type", "Package Type", 250, 298, 160, 24, $"{entry.PkgType}"),
-                    ("size_l", "L", 430, 298, 70, 24, $"{entry.SizeL:0.####################}"),
-                    ("size_w", "W", 520, 298, 70, 24, $"{entry.SizeW:0.####################}"),
-                    ("size_h", "H", 610, 298, 70, 24, $"{entry.SizeH:0.####################}"),
+                    ("size_l", "L", 430, 298, 70, 24, entry.SizeL == 0m ? string.Empty : $"{entry.SizeL:0.####################}"),
+                    ("size_w", "W", 520, 298, 70, 24, entry.SizeW == 0m ? string.Empty : $"{entry.SizeW:0.####################}"),
+                    ("size_h", "H", 610, 298, 70, 24, entry.SizeH == 0m ? string.Empty : $"{entry.SizeH:0.####################}"),
                     ("description", "Description", 42, 326, 480, 48, $"{entry.Description}"),
                     ("invoice", "Invoice", 42, 354, 220, 24, $"{entry.Invoice}"),
                     ("value", "Value", 280, 354, 140, 24, $"{entry.Value}")

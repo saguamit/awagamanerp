@@ -296,11 +296,19 @@ namespace Awagaman_ERP.Models
         }
 
         private bool _hasComments;
+        private string _commentPreview;
         [System.Xml.Serialization.XmlIgnore]
         public bool HasComments
         {
             get => _hasComments;
             set { _hasComments = value; OnPropertyChanged(); }
+        }
+
+        [System.Xml.Serialization.XmlIgnore]
+        public string CommentPreview
+        {
+            get => _commentPreview;
+            set { _commentPreview = value; OnPropertyChanged(); }
         }
 
         [System.Xml.Serialization.XmlIgnore]

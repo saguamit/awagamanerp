@@ -135,11 +135,19 @@ namespace Awagaman_ERP.Models
         public bool PreserveImportedBilling { get => _preserveImportedBilling; set { _preserveImportedBilling = value; OnPropertyChanged(); OnPropertyChanged(nameof(TotalBill)); } }
 
         private bool _hasComments;
+        private string _commentPreview;
         [System.Xml.Serialization.XmlIgnore]
         public bool HasComments
         {
             get => _hasComments;
             set { _hasComments = value; OnPropertyChanged(); }
+        }
+
+        [System.Xml.Serialization.XmlIgnore]
+        public string CommentPreview
+        {
+            get => _commentPreview;
+            set { _commentPreview = value; OnPropertyChanged(); }
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

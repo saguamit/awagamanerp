@@ -62,10 +62,13 @@ namespace Awagaman_ERP.Models
 
         private string _groupColor;
         private string _billNoDisplay;
+        private string _commentPreview;
         [System.Xml.Serialization.XmlIgnore]
         public string GroupColor { get => _groupColor; set { _groupColor = value; OnPropertyChanged(); } }
         [System.Xml.Serialization.XmlIgnore]
         public string BillNoDisplay { get => _billNoDisplay; set { _billNoDisplay = value; OnPropertyChanged(); } }
+        [System.Xml.Serialization.XmlIgnore]
+        public string CommentPreview { get => _commentPreview; set { _commentPreview = value; OnPropertyChanged(); } }
         [System.Xml.Serialization.XmlIgnore]
         public string BillNoLedgerDisplay => FormatLedgerBillNo(BillNo, BillDate);
         [System.Xml.Serialization.XmlIgnore]

@@ -187,7 +187,6 @@
                                     <TextBlock Text="{Binding FilteredTotalBalance, StringFormat=Rs. {0:N2}}" FontSize="13" Foreground="{StaticResource TextDark}" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" />
                                 </StackPanel>
                             </StackPanel>
-                            <Button Grid.Column="1" Content="+ Create LR" Style="{StaticResource GreenButtonStyle}" Click="OpenLRForm_Click" />
                         </Grid>
                     </Border>
 

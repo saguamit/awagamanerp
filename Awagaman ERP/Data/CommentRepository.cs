@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Linq;
 using Awagaman_ERP.Models;
 
 namespace Awagaman_ERP.Data
@@ -251,6 +252,99 @@ namespace Awagaman_ERP.Data
                     while (r.Read()) ids.Add(Convert.ToInt32(r["ChallanId"]));
             }
             return ids;
+        }
+
+        public Dictionary<int, string> GetLatestChallanCommentsByIds(IEnumerable<int> challanIds)
+        {
+            var ids = new HashSet<int>((challanIds ?? Enumerable.Empty<int>()).Where(x => x > 0));
+            if (ids.Count == 0) return new Dictionary<int, string>();
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<ChallanComment>("api/comments/challan/all")
+                    .Where(x => x != null && ids.Contains(x.ChallanId))
+                    .GroupBy(x => x.ChallanId)
+                    .ToDictionary(g => g.Key, g => (g.OrderByDescending(x => x.CreatedAt).FirstOrDefault()?.Comment ?? string.Empty).Trim());
+            }
+
+            var result = new Dictionary<int, string>();
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand("SELECT ChallanId, Comment, CreatedAt FROM ChallanComments ORDER BY CreatedAt DESC;", c))
+            {
+                c.Open();
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        var id = Convert.ToInt32(r["ChallanId"]);
+                        if (!ids.Contains(id) || result.ContainsKey(id)) continue;
+                        result[id] = (r["Comment"] as string ?? string.Empty).Trim();
+                    }
+                }
+            }
+            return result;
+        }
+
+        public Dictionary<int, string> GetLatestLRCommentsByIds(IEnumerable<int> lrEntryIds)
+        {
+            var ids = new HashSet<int>((lrEntryIds ?? Enumerable.Empty<int>()).Where(x => x > 0));
+            if (ids.Count == 0) return new Dictionary<int, string>();
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<LRComment>("api/comments/lr/all")
+                    .Where(x => x != null && ids.Contains(x.LREntryId))
+                    .GroupBy(x => x.LREntryId)
+                    .ToDictionary(g => g.Key, g => (g.OrderByDescending(x => x.CreatedAt).FirstOrDefault()?.Comment ?? string.Empty).Trim());
+            }
+
+            var result = new Dictionary<int, string>();
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand("SELECT LREntryId, Comment, CreatedAt FROM LRComments ORDER BY CreatedAt DESC;", c))
+            {
+                c.Open();
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        var id = Convert.ToInt32(r["LREntryId"]);
+                        if (!ids.Contains(id) || result.ContainsKey(id)) continue;
+                        result[id] = (r["Comment"] as string ?? string.Empty).Trim();
+                    }
+                }
+            }
+            return result;
+        }
+
+        public Dictionary<int, string> GetLatestBillCommentsByIds(IEnumerable<int> billIds)
+        {
+            var ids = new HashSet<int>((billIds ?? Enumerable.Empty<int>()).Where(x => x > 0));
+            if (ids.Count == 0) return new Dictionary<int, string>();
+
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<BillComment>("api/comments/bill/all")
+                    .Where(x => x != null && ids.Contains(x.BillId))
+                    .GroupBy(x => x.BillId)
+                    .ToDictionary(g => g.Key, g => (g.OrderByDescending(x => x.CreatedAt).FirstOrDefault()?.Comment ?? string.Empty).Trim());
+            }
+
+            var result = new Dictionary<int, string>();
+            using (var c = new SQLiteConnection(AppDatabase.ConnectionString))
+            using (var cmd = new SQLiteCommand("SELECT BillId, Comment, CreatedAt FROM BillComments ORDER BY CreatedAt DESC;", c))
+            {
+                c.Open();
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        var id = Convert.ToInt32(r["BillId"]);
+                        if (!ids.Contains(id) || result.ContainsKey(id)) continue;
+                        result[id] = (r["Comment"] as string ?? string.Empty).Trim();
+                    }
+                }
+            }
+            return result;
         }
     }
 }

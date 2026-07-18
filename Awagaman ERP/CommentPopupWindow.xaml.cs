@@ -14,6 +14,7 @@ namespace Awagaman_ERP
         private readonly string _challanNumber;
         private readonly CommentRepository _repo;
         private ObservableCollection<ChallanComment> _comments;
+        public bool CommentsChanged { get; private set; }
 
         public CommentPopupWindow(int challanId, string challanNumber)
         {
@@ -45,6 +46,7 @@ namespace Awagaman_ERP
                 Comment = text,
                 CreatedAt = DateTime.Now
             });
+            CommentsChanged = true;
             CommentTextBox.Text = "";
             LoadComments();
         }
@@ -56,11 +58,13 @@ namespace Awagaman_ERP
             var result = MessageBox.Show("Delete this comment?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (result != MessageBoxResult.Yes) return;
             _repo.Delete(comment.Id);
+            CommentsChanged = true;
             LoadComments();
         }
 
         private void Close_Click(object sender, RoutedEventArgs e)
         {
+            try { Owner?.Activate(); } catch { }
             Close();
         }
     }

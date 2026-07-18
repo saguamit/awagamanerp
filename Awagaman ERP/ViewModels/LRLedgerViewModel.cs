@@ -449,11 +449,16 @@ namespace Awagaman_ERP.ViewModels
         {
             try
             {
+                var itemList = items?.Where(x => x != null).ToList() ?? new List<LREntry>();
                 var ids = commentIds != null
                     ? new HashSet<int>(commentIds)
                     : new Data.CommentRepository().GetLREntryIdsWithComments();
-                foreach (var e in items)
-                    if (e != null) e.HasComments = ids.Contains(e.Id);
+                var previews = new Data.CommentRepository().GetLatestLRCommentsByIds(itemList.Select(x => x.Id));
+                foreach (var e in itemList)
+                {
+                    e.HasComments = ids.Contains(e.Id);
+                    e.CommentPreview = previews.TryGetValue(e.Id, out var preview) ? preview : string.Empty;
+                }
             }
             catch { }
         }
