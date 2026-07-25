@@ -1,5 +1,5 @@
 ﻿#define MyAppName "Awagaman ERP"
-#define MyAppVersion "1.0.54"
+#define MyAppVersion "1.0.55"
 #define MyAppPublisher "Awagaman ERP"
 #define MyAppExeName "Awagaman ERP.exe"
 #define MySourceDir "c:\amit sagu\awagaman project\ATL ERP_pre_multiuser\Awagaman ERP\bin\Release"
@@ -13,7 +13,7 @@ DefaultDirName={autopf}\Awagaman ERP
 DefaultGroupName=Awagaman ERP
 DisableProgramGroupPage=yes
 OutputDir=c:\amit sagu\awagaman project\ATL ERP_pre_multiuser\dist
-OutputBaseFilename=AwagamanERP-Setup-v1.0.54
+OutputBaseFilename=AwagamanERP-Setup-v1.0.55
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -150,6 +150,15 @@ begin
   if CurStep = ssInstall then
   begin
     Exec(ExpandConstant('{cmd}'), '/C taskkill /F /T /IM "Awagaman ERP.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    DeleteFile(ExpandConstant('{autodesktop}\Awagaman ERP.lnk'));
+    DeleteFile(ExpandConstant('{userdesktop}\Awagaman ERP.lnk'));
+    DeleteFile(ExpandConstant('{commondesktop}\Awagaman ERP.lnk'));
+    DeleteFile(ExpandConstant('{autoprograms}\Awagaman ERP.lnk'));
+    DeleteFile(ExpandConstant('{group}\Awagaman ERP.lnk'));
+    DeleteFile(ExpandConstant('{commonprograms}\Awagaman ERP\Awagaman ERP.lnk'));
+    DeleteFile(ExpandConstant('{userprograms}\Awagaman ERP\Awagaman ERP.lnk'));
+    RemoveDir(ExpandConstant('{commonprograms}\Awagaman ERP'));
+    RemoveDir(ExpandConstant('{userprograms}\Awagaman ERP'));
     Sleep(1500);
   end;
 
