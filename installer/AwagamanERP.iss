@@ -1,5 +1,5 @@
 ﻿#define MyAppName "Awagaman ERP"
-#define MyAppVersion "1.0.53"
+#define MyAppVersion "1.0.54"
 #define MyAppPublisher "Awagaman ERP"
 #define MyAppExeName "Awagaman ERP.exe"
 #define MySourceDir "c:\amit sagu\awagaman project\ATL ERP_pre_multiuser\Awagaman ERP\bin\Release"
@@ -13,13 +13,16 @@ DefaultDirName={autopf}\Awagaman ERP
 DefaultGroupName=Awagaman ERP
 DisableProgramGroupPage=yes
 OutputDir=c:\amit sagu\awagaman project\ATL ERP_pre_multiuser\dist
-OutputBaseFilename=AwagamanERP-Setup-v1.0.53
+OutputBaseFilename=AwagamanERP-Setup-v1.0.54
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 SetupIconFile=c:\amit sagu\awagaman project\ATL ERP_pre_multiuser\Awagaman ERP\logo.ico
 UninstallDisplayIcon={app}\Awagaman ERP.exe
+AppMutex=AwagamanERP.SingleInstance
+CloseApplications=yes
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -141,7 +144,15 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
 begin
+  if CurStep = ssInstall then
+  begin
+    Exec(ExpandConstant('{cmd}'), '/C taskkill /F /T /IM "Awagaman ERP.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(1500);
+  end;
+
   if CurStep = ssPostInstall then
     WriteNetworkSettings;
 end;
