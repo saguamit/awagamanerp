@@ -150,6 +150,11 @@ namespace Awagaman_ERP
             public decimal BillAmount;
             public decimal Margin;
         }
+        private sealed class Win32WindowHandle : System.Windows.Forms.IWin32Window
+        {
+            public Win32WindowHandle(IntPtr handle) { Handle = handle; }
+            public IntPtr Handle { get; }
+        }
         private readonly Stack<ChallanEditAction> _challanUndoStack = new Stack<ChallanEditAction>();
         private readonly Stack<ChallanEditAction> _challanRedoStack = new Stack<ChallanEditAction>();
         private ChallanEntry _challanEditBeforeSnapshot;
@@ -13167,7 +13172,8 @@ namespace Awagaman_ERP
             {
                 try
                 {
-                    var tempPdf = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"Awagaman-{entry.ChallanNumber}-{DateTime.Now:yyyyMMddHHmmss}.pdf");
+                    var safeChallanNo = MakeSafeFileName(entry.ChallanNumber, "challan");
+                    var tempPdf = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"Awagaman-{safeChallanNo}-{DateTime.Now:yyyyMMddHHmmss}.pdf");
                     var visual = BuildPreviewPage();
                     var bmp = RenderElementToBitmap(visual, pageWidth, pageHeight, exportDpi);
                     SaveBitmapAsPdf(bmp, tempPdf, exportDpi);
@@ -13191,12 +13197,20 @@ namespace Awagaman_ERP
             {
                 try
                 {
-                    var pd = new PrintDialog();
-                    if (pd.ShowDialog() == true)
+                    var printerName = ShowLegacyPrinterDialog(dialog);
+                    if (string.IsNullOrWhiteSpace(printerName)) return;
+
+                    var queue = new System.Printing.LocalPrintServer().GetPrintQueue(printerName);
+                    var pd = new PrintDialog
                     {
-                        var visual = BuildPreviewPage();
-                        pd.PrintVisual(visual, $"{(challanMode ? "Challan" : "Purchase")} {entry.ChallanNumber}");
-                    }
+                        PrintQueue = queue
+                    };
+
+                    var visual = BuildPreviewPage();
+                    pd.PrintVisual(visual, $"{(challanMode ? "Challan" : "Purchase")} {entry.ChallanNumber}");
+                    if (dialog.WindowState == WindowState.Minimized) dialog.WindowState = WindowState.Normal;
+                    dialog.Activate();
+                    Activate();
                 }
                 catch (Exception ex)
                 {
@@ -13216,10 +13230,11 @@ namespace Awagaman_ERP
             {
                 try
                 {
+                    var safeChallanNo = MakeSafeFileName(entry.ChallanNumber, "challan");
                     var sfd = new Microsoft.Win32.SaveFileDialog
                     {
                         Filter = "PDF Files|*.pdf",
-                        FileName = $"{entry.ChallanNumber}_{(challanMode ? "challan" : "purchase")}.pdf"
+                        FileName = $"{safeChallanNo}_{(challanMode ? "challan" : "purchase")}.pdf"
                     };
                     if (sfd.ShowDialog() == true)
                     {
@@ -16415,6 +16430,41 @@ namespace Awagaman_ERP
                 return draft;
             }
             catch { return null; }
+        }
+
+        private static string MakeSafeFileName(string value, string fallback = "file")
+        {
+            var text = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+            var safe = string.Join("_", text.Split(System.IO.Path.GetInvalidFileNameChars()));
+            return string.IsNullOrWhiteSpace(safe) ? fallback : safe;
+        }
+
+        private static string ShowLegacyPrinterDialog(Window owner = null)
+        {
+            using (var dialog = new System.Windows.Forms.PrintDialog())
+            {
+                dialog.UseEXDialog = false;
+                dialog.AllowCurrentPage = false;
+                dialog.AllowPrintToFile = false;
+                dialog.AllowSelection = false;
+                dialog.AllowSomePages = false;
+                dialog.PrinterSettings = new System.Drawing.Printing.PrinterSettings();
+
+                System.Windows.Forms.DialogResult result;
+                var ownerHandle = owner != null ? new System.Windows.Interop.WindowInteropHelper(owner).Handle : IntPtr.Zero;
+                if (ownerHandle != IntPtr.Zero)
+                {
+                    result = dialog.ShowDialog(new Win32WindowHandle(ownerHandle));
+                }
+                else
+                {
+                    result = dialog.ShowDialog();
+                }
+
+                return result == System.Windows.Forms.DialogResult.OK
+                    ? dialog.PrinterSettings?.PrinterName
+                    : null;
+            }
         }
 
         private static void SaveBillPreviewDraft(string billNo, BillPreviewDraft draft)

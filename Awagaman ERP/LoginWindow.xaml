@@ -32,14 +32,31 @@
                          Foreground="#0F172A"/>
 
                 <TextBlock Text="Password" FontWeight="SemiBold" Foreground="#1E293B"/>
-                <PasswordBox x:Name="PasswordBox"
+                <Grid Margin="0,6,0,0">
+                    <PasswordBox x:Name="PasswordBox"
+                                 Height="38"
+                                 Padding="10,6"
+                                 BorderBrush="#CBD5E1"
+                                 BorderThickness="1"
+                                 Background="White"
+                                 Foreground="#0F172A"
+                                 PasswordChanged="PasswordBox_PasswordChanged"/>
+                    <TextBox x:Name="PasswordTextBox"
                              Height="38"
-                             Margin="0,6,0,0"
                              Padding="10,6"
                              BorderBrush="#CBD5E1"
                              BorderThickness="1"
                              Background="White"
-                             Foreground="#0F172A"/>
+                             Foreground="#0F172A"
+                             Visibility="Collapsed"
+                             TextChanged="PasswordTextBox_TextChanged"/>
+                </Grid>
+                <CheckBox x:Name="ShowPasswordCheckBox"
+                          Margin="0,8,0,0"
+                          Content="Show password"
+                          Foreground="#475569"
+                          Checked="ShowPasswordCheckBox_Changed"
+                          Unchecked="ShowPasswordCheckBox_Changed"/>
 
                 <TextBlock x:Name="ErrorText"
                            Margin="0,14,0,0"

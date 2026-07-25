@@ -7,6 +7,8 @@ namespace Awagaman_ERP
 {
     public partial class LoginWindow : Window
     {
+        private bool _syncingPasswordFields;
+
         public LoginWindow()
         {
             InitializeComponent();
@@ -21,7 +23,9 @@ namespace Awagaman_ERP
             try
             {
                 var username = UsernameBox.Text?.Trim();
-                var password = PasswordBox.Password ?? string.Empty;
+                var password = ShowPasswordCheckBox.IsChecked == true
+                    ? (PasswordTextBox.Text ?? string.Empty)
+                    : (PasswordBox.Password ?? string.Empty);
                 AppLogger.LogMessage("Login", $"Login requested for user '{username}'.");
 
                 var response = RemoteApiClient.Post<LoginResponse>("api/auth/login", new LoginRequest
@@ -74,6 +78,54 @@ namespace Awagaman_ERP
             }
 
             return message;
+        }
+
+        private void ShowPasswordCheckBox_Changed(object sender, RoutedEventArgs e)
+        {
+            var showPassword = ShowPasswordCheckBox.IsChecked == true;
+            if (showPassword)
+            {
+                PasswordTextBox.Text = PasswordBox.Password ?? string.Empty;
+                PasswordTextBox.Visibility = Visibility.Visible;
+                PasswordBox.Visibility = Visibility.Collapsed;
+                PasswordTextBox.Focus();
+                PasswordTextBox.CaretIndex = PasswordTextBox.Text.Length;
+            }
+            else
+            {
+                PasswordBox.Password = PasswordTextBox.Text ?? string.Empty;
+                PasswordBox.Visibility = Visibility.Visible;
+                PasswordTextBox.Visibility = Visibility.Collapsed;
+                PasswordBox.Focus();
+            }
+        }
+
+        private void PasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
+        {
+            if (_syncingPasswordFields || ShowPasswordCheckBox.IsChecked == true) return;
+            _syncingPasswordFields = true;
+            try
+            {
+                PasswordTextBox.Text = PasswordBox.Password ?? string.Empty;
+            }
+            finally
+            {
+                _syncingPasswordFields = false;
+            }
+        }
+
+        private void PasswordTextBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+        {
+            if (_syncingPasswordFields || ShowPasswordCheckBox.IsChecked != true) return;
+            _syncingPasswordFields = true;
+            try
+            {
+                PasswordBox.Password = PasswordTextBox.Text ?? string.Empty;
+            }
+            finally
+            {
+                _syncingPasswordFields = false;
+            }
         }
     }
 }

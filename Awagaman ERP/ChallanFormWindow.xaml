@@ -174,7 +174,14 @@
 
                                 <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,0,8">
                                     <TextBlock Text="Agent / Broker *" Style="{StaticResource FieldLabelStyle}" />
-                                    <TextBox Text="{Binding BrokerName, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                                    <Grid>
+                                        <TextBox x:Name="BrokerNameBox" Text="{Binding BrokerName, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" TextChanged="BrokerNameBox_TextChanged" LostFocus="SuggestionTextBox_LostFocus" PreviewKeyDown="SuggestionTextBox_PreviewKeyDown" />
+                                        <Popup x:Name="BrokerPopup" PlacementTarget="{Binding ElementName=BrokerNameBox}" Placement="Bottom" StaysOpen="False" Width="{Binding ActualWidth, ElementName=BrokerNameBox}">
+                                            <Border BorderBrush="#AAA" BorderThickness="1" Background="White" CornerRadius="4">
+                                                <ListBox x:Name="BrokerSuggestionList" MaxHeight="220" FontSize="12" SelectionChanged="BrokerSuggestionList_SelectionChanged" PreviewMouseLeftButtonDown="SuggestionList_PreviewMouseLeftButtonDown" />
+                                            </Border>
+                                        </Popup>
+                                    </Grid>
                                 </StackPanel>
                                 <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,0,0,8">
                                     <TextBlock Text="LR No. (Multiple)" Style="{StaticResource FieldLabelStyle}" />
@@ -189,11 +196,25 @@
 
                                 <StackPanel Grid.Row="2" Grid.Column="0">
                                     <TextBlock Text="Origin (From) *" Style="{StaticResource FieldLabelStyle}" />
-                                    <TextBox Text="{Binding From, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                                    <Grid>
+                                        <TextBox x:Name="FromBox" Text="{Binding From, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" TextChanged="FromBox_TextChanged" LostFocus="SuggestionTextBox_LostFocus" PreviewKeyDown="SuggestionTextBox_PreviewKeyDown" />
+                                        <Popup x:Name="FromPopup" PlacementTarget="{Binding ElementName=FromBox}" Placement="Bottom" StaysOpen="False" Width="{Binding ActualWidth, ElementName=FromBox}">
+                                            <Border BorderBrush="#AAA" BorderThickness="1" Background="White" CornerRadius="4">
+                                                <ListBox x:Name="FromSuggestionList" MaxHeight="220" FontSize="12" SelectionChanged="FromSuggestionList_SelectionChanged" PreviewMouseLeftButtonDown="SuggestionList_PreviewMouseLeftButtonDown" />
+                                            </Border>
+                                        </Popup>
+                                    </Grid>
                                 </StackPanel>
                                 <StackPanel Grid.Row="2" Grid.Column="2">
                                     <TextBlock Text="Destination (To) *" Style="{StaticResource FieldLabelStyle}" />
-                                    <TextBox Text="{Binding To, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" />
+                                    <Grid>
+                                        <TextBox x:Name="ToBox" Text="{Binding To, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputTextBoxStyle}" TextChanged="ToBox_TextChanged" LostFocus="SuggestionTextBox_LostFocus" PreviewKeyDown="SuggestionTextBox_PreviewKeyDown" />
+                                        <Popup x:Name="ToPopup" PlacementTarget="{Binding ElementName=ToBox}" Placement="Bottom" StaysOpen="False" Width="{Binding ActualWidth, ElementName=ToBox}">
+                                            <Border BorderBrush="#AAA" BorderThickness="1" Background="White" CornerRadius="4">
+                                                <ListBox x:Name="ToSuggestionList" MaxHeight="220" FontSize="12" SelectionChanged="ToSuggestionList_SelectionChanged" PreviewMouseLeftButtonDown="SuggestionList_PreviewMouseLeftButtonDown" />
+                                            </Border>
+                                        </Popup>
+                                    </Grid>
                                 </StackPanel>
                             </Grid>
                         </StackPanel>
@@ -314,7 +335,7 @@
                                 </StackPanel>
                                 <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,0,0,8">
                                     <TextBlock Text="Advance Date" Style="{StaticResource FieldLabelStyle}" />
-                                    <DatePicker SelectedDate="{Binding AdvanceDate, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputDatePickerStyle}" />
+                                    <DatePicker x:Name="AdvanceDatePicker" SelectedDate="{Binding AdvanceDate, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputDatePickerStyle}" />
                                 </StackPanel>
 
                                 <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,0,8">
@@ -383,7 +404,7 @@
                                 </StackPanel>
                                 <StackPanel Grid.Row="2" Grid.Column="2" Margin="0,0,0,8">
                                     <TextBlock Text="Bal Paid Date" Style="{StaticResource FieldLabelStyle}" />
-                                    <DatePicker SelectedDate="{Binding BalancePaidDate, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputDatePickerStyle}" />
+                                    <DatePicker x:Name="BalancePaidDatePicker" SelectedDate="{Binding BalancePaidDate, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputDatePickerStyle}" />
                                 </StackPanel>
 
                                 <Grid Grid.Row="3" Grid.ColumnSpan="3" Margin="0,8,0,0">
