@@ -2997,6 +2997,12 @@ SELECT COUNT(*) FROM deduped_tracking {where};", parameters);
     public Task<int> DeleteTrackingAsync(int id) =>
         ExecuteAsync("DELETE FROM tracking_entries WHERE id = @id;", new { id });
 
+    public Task<int> DeleteTrackingByChallanNoAsync(string challanNo) =>
+        ExecuteAsync(
+            @"DELETE FROM tracking_entries
+WHERE lower(trim(coalesce(challan_no, ''))) = lower(trim(@challanNo));",
+            new { challanNo });
+
     public Task<int> AddReportingTrackAsync(ReportingTrackEntry entry) =>
         ExecuteScalarIntAsync(
             @"INSERT INTO reporting_tracks (tracking_entry_id, report_date_time, remarks)
@@ -3175,6 +3181,50 @@ RETURNING id;", new
             EntityKey = (entry.EntityKey ?? string.Empty).Trim(),
             Details = entry.Details ?? string.Empty,
             CreatedUtc = entry.CreatedUtc == default ? DateTime.UtcNow : entry.CreatedUtc
+        });
+
+    public async Task<int> AddDeletedLedgerRecordAsync(DeletedLedgerRecord entry)
+    {
+        var id = await ExecuteScalarIntAsync(@"
+INSERT INTO deleted_ledger_records (ledger_type, entity_key, json_data, deleted_utc)
+VALUES (@LedgerType, @EntityKey, @JsonData, @DeletedUtc)
+RETURNING id;", new
+        {
+            LedgerType = (entry.LedgerType ?? string.Empty).Trim(),
+            EntityKey = (entry.EntityKey ?? string.Empty).Trim(),
+            JsonData = entry.JsonData ?? string.Empty,
+            DeletedUtc = entry.DeletedUtc == default ? DateTime.UtcNow : entry.DeletedUtc
+        });
+
+        await ExecuteAsync(@"
+DELETE FROM deleted_ledger_records
+WHERE ledger_type = @ledgerType
+  AND id NOT IN (
+      SELECT id
+      FROM deleted_ledger_records
+      WHERE ledger_type = @ledgerType
+      ORDER BY deleted_utc DESC, id DESC
+      LIMIT 100
+  );", new { ledgerType = (entry.LedgerType ?? string.Empty).Trim() });
+
+        return id;
+    }
+
+    public Task<IEnumerable<DeletedLedgerRecord>> GetDeletedLedgerRecordsAsync(string? ledgerType, int take = 100) =>
+        QueryAsync<DeletedLedgerRecord>(@"
+SELECT
+    id,
+    ledger_type AS LedgerType,
+    entity_key AS EntityKey,
+    json_data AS JsonData,
+    deleted_utc AS DeletedUtc
+FROM deleted_ledger_records
+WHERE (@ledgerType IS NULL OR lower(trim(ledger_type)) = lower(trim(@ledgerType)))
+ORDER BY deleted_utc DESC, id DESC
+LIMIT @take;", new
+        {
+            ledgerType = string.IsNullOrWhiteSpace(ledgerType) ? null : ledgerType.Trim(),
+            take = Math.Clamp(take, 1, 100)
         });
 
     public Task<IEnumerable<AuditLogEntry>> GetRecentAuditAsync(int take = 200) =>

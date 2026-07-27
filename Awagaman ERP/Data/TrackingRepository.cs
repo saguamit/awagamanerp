@@ -332,15 +332,7 @@ LIMIT 1;";
 
             if (BackendSettings.UseRemoteApi)
             {
-                var matches = GetAll()
-                    .Where(x => string.Equals((x.ChallanNo ?? string.Empty).Trim(), challanNo, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-
-                foreach (var entry in matches)
-                {
-                    Delete(entry);
-                }
-
+                RemoteApiClient.Delete("api/tracking/by-challan/" + RemoteApiClient.UrlEncode(challanNo));
                 return;
             }
 

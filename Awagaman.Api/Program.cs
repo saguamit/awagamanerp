@@ -485,6 +485,17 @@ challans.MapDelete("/{id:int}", async (HttpContext context, int id, string? ledg
 {
     try
     {
+        var deletedEntry = await repo.GetChallanAsync(id, ledgerKind);
+        if (deletedEntry != null && !string.Equals(ledgerKind, "challan", StringComparison.OrdinalIgnoreCase))
+        {
+            await repo.AddDeletedLedgerRecordAsync(new DeletedLedgerRecord
+            {
+                LedgerType = "Purchase",
+                EntityKey = deletedEntry.ChallanNumber ?? id.ToString(),
+                JsonData = JsonSerializer.Serialize(deletedEntry, jsonOptions),
+                DeletedUtc = DateTime.UtcNow
+            });
+        }
         await repo.DeleteChallanAsync(id, ledgerKind);
         await WriteAuditAsync(
             context,
@@ -602,6 +613,17 @@ lrs.MapPut("/{id:int}", async (HttpContext context, int id, LREntry entry, Awaga
 });
 lrs.MapDelete("/{id:int}", async (HttpContext context, int id, AwagamanRepository repo) =>
 {
+    var deletedEntry = await repo.GetLREntryAsync(id);
+    if (deletedEntry != null)
+    {
+        await repo.AddDeletedLedgerRecordAsync(new DeletedLedgerRecord
+        {
+            LedgerType = "LR",
+            EntityKey = deletedEntry.LRNo ?? id.ToString(),
+            JsonData = JsonSerializer.Serialize(deletedEntry, jsonOptions),
+            DeletedUtc = DateTime.UtcNow
+        });
+    }
     await repo.DeleteLREntryAsync(id);
     await WriteAuditAsync(context, repo, "LR Ledger", "Delete", id.ToString(), "Deleted LR.");
     return Results.NoContent();
@@ -759,6 +781,17 @@ bills.MapDelete("/{id:int}", async (HttpContext context, int id, AwagamanReposit
 {
     try
     {
+        var deletedEntry = await repo.GetBillAsync(id);
+        if (deletedEntry != null)
+        {
+            await repo.AddDeletedLedgerRecordAsync(new DeletedLedgerRecord
+            {
+                LedgerType = "Bill",
+                EntityKey = deletedEntry.BillNo ?? id.ToString(),
+                JsonData = JsonSerializer.Serialize(deletedEntry, jsonOptions),
+                DeletedUtc = DateTime.UtcNow
+            });
+        }
         await repo.DeleteBillAsync(id);
         await WriteAuditAsync(context, repo, "Bill Ledger", "Delete", id.ToString(), "Deleted bill.");
         return Results.NoContent();
@@ -900,6 +933,7 @@ app.MapPost("/api/admin/reset-all", async (HttpContext context, AwagamanReposito
 });
 
 var tracking = app.MapGroup("/api/tracking");
+var deletedRecords = app.MapGroup("/api/deleted-records");
 tracking.MapGet("/", async (AwagamanRepository repo) => Results.Ok(await repo.GetTrackingAsync()));
 tracking.MapGet("/page", async (int page, int pageSize, string? search, string? challanNo, string? from, string? to, AwagamanRepository repo) =>
 {
@@ -945,6 +979,14 @@ tracking.MapDelete("/{id:int}", async (HttpContext context, int id, AwagamanRepo
     await WriteAuditAsync(context, repo, "Tracking Ledger", "Delete", id.ToString(), "Deleted tracking row.");
     return Results.NoContent();
 });
+tracking.MapDelete("/by-challan/{challanNo}", async (HttpContext context, string challanNo, AwagamanRepository repo) =>
+{
+    var deleted = await repo.DeleteTrackingByChallanNoAsync(challanNo);
+    await WriteAuditAsync(context, repo, "Tracking Ledger", "Delete", challanNo, "Deleted tracking rows for challan.");
+    return Results.Ok(new { DeletedCount = deleted });
+});
+deletedRecords.MapGet("/", async (string? ledgerType, int? take, AwagamanRepository repo) =>
+    Results.Ok(await repo.GetDeletedLedgerRecordsAsync(ledgerType, Math.Clamp(take ?? 100, 1, 100))));
 
 app.Run();
 

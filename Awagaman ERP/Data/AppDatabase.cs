@@ -235,6 +235,15 @@ CREATE TABLE IF NOT EXISTS ReportingTracks (
     FOREIGN KEY (TrackingEntryId) REFERENCES TrackingEntries(Id) ON DELETE CASCADE
 );");
 
+                    ExecuteNonQuery(connection, @"
+CREATE TABLE IF NOT EXISTS DeletedLedgerRecords (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    LedgerType TEXT NOT NULL,
+    EntityKey TEXT,
+    JsonData TEXT NOT NULL,
+    DeletedUtc TEXT NOT NULL
+);");
+
                     ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_Challans_Date ON Challans(Date);");
                     ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_Challans_Sr ON Challans(Sr);");
                     ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_Challans_Sr_Id ON Challans(Sr, Id);");
@@ -268,6 +277,7 @@ WHERE NOT EXISTS (
                     ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_LREntries_CHNo ON LREntries(CHNo);");
                     ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_LREntries_VehicleNo ON LREntries(VehicleNo);");
                     ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_ReportingTracks_TrackingEntryId ON ReportingTracks(TrackingEntryId);");
+                    ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_DeletedLedgerRecords_LedgerType_DeletedUtc ON DeletedLedgerRecords(LedgerType, DeletedUtc DESC, Id DESC);");
 
                     ExecuteNonQuery(connection, @"
 CREATE TABLE IF NOT EXISTS Parties (

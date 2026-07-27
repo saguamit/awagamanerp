@@ -124,6 +124,7 @@
     <Compile Include="Data\RemoteApiClient.cs" />
     <Compile Include="Data\RemotePagedResult.cs" />
     <Compile Include="Data\RemoteSummaryModels.cs" />
+    <Compile Include="Data\DeletedLedgerRepository.cs" />
     <Compile Include="Data\BillPrefixSettings.cs" />
     <Compile Include="Data\AppLogger.cs" />
     <Compile Include="ViewModels\ChallanViewModel.cs" />
@@ -238,6 +239,7 @@
     <Compile Include="Models\BillComment.cs" />
     <Compile Include="Models\DashboardSummary.cs" />
     <Compile Include="Models\LhsSummaryEntry.cs" />
+    <Compile Include="Models\DeletedLedgerRecord.cs" />
     <Compile Include="Models\SecurityModels.cs" />
     <Compile Include="Properties\AssemblyInfo.cs">
       <SubType>Code</SubType>

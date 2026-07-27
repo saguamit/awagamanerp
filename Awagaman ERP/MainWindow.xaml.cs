@@ -21,6 +21,7 @@ using System.Threading;
 using System.Runtime.CompilerServices;
 using System.Globalization;
 using System.Windows.Threading;
+using System.Web.Script.Serialization;
 
 namespace Awagaman_ERP
 {
@@ -77,6 +78,13 @@ namespace Awagaman_ERP
             public decimal Received { get; set; }
         }
 
+        private sealed class DeletedLedgerBundle
+        {
+            public List<DeletedPurchaseRow> PurchaseRows { get; set; }
+            public List<DeletedLrRow> LrRows { get; set; }
+            public List<DeletedBillRow> BillRows { get; set; }
+        }
+
         public ChallanViewModel VM => DataContext as ChallanViewModel;
         public LRLedgerViewModel LRVM { get; private set; }
         public TrackingViewModel TrackingVM { get; private set; }
@@ -124,8 +132,17 @@ namespace Awagaman_ERP
         private readonly Dictionary<string, System.Data.DataTable> _billLinesCache = new Dictionary<string, System.Data.DataTable>(StringComparer.Ordinal);
         private readonly CBSAccountRepository _cbsAccountRepo = new CBSAccountRepository();
         private readonly CashBankStatementRepository _cbsRepo = new CashBankStatementRepository();
+        private readonly DeletedLedgerRepository _deletedLedgerRepo = new DeletedLedgerRepository();
         private List<CBSAccountEntry> _allCbsAccounts = new List<CBSAccountEntry>();
         private List<CashBankStatementEntry> _allCbsEntries = new List<CashBankStatementEntry>();
+        private static readonly JavaScriptSerializer DeletedRecordSerializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue, RecursionLimit = 128 };
+        private bool _returnsViewBuilt;
+        private DataGrid _deletedPurchaseGrid;
+        private DataGrid _deletedLrGrid;
+        private DataGrid _deletedBillGrid;
+        private TextBlock _deletedPurchaseCountText;
+        private TextBlock _deletedLrCountText;
+        private TextBlock _deletedBillCountText;
         public ObservableCollection<string> CBSAccountNames { get; } = new ObservableCollection<string>();
         private readonly Dictionary<string, HashSet<string>> _cbsHeaderFilters = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         private Style _cbsFilteredHeaderStyle;
@@ -2310,7 +2327,15 @@ namespace Awagaman_ERP
                 {
                     foreach (var item in selected)
                     {
-                        try { _lrRepo.Delete(item); } catch { }
+                        try
+                        {
+                            if (!BackendSettings.UseRemoteApi)
+                            {
+                                _deletedLedgerRepo.Add("LR", item.LRNo, item);
+                            }
+                            _lrRepo.Delete(item);
+                        }
+                        catch { }
                     }
                     SyncChallanBillingForLrs(selected);
                 });
@@ -2380,7 +2405,15 @@ namespace Awagaman_ERP
                             try { commentRepo.DeleteBill(comment.Id); } catch { }
                         }
 
-                        try { _billRepo.Delete(item); } catch { }
+                        try
+                        {
+                            if (!BackendSettings.UseRemoteApi)
+                            {
+                                _deletedLedgerRepo.Add("Bill", item.BillNo, item);
+                            }
+                            _billRepo.Delete(item);
+                        }
+                        catch { }
                     }
 
                     var remainingBillsByNo = affectedBillNos.ToDictionary(x => x, x => _billRepo.GetByBillNo(x), StringComparer.OrdinalIgnoreCase);
@@ -7732,6 +7765,21 @@ namespace Awagaman_ERP
             }
         }
 
+        private void OpenReturns_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                EnsureReturnsViewBuilt();
+                ShowUtilityView(ReturnsView, "Deleted Logs", SidebarReturnsButton);
+                LoadDeletedRecordsAsync();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogException(nameof(OpenReturns_Click), ex);
+                MessageBox.Show("Unable to open deleted records: " + ex.Message, "Deleted Logs", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void OpenUsers_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -7757,6 +7805,264 @@ namespace Awagaman_ERP
             {
                 AppLogger.LogException(nameof(OpenExportHub_Click), ex);
                 MessageBox.Show("Unable to open exports: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void EnsureReturnsViewBuilt()
+        {
+            if (_returnsViewBuilt || ReturnsContentHost == null)
+            {
+                return;
+            }
+
+            var root = new Grid { Background = Brushes.White };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            var header = new DockPanel { Margin = new Thickness(20, 18, 20, 12) };
+            var info = new TextBlock
+            {
+                Text = "Last 100 deleted rows per ledger",
+                FontSize = 13,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#64748B")),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(info, Dock.Left);
+            header.Children.Add(info);
+
+            var refreshButton = new Button
+            {
+                Content = "Refresh",
+                Width = 90,
+                Height = 30,
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2563EB")),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            refreshButton.Click += delegate { LoadDeletedRecordsAsync(); };
+            DockPanel.SetDock(refreshButton, Dock.Right);
+            header.Children.Add(refreshButton);
+
+            Grid.SetRow(header, 0);
+            root.Children.Add(header);
+
+            var tabs = new TabControl { Margin = new Thickness(20, 0, 20, 20) };
+            tabs.Items.Add(CreateDeletedRecordsTab("Purchase Ledger", out _deletedPurchaseGrid, out _deletedPurchaseCountText, BuildDeletedPurchaseColumns));
+            tabs.Items.Add(CreateDeletedRecordsTab("LR Ledger", out _deletedLrGrid, out _deletedLrCountText, BuildDeletedLrColumns));
+            tabs.Items.Add(CreateDeletedRecordsTab("Bill Ledger", out _deletedBillGrid, out _deletedBillCountText, BuildDeletedBillColumns));
+            Grid.SetRow(tabs, 1);
+            root.Children.Add(tabs);
+
+            ReturnsContentHost.Content = root;
+            _returnsViewBuilt = true;
+        }
+
+        private TabItem CreateDeletedRecordsTab(string header, out DataGrid grid, out TextBlock countText, Action<DataGrid> configureColumns)
+        {
+            var panel = new DockPanel();
+            countText = new TextBlock
+            {
+                Margin = new Thickness(0, 0, 0, 8),
+                FontSize = 13,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#334155")),
+                Text = "Records: 0"
+            };
+            DockPanel.SetDock(countText, Dock.Top);
+            panel.Children.Add(countText);
+
+            grid = new DataGrid
+            {
+                AutoGenerateColumns = false,
+                CanUserAddRows = false,
+                CanUserDeleteRows = false,
+                IsReadOnly = true,
+                RowHeaderWidth = 0,
+                HeadersVisibility = DataGridHeadersVisibility.Column,
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D8E1EE")),
+                BorderThickness = new Thickness(1),
+                GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
+                HorizontalGridLinesBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E5E7EB")),
+                RowBackground = Brushes.White,
+                FontSize = 12,
+                SelectionUnit = DataGridSelectionUnit.FullRow,
+                ColumnHeaderStyle = (Style)FindResource("DataGridHeaderStyle")
+            };
+            configureColumns(grid);
+            panel.Children.Add(grid);
+
+            return new TabItem { Header = header, Content = panel };
+        }
+
+        private void BuildDeletedPurchaseColumns(DataGrid grid)
+        {
+            grid.Columns.Add(new DataGridTextColumn { Header = "Deleted", Binding = new Binding("DeletedAt") { StringFormat = "dd-MM-yyyy HH:mm" }, Width = 135 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Challan No.", Binding = new Binding("ChallanNumber"), Width = 120 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Date", Binding = new Binding("Date") { StringFormat = "dd-MM-yyyy" }, Width = 105 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "LR No.", Binding = new Binding("LRNumber"), Width = 140 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Broker", Binding = new Binding("BrokerName"), Width = 150 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "From", Binding = new Binding("From"), Width = 120 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "To", Binding = new Binding("To"), Width = 120 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Vehicle No.", Binding = new Binding("VehicleNumber"), Width = 120 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Bill Amt", Binding = new Binding("BillAmount") { StringFormat = "N2" }, Width = 110 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Margin", Binding = new Binding("Margin") { StringFormat = "N2" }, Width = 110 });
+        }
+
+        private void BuildDeletedLrColumns(DataGrid grid)
+        {
+            grid.Columns.Add(new DataGridTextColumn { Header = "Deleted", Binding = new Binding("DeletedAt") { StringFormat = "dd-MM-yyyy HH:mm" }, Width = 135 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "LR No.", Binding = new Binding("LRNo"), Width = 120 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Date", Binding = new Binding("Date") { StringFormat = "dd-MM-yyyy" }, Width = 105 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Challan No.", Binding = new Binding("CHNo"), Width = 120 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Consignor", Binding = new Binding("ConsignorName"), Width = 150 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Consignee", Binding = new Binding("ConsigneeName"), Width = 150 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "From", Binding = new Binding("From"), Width = 120 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "To", Binding = new Binding("To"), Width = 120 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Lorry Hire", Binding = new Binding("LorryHire") { StringFormat = "N2" }, Width = 110 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Total Bill", Binding = new Binding("TotalBill") { StringFormat = "N2" }, Width = 110 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Bill No.", Binding = new Binding("BillNo"), Width = 130 });
+        }
+
+        private void BuildDeletedBillColumns(DataGrid grid)
+        {
+            grid.Columns.Add(new DataGridTextColumn { Header = "Deleted", Binding = new Binding("DeletedAt") { StringFormat = "dd-MM-yyyy HH:mm" }, Width = 135 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Bill No.", Binding = new Binding("BillNo"), Width = 120 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Bill Date", Binding = new Binding("BillDate") { StringFormat = "dd-MM-yyyy" }, Width = 105 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "LR No.", Binding = new Binding("LRNo"), Width = 150 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Party", Binding = new Binding("Party"), Width = 150 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "From", Binding = new Binding("From"), Width = 120 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "To", Binding = new Binding("To"), Width = 120 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Total", Binding = new Binding("Total") { StringFormat = "N2" }, Width = 110 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Received", Binding = new Binding("Received") { StringFormat = "N2" }, Width = 110 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Due", Binding = new Binding("Due") { StringFormat = "N2" }, Width = 110 });
+        }
+
+        private async void LoadDeletedRecordsAsync()
+        {
+            if (!_returnsViewBuilt)
+            {
+                return;
+            }
+
+            BeginBusyCursor();
+            try
+            {
+                var bundle = await Task.Run(() => FetchDeletedLedgerBundle());
+                _deletedPurchaseGrid.ItemsSource = bundle.PurchaseRows;
+                _deletedLrGrid.ItemsSource = bundle.LrRows;
+                _deletedBillGrid.ItemsSource = bundle.BillRows;
+                _deletedPurchaseCountText.Text = "Records: " + bundle.PurchaseRows.Count;
+                _deletedLrCountText.Text = "Records: " + bundle.LrRows.Count;
+                _deletedBillCountText.Text = "Records: " + bundle.BillRows.Count;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to load deleted records: " + ex.Message, "Deleted Logs", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                EndBusyCursor();
+            }
+        }
+
+        private DeletedLedgerBundle FetchDeletedLedgerBundle()
+        {
+            var purchaseRecords = GetDeletedLedgerRecords("Purchase");
+            var lrRecords = GetDeletedLedgerRecords("LR");
+            var billRecords = GetDeletedLedgerRecords("Bill");
+
+            return new DeletedLedgerBundle
+            {
+                PurchaseRows = purchaseRecords.Select(BuildDeletedPurchaseRow).Where(x => x != null).ToList(),
+                LrRows = lrRecords.Select(BuildDeletedLrRow).Where(x => x != null).ToList(),
+                BillRows = billRecords.Select(BuildDeletedBillRow).Where(x => x != null).ToList()
+            };
+        }
+
+        private List<DeletedLedgerRecord> GetDeletedLedgerRecords(string ledgerType)
+        {
+            if (BackendSettings.UseRemoteApi)
+            {
+                return RemoteApiClient.GetList<DeletedLedgerRecord>("api/deleted-records?ledgerType=" + RemoteApiClient.UrlEncode(ledgerType) + "&take=100");
+            }
+
+            return _deletedLedgerRepo.GetRecent(ledgerType, 100);
+        }
+
+        private static DeletedPurchaseRow BuildDeletedPurchaseRow(DeletedLedgerRecord record)
+        {
+            var entry = DeserializeDeletedRecord<ChallanEntry>(record);
+            if (entry == null) return null;
+            return new DeletedPurchaseRow
+            {
+                DeletedAt = record.DeletedLocal,
+                ChallanNumber = entry.ChallanNumber,
+                Date = entry.Date,
+                LRNumber = entry.LRNumber,
+                BrokerName = entry.BrokerName,
+                From = entry.From,
+                To = entry.To,
+                VehicleNumber = entry.VehicleNumber,
+                BillAmount = entry.BillAmount,
+                Margin = entry.Margin
+            };
+        }
+
+        private static DeletedLrRow BuildDeletedLrRow(DeletedLedgerRecord record)
+        {
+            var entry = DeserializeDeletedRecord<LREntry>(record);
+            if (entry == null) return null;
+            return new DeletedLrRow
+            {
+                DeletedAt = record.DeletedLocal,
+                LRNo = entry.LRNo,
+                Date = entry.Date,
+                CHNo = entry.CHNo,
+                ConsignorName = entry.ConsignorName,
+                ConsigneeName = entry.ConsigneeName,
+                From = entry.From,
+                To = entry.To,
+                LorryHire = entry.ChallanLorryHire,
+                TotalBill = entry.TotalBill,
+                BillNo = entry.BillNo
+            };
+        }
+
+        private static DeletedBillRow BuildDeletedBillRow(DeletedLedgerRecord record)
+        {
+            var entry = DeserializeDeletedRecord<BillEntry>(record);
+            if (entry == null) return null;
+            return new DeletedBillRow
+            {
+                DeletedAt = record.DeletedLocal,
+                BillNo = entry.BillNo,
+                BillDate = entry.BillDate,
+                LRNo = entry.LRNo,
+                Party = entry.Party,
+                From = entry.From,
+                To = entry.To,
+                Total = entry.Total,
+                Received = entry.RCVD,
+                Due = entry.Due
+            };
+        }
+
+        private static T DeserializeDeletedRecord<T>(DeletedLedgerRecord record) where T : class
+        {
+            if (record == null || string.IsNullOrWhiteSpace(record.JsonData))
+            {
+                return null;
+            }
+
+            try
+            {
+                return DeletedRecordSerializer.Deserialize<T>(record.JsonData);
+            }
+            catch
+            {
+                return null;
             }
         }
 
@@ -8354,6 +8660,7 @@ namespace Awagaman_ERP
             if (ReportsView != null) ReportsView.Visibility = Visibility.Collapsed;
             if (FundsView != null) FundsView.Visibility = Visibility.Collapsed;
             if (UsersView != null) UsersView.Visibility = Visibility.Collapsed;
+            if (ReturnsView != null) ReturnsView.Visibility = Visibility.Collapsed;
 
             if (targetView != null) targetView.Visibility = Visibility.Visible;
             SetTopTabsInactive();
@@ -8368,6 +8675,7 @@ namespace Awagaman_ERP
             if (ReportsView != null) ReportsView.Visibility = Visibility.Collapsed;
             if (FundsView != null) FundsView.Visibility = Visibility.Collapsed;
             if (UsersView != null) UsersView.Visibility = Visibility.Collapsed;
+            if (ReturnsView != null) ReturnsView.Visibility = Visibility.Collapsed;
         }
 
         private void SetTopTabsInactive()
@@ -15182,9 +15490,25 @@ namespace Awagaman_ERP
             }
 
             var challanRepository = GetActiveChallanRepository();
+            var deletedTrackingChallanNos = selected
+                .Select(x => (x?.ChallanNumber ?? string.Empty).Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
             foreach (var entry in selected)
             {
                 VM?.RemoveOptimisticEntry(entry);
+            }
+            if (TrackingVM != null && deletedTrackingChallanNos.Count > 0)
+            {
+                var trackingMatches = TrackingVM.Entries
+                    .Where(x => deletedTrackingChallanNos.Contains((x?.ChallanNo ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase))
+                    .ToList();
+                foreach (var trackingEntry in trackingMatches)
+                {
+                    TrackingVM.Entries.Remove(trackingEntry);
+                }
+                TrackingVM.FilteredEntriesCount = TrackingVM.Entries.Count;
             }
             UpdatePageUI(applyGridFilter: _onlyDueFilterEnabled || _challanHeaderFilters.Count > 0);
 
@@ -15197,6 +15521,10 @@ namespace Awagaman_ERP
                     {
                         try
                         {
+                            if (!BackendSettings.UseRemoteApi)
+                            {
+                                _deletedLedgerRepo.Add("Purchase", entry.ChallanNumber, entry);
+                            }
                             challanRepository.Delete(entry);
                             DeleteTrackingRowsForChallan(entry);
                         }
@@ -15204,14 +15532,18 @@ namespace Awagaman_ERP
                     }
                 });
 
-                TrackingVM?.LoadData();
                 RefreshTrackingReminderFromCurrentEntries();
+                RefreshDashboardTrackingTablesFromCurrentEntries();
                 RefreshFilteredSummary();
                 QueueDashboardRefresh();
             }
             catch (Exception ex)
             {
                 VM?.RefreshAfterDelete();
+                if (TrackingVM != null)
+                {
+                    TrackingVM.LoadData();
+                }
                 UpdatePageUI(applyGridFilter: _onlyDueFilterEnabled || _challanHeaderFilters.Count > 0);
                 MessageBox.Show("Challan delete failed: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }

@@ -68,7 +68,7 @@ namespace Awagaman_ERP
             {
                 CurrentEntry = new LREntry
                 {
-                    Date = DateTime.Today,
+                    Date = prefillFrom.Date == default(DateTime) ? DateTime.Today : prefillFrom.Date,
                     From = prefillFrom.From,
                     To = prefillFrom.To,
                     VehicleNo = prefillFrom.VehicleNumber,
